@@ -159,6 +159,14 @@ Filled in as phases complete. Every row names the commit that produced it.
 - **Regional private sets:** real documents with personal data. Never committed. Only aggregate numbers appear in this README.
 - **Corrections from review:** appended to the eval set as new cases, forming the data flywheel.
 
+**Getting DocILE.** Request a token at https://docile.rossum.ai/. The form returns it immediately; there is no approval wait. Put it in `.env` as `DOCILE_TOKEN` (see `.env.example`), then download the annotated subset, 1.14 GB, into the gitignored `data/`:
+
+```bash
+curl -O "https://docile-dataset-rossum.s3.eu-west-1.amazonaws.com/$DOCILE_TOKEN/annotated-trainval.zip"
+```
+
+Upstream's `download_dataset.sh` does the same thing. Note that its `--help` names this subset `labeled-trainval`, which 404s; `annotated-trainval` is the working name.
+
 ## Extraction backends
 
 The `Extractor` interface is the seam. Backends are compared, not chosen up front. List prices as published by vendors at the time of writing; verify before relying on them.
