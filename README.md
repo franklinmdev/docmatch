@@ -44,7 +44,7 @@ Phases have exit criteria, not dates. Each phase produces a number that goes int
 
 Measurement before modeling.
 
-- Loader for the DocILE dataset. Access requires registration; the data is never committed, only the loader and the results.
+- Loader for the DocILE dataset. Access is a request form that returns a download token; the data is never committed, only the loader and the results.
 - Ground-truth normalization: currency, dates, numeric formats, whitespace.
 - Metrics module: field-level precision, recall, and F1 with normalization; line-item scoring by optimal assignment between predicted and labeled rows, with per-cell accuracy.
 - Fixed evaluation subset with a pinned manifest so numbers are comparable across commits.
@@ -154,10 +154,18 @@ Filled in as phases complete. Every row names the commit that produced it.
 
 ## Data
 
-- **Real invoices:** DocILE, 6,680 real annotated invoices with key-field and line-item labels, plus a larger synthetic set. Research-use terms; registration required; never redistributed here.
+- **Real invoices:** DocILE, 6,680 real annotated invoices with key-field and line-item labels, plus 100k synthetic and close to 1M unlabeled documents. Access is a request form that returns a download token. The terms are non-commercial research use only, no redistribution, no third-party access, GDPR compliance, and deletion when the permission ends. They restrict the data, not the publication of results, so the numbers in this README are publishable and the documents are not.
 - **Purchase orders, receiving records, catalog:** generated from the labels with controlled, labeled perturbations, so every discrepancy case has an exact expected answer. The generator and its seed are committed; the outputs are reproducible.
 - **Regional private sets:** real documents with personal data. Never committed. Only aggregate numbers appear in this README.
 - **Corrections from review:** appended to the eval set as new cases, forming the data flywheel.
+
+**Getting DocILE.** Request a token at https://docile.rossum.ai/. The form returns it immediately; there is no approval wait. Put it in `.env` as `DOCILE_TOKEN` (see `.env.example`), then download the annotated subset, 1.14 GB, into the gitignored `data/`:
+
+```bash
+curl -O "https://docile-dataset-rossum.s3.eu-west-1.amazonaws.com/$DOCILE_TOKEN/annotated-trainval.zip"
+```
+
+Upstream's `download_dataset.sh` does the same thing. Note that its `--help` names this subset `labeled-trainval`, which 404s; `annotated-trainval` is the working name.
 
 ## Extraction backends
 
@@ -166,7 +174,7 @@ The `Extractor` interface is the seam. Backends are compared, not chosen up fron
 | Backend | Kind | List price | Role in the benchmark |
 |---|---|---|---|
 | Gemini Flash-tier with structured output | vision LLM | fractions of a cent per page | cheap default |
-| Claude Haiku or Sonnet with structured output | vision LLM | about $1 to $3 input per million tokens | second provider |
+| Claude Haiku 4.5 or Sonnet 5 with structured output | vision LLM | $1 and $2 input per million tokens respectively | second provider |
 | Azure Document Intelligence prebuilt-invoice | specialized document model | $10 per 1,000 pages, free tier available | commercial baseline |
 | Google Document AI Invoice Parser | specialized document model | $10 per 1,000 pages | commercial baseline, optional |
 | Cloud Vision document OCR, then an LLM over the text | OCR-first | $1.50 per 1,000 pages, free tier available | ablation: what layout loss costs |

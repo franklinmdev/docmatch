@@ -52,4 +52,4 @@ Any of these, observed in the Benchmarks section, opens a pivot discussion recor
 - Extraction field F1 above 0.97 on the fixed subset with the cheapest backend and no gate. The extraction layer would demonstrate little.
 - Matching precision and recall above 0.99 on every discrepancy type at first attempt. The matching layer would demonstrate little.
 - Entity resolution is the only layer where methods differ materially. Bank reconciliation becomes attractive.
-- The DocILE terms prevent publishing the numbers needed for the README. Contracts with CUAD become attractive.
+- A dataset restriction prevents publishing the numbers needed for the README. Not a live risk for DocILE: its terms restrict redistribution and commercial use of the data, not the publication of results. Contracts with CUAD become attractive if that changes.
