@@ -15,6 +15,7 @@ A document reconciliation engine: extract invoices with vision language models, 
 5. **No time estimates in any document.** Phases and exit criteria, never dates, weeks, or hours.
 6. **Never commit datasets, document contents, or personal data.** `data/` is ignored. Only loaders, generators, and aggregate numbers are committed.
 7. **Smallest change that moves a number.** Prefer deleting a component over adding one.
+8. **Docs before code.** Before writing code against a library, API, or service, read its current documentation and record the version you read. Nothing from memory.
 
 ## Stack
 
