@@ -1,0 +1,3 @@
+# Paths where new markdown may be created, in addition to README, CLAUDE.md, docs/ and dot-directories.
+# notes/ is untracked personal working notes, excluded through .git/info/exclude.
+^notes/
