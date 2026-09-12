@@ -9,6 +9,8 @@ are always derived.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
+from dataclasses import dataclass
 
 
 class Score(ABC):
@@ -45,6 +47,37 @@ class Score(ABC):
         if precision + recall == 0:
             return 0.0
         return 2 * precision * recall / (precision + recall)
+
+
+@dataclass(frozen=True)
+class MicroAverage(Score):
+    """Several scores as one score, by summing counts rather than averaging ratios.
+
+    Micro, not macro, and the difference is not cosmetic on this corpus. A
+    document's line-item table holds anything from no rows to the 110 of the
+    largest in the annotated set, so averaging each document's F1 would let a
+    one-row table weigh as much as a hundred-row one and the number would
+    track table size rather than extraction. Summing the counts gives every
+    row, and every header value, the same weight.
+    """
+
+    parts: tuple[Score, ...]
+
+    @property
+    def true_positives(self) -> int:
+        return sum(part.true_positives for part in self.parts)
+
+    @property
+    def false_negatives(self) -> int:
+        return sum(part.false_negatives for part in self.parts)
+
+    @property
+    def false_positives(self) -> int:
+        return sum(part.false_positives for part in self.parts)
+
+
+def micro_average(parts: Iterable[Score]) -> MicroAverage:
+    return MicroAverage(tuple(parts))
 
 
 def ratio(part: int, whole: int) -> float:

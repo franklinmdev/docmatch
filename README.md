@@ -178,6 +178,8 @@ uv run mypy        # typecheck, strict, with the pydantic plugin
 uv run pytest      # tests; these need no dataset and are what CI runs
 ```
 
+### One document
+
 With DocILE downloaded into `data/docile`, print the labels the dataset holds
 for one document, its KILE header fields and its LIR line items:
 
@@ -242,6 +244,55 @@ and the measurements behind them, are documented in
 DocILE may not be redistributed, so no label text is committed anywhere in this
 repository.
 
+### The fixed subset
+
+Every number in the Benchmarks section is measured over the same 100 documents:
+a seeded draw from the val split, pinned as a list in
+`engine/src/docmatch/evals/subset.json`. The list and the seed are both
+committed, so the list is the subset and the seed is the audit trail. Check
+that the seed still draws it:
+
+```bash
+uv run docmatch subset
+```
+
+It exits non-zero when the pinned list is no longer what the seed draws.
+`--write` redraws the manifest, and changing the seed is a deliberate change of
+benchmark rather than a detail.
+
+Score a run of predictions over the subset. The predictions file is a JSON
+object keyed by document id, each value the single-document shape above:
+
+```json
+{
+  "0a1b2c3d4e5f60718293a4b5": {"fields": {}, "line_items": []},
+  "6c7d8e9f0a1b2c3d4e5f6071": {"fields": {}, "line_items": []}
+}
+```
+
+```bash
+uv run docmatch eval --predictions predictions.json
+```
+
+From a checkout with DocILE in `data/docile`, that is the command the numbers
+in the Benchmarks section come from. It prints field F1 and line-item F1 over
+the whole subset, a per-fieldtype breakdown of each, and the ids behind two
+counts that are not scores: pinned documents the run did not predict, and
+predicted documents the subset does not pin.
+
+Both numbers are micro-averaged, summing counts across documents rather than
+averaging each document's F1, so a one-row table does not weigh as much as a
+thirty-row one. A pinned document missing from the predictions file is scored
+as a prediction of nothing rather than skipped, because a number over 97 of the
+100 documents is not comparable with one over 100.
+
+The report carries counts and no label text, so it can be pasted into a commit
+message or an issue. CI runs the same command on a committed synthetic corpus
+in DocILE's shape, `engine/tests/evals/synthetic`, which exercises the whole
+path on every push while the dataset stays on the machine that downloaded it.
+
+### Comparability
+
 Neither score is comparable with the DocILE leaderboard, which matches a
 prediction to a label by the overlap of their bounding boxes. The backends this
 engine benchmarks return text and no boxes, so the scores here are over
@@ -288,7 +339,9 @@ docmatch/
   uv.lock              pinned for every machine and for CI
   engine/              the Python engine, a uv workspace member
     pyproject.toml     the docmatch package and its `docmatch` command
-    src/docmatch/      extraction, validation, resolution, matching, evals
+    src/docmatch/      extraction, validation, resolution, matching, metrics
+      evals/           the pinned subset and the run that scores it
+    tests/evals/       the synthetic corpus CI runs the eval on
   apps/review/         Next.js review inbox, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
   docs/                decision records
@@ -296,8 +349,9 @@ docmatch/
 ```
 
 Tests live next to the code they test, so `src/docmatch/docile/dataset.py` is
-tested by `src/docmatch/docile/test_dataset.py`. The eval suite will live under
-`engine/tests/evals`.
+tested by `src/docmatch/docile/test_dataset.py`. The eval suite lives under
+`engine/tests/evals`: the corpus the eval command runs on in CI, with no test
+of its own, since the command is the test.
 
 ## Contributing
 

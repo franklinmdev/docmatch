@@ -4,11 +4,13 @@ Every case builds a dataset from the synthetic fixture in a temporary
 directory, so the suite runs in CI with no dataset present.
 """
 
+import json
 from pathlib import Path
 
 import pytest
 
 from docmatch.cli import main
+from docmatch.evals.manifest import Manifest, load, select, write
 
 EXPECTED_SHOW_OUTPUT = "\n".join(
     [
@@ -347,3 +349,348 @@ def test_score_still_reports_the_dataset_errors_show_reports(
 
     assert exit_code == 1
     assert "README.md" in capsys.readouterr().err
+
+
+@pytest.fixture
+def split_dir(tmp_path: Path) -> Path:
+    """A dataset whose val split is large enough to draw a subset from.
+
+    `subset` reads the split file and no annotation, so the documents it names
+    need not exist; the annotations directory is there because that is how a
+    downloaded dataset is told apart from a path that was never downloaded.
+    """
+    root = tmp_path / "dataset"
+    (root / "annotations").mkdir(parents=True)
+    ids = [f"doc{number:04d}" for number in range(500)]
+    (root / "val.json").write_text(json.dumps(ids), encoding="utf-8")
+    return root
+
+
+def test_subset_writes_the_manifest_it_draws(
+    split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "subset.json"
+
+    exit_code = main(
+        ["subset", "--write", "--manifest", str(path), "--data-dir", str(split_dir)]
+    )
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == "\n".join(
+        [
+            "Fixed subset",
+            f"  manifest  {path}",
+            "  split     val",
+            "  seed      20260912",
+            "  size      100",
+            "  written   yes",
+            "",
+        ]
+    )
+    assert len(load(path).document_ids) == 100
+
+
+def test_subset_reports_that_the_seed_still_draws_the_pinned_documents(
+    split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "subset.json"
+    main(["subset", "--write", "--manifest", str(path), "--data-dir", str(split_dir)])
+    capsys.readouterr()
+
+    exit_code = main(["subset", "--manifest", str(path), "--data-dir", str(split_dir)])
+
+    assert exit_code == 0
+    assert "  reproduced  yes" in capsys.readouterr().out
+
+
+def test_subset_fails_when_the_seed_no_longer_draws_the_pinned_documents(
+    split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A subset that drifted is not a benchmark, so this is not a warning."""
+    path = tmp_path / "subset.json"
+    main(["subset", "--write", "--manifest", str(path), "--data-dir", str(split_dir)])
+    capsys.readouterr()
+    pinned = load(path)
+    undrawn = next(
+        f"doc{number:04d}"
+        for number in range(500)
+        if f"doc{number:04d}" not in pinned.document_ids
+    )
+    write(
+        pinned.model_copy(update={"document_ids": (undrawn, *pinned.document_ids[1:])}),
+        path,
+    )
+
+    exit_code = main(["subset", "--manifest", str(path), "--data-dir", str(split_dir)])
+
+    assert exit_code == 1
+    assert "  reproduced  no, 1 of the 100 documents are not pinned" in (
+        capsys.readouterr().out
+    )
+
+
+def test_subset_reports_the_pinned_documents_in_the_wrong_order(
+    split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A prefix of the subset is a sample, so the order is pinned too."""
+    path = tmp_path / "subset.json"
+    main(["subset", "--write", "--manifest", str(path), "--data-dir", str(split_dir)])
+    capsys.readouterr()
+    pinned = load(path)
+    write(
+        pinned.model_copy(
+            update={"document_ids": tuple(reversed(pinned.document_ids))}
+        ),
+        path,
+    )
+
+    exit_code = main(["subset", "--manifest", str(path), "--data-dir", str(split_dir)])
+
+    assert exit_code == 1
+    assert "  reproduced  no, the same documents in a different order" in (
+        capsys.readouterr().out
+    )
+
+
+def test_subset_draws_with_the_seed_it_is_given(
+    split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "subset.json"
+
+    main(
+        [
+            "subset",
+            "--write",
+            "--seed",
+            "1",
+            "--manifest",
+            str(path),
+            "--data-dir",
+            str(split_dir),
+        ]
+    )
+
+    assert "  seed      1\n" in capsys.readouterr().out
+    assert load(path).document_ids == select(
+        [f"doc{number:04d}" for number in range(500)], seed=1, size=100
+    )
+
+
+def test_subset_reports_a_manifest_that_is_not_there(
+    split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    absent = tmp_path / "absent.json"
+
+    exit_code = main(
+        ["subset", "--manifest", str(absent), "--data-dir", str(split_dir)]
+    )
+
+    assert exit_code == 1
+    assert str(absent) in capsys.readouterr().err
+
+
+def test_subset_points_at_the_readme_when_the_dataset_is_not_downloaded(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = main(["subset", "--data-dir", str(tmp_path / "absent")])
+
+    assert exit_code == 1
+    assert "README.md" in capsys.readouterr().err
+
+
+def test_subset_reports_a_split_the_dataset_does_not_have(
+    split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An incomplete download is a different problem to a drifted subset."""
+    (split_dir / "val.json").unlink()
+
+    exit_code = main(["subset", "--data-dir", str(split_dir)])
+
+    assert exit_code == 1
+    assert "val.json" in capsys.readouterr().err
+
+
+EXPECTED_EVAL_OUTPUT = "\n".join(
+    [
+        "Fixed subset",
+        "  manifest       {manifest}",
+        "  split          val",
+        "  size           5",
+        "  predicted      4",
+        "  not predicted  1",
+        "  not pinned     1",
+        "",
+        # A pinned document nobody predicted and a predicted document nobody
+        # pinned are both named, because a count cannot be acted on.
+        "Not predicted (1)",
+        "  eval0006",
+        "",
+        "Not pinned (1)",
+        "  eval0001",
+        "",
+        "Field score",
+        "  precision  0.875",
+        "  recall     0.700",
+        "  F1         0.778",
+        "  14 matched, 6 missing, 2 spurious",
+        "",
+        "Fields (6)",
+        "  amount_total_gross  0.750  3 matched, 2 missing",
+        "  date_issue          0.800  2 matched, 1 missing",
+        "  document_id         0.667  3 matched, 2 missing, 1 spurious",
+        "  tax_detail_rate     1.000  2 matched, 0 missing",
+        "  vendor_email        0.000  0 matched, 0 missing, 1 spurious",
+        "  vendor_name         0.889  4 matched, 1 missing",
+        "",
+        "Line-item score",
+        "  precision  0.571",
+        "  recall     0.571",
+        "  F1         0.571",
+        "  4 matched, 3 missing, 3 spurious",
+        "",
+        "Cell accuracy (3)",
+        "  line_item_amount_gross  0.714  5 of 7, 2 spurious",
+        "  line_item_description   0.857  6 of 7, 1 spurious",
+        "  line_item_quantity      0.714  5 of 7, 1 spurious",
+        "",
+    ]
+)
+"""What CI sees. The counts behind it are checked in `evals/test_run.py`; this
+pins the report that carries them."""
+
+
+def evaluate(synthetic_subset: Path, *arguments: str) -> list[str]:
+    return [
+        "eval",
+        "--data-dir",
+        str(synthetic_subset),
+        "--manifest",
+        str(synthetic_subset / "subset.json"),
+        "--predictions",
+        str(synthetic_subset / "predictions.json"),
+        *arguments,
+    ]
+
+
+def test_eval_reports_both_numbers_over_the_subset(
+    synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = main(evaluate(synthetic_subset))
+
+    assert capsys.readouterr().out == EXPECTED_EVAL_OUTPUT.format(
+        manifest=synthetic_subset / "subset.json"
+    )
+    assert exit_code == 0
+
+
+def test_eval_prints_no_label_text(
+    synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rule 6: the report is pasted into a commit message, so it carries counts."""
+    main(evaluate(synthetic_subset))
+
+    out = capsys.readouterr().out
+    assert "Junction box" not in out
+    assert "Beacon" not in out
+
+
+def test_eval_scores_the_committed_subset_by_default(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The command in the README names a predictions file and nothing else."""
+    predictions = tmp_path / "predictions.json"
+    predictions.write_text("{}", encoding="utf-8")
+
+    exit_code = main(
+        [
+            "eval",
+            "--predictions",
+            str(predictions),
+            "--data-dir",
+            str(tmp_path / "absent"),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "README.md" in capsys.readouterr().err
+
+
+def test_eval_reports_a_predictions_file_that_is_not_there(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    absent = tmp_path / "absent.json"
+
+    exit_code = main(
+        [
+            "eval",
+            "--data-dir",
+            str(synthetic_subset),
+            "--manifest",
+            str(synthetic_subset / "subset.json"),
+            "--predictions",
+            str(absent),
+        ]
+    )
+
+    assert exit_code == 1
+    assert str(absent) in capsys.readouterr().err
+
+
+def test_eval_names_the_document_of_a_bad_prediction(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "predictions.json"
+    path.write_text('{"eval0002": {"fields": {"vendor_name": 7}}}', encoding="utf-8")
+
+    exit_code = main(
+        [
+            "eval",
+            "--data-dir",
+            str(synthetic_subset),
+            "--manifest",
+            str(synthetic_subset / "subset.json"),
+            "--predictions",
+            str(path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "eval0002.fields.vendor_name is the first problem" in captured.err
+
+
+def test_eval_reports_a_pinned_document_the_dataset_does_not_hold(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A dataset that cannot satisfy the manifest produces no number at all."""
+    manifest = tmp_path / "subset.json"
+    write(Manifest(split="val", seed=1, size=1, document_ids=("eval9999",)), manifest)
+    predictions = tmp_path / "predictions.json"
+    predictions.write_text("{}", encoding="utf-8")
+
+    exit_code = main(
+        [
+            "eval",
+            "--data-dir",
+            str(synthetic_subset),
+            "--manifest",
+            str(manifest),
+            "--predictions",
+            str(predictions),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "eval9999" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag", ["--seed", "--size"])
+def test_subset_refuses_to_draw_without_writing(
+    flag: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Checking the pinned seed while asked about another one is a wrong answer."""
+    with pytest.raises(SystemExit):
+        main(["subset", flag, "5"])
+
+    assert "--write" in capsys.readouterr().err

@@ -1,0 +1,20 @@
+{
+  "field_extractions": [
+    {"bbox": [0.08, 0.10, 0.42, 0.13], "fieldtype": "vendor_name", "page": 0, "text": "Lakeside Tools"},
+    {"bbox": [0.70, 0.10, 0.92, 0.13], "fieldtype": "document_id", "page": 0, "text": "INV-1003"},
+    {"bbox": [0.70, 0.80, 0.92, 0.83], "fieldtype": "amount_total_gross", "page": 0, "text": "412.50"}
+  ],
+  "line_item_extractions": [
+    {"bbox": [0.10, 0.50, 0.16, 0.53], "fieldtype": "line_item_quantity", "line_item_id": 1, "page": 0, "text": "3"},
+    {"bbox": [0.20, 0.50, 0.55, 0.53], "fieldtype": "line_item_description", "line_item_id": 1, "page": 0, "text": "Hex key set"},
+    {"bbox": [0.78, 0.50, 0.92, 0.53], "fieldtype": "line_item_amount_gross", "line_item_id": 1, "page": 0, "text": "45.00"},
+    {"bbox": [0.10, 0.55, 0.16, 0.58], "fieldtype": "line_item_quantity", "line_item_id": 2, "page": 0, "text": "1"},
+    {"bbox": [0.20, 0.55, 0.55, 0.58], "fieldtype": "line_item_description", "line_item_id": 2, "page": 0, "text": "Torque wrench"},
+    {"bbox": [0.78, 0.55, 0.92, 0.58], "fieldtype": "line_item_amount_gross", "line_item_id": 2, "page": 0, "text": "317.50"},
+    {"bbox": [0.10, 0.60, 0.16, 0.63], "fieldtype": "line_item_quantity", "line_item_id": 3, "page": 0, "text": "5"},
+    {"bbox": [0.20, 0.60, 0.55, 0.63], "fieldtype": "line_item_description", "line_item_id": 3, "page": 0, "text": "Work gloves"},
+    {"bbox": [0.78, 0.60, 0.92, 0.63], "fieldtype": "line_item_amount_gross", "line_item_id": 3, "page": 0, "text": "50.00"}
+  ],
+  "line_item_headers": [],
+  "metadata": {"cluster_id": 0, "currency": "usd", "document_type": "tax_invoice", "language": "eng", "original_filename": "synthetic-eval-0003", "page_count": 1, "page_sizes_at_200dpi": [[1654, 2339]], "source": "synthetic"}
+}

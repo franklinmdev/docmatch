@@ -28,10 +28,28 @@ def data_dir(tmp_path: Path) -> Path:
     """A DocILE dataset directory holding two synthetic documents.
 
     `syn0001` has a line-item table; `syn0002` is header only, which 355 of
-    the 5,680 real annotated documents are.
+    the 5,680 real annotated documents are. A `val` split lists both, in the
+    order a split file's order means nothing.
     """
     annotations = tmp_path / "annotations"
     annotations.mkdir()
     shutil.copy(SYNTHETIC_ANNOTATION, annotations / "syn0001.json")
     shutil.copy(SYNTHETIC_HEADER_ONLY, annotations / "syn0002.json")
+    split = tmp_path / "val.json"
+    split.write_text('["syn0002", "syn0001"]', encoding="utf-8")
     return tmp_path
+
+
+SYNTHETIC_SUBSET = Path(__file__).parents[2] / "tests" / "evals" / "synthetic"
+
+
+@pytest.fixture
+def synthetic_subset() -> Path:
+    """The committed corpus the eval command runs on in CI.
+
+    A dataset in DocILE's shape, a manifest drawn from it, and a predictions
+    file covering all but one of the pinned documents plus one the manifest
+    does not pin. No real document content, so it is committed and CI needs no
+    dataset.
+    """
+    return SYNTHETIC_SUBSET

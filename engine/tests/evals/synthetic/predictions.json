@@ -1,0 +1,89 @@
+{
+  "eval0001": {
+    "fields": {
+      "vendor_name": "Northwind Paper Co",
+      "document_id": "INV-1001",
+      "amount_total_gross": "US$ 118.00"
+    },
+    "line_items": [
+      {
+        "line_item_quantity": "2",
+        "line_item_units_of_measure": "BOX",
+        "line_item_description": "A4 copier paper, 500 sheets",
+        "line_item_amount_gross": "60.00"
+      }
+    ]
+  },
+  "eval0002": {
+    "fields": {
+      "vendor_name": "CEDAR FREIGHT LTD",
+      "document_id": "INV-1OO2",
+      "date_issue": "March 5, 2026",
+      "amount_total_gross": null,
+      "vendor_email": "billing@cedar.example"
+    }
+  },
+  "eval0003": {
+    "fields": {
+      "vendor_name": "Lakeside Tools",
+      "document_id": "INV-1003",
+      "amount_total_gross": "$412.50"
+    },
+    "line_items": [
+      {
+        "line_item_quantity": "5",
+        "line_item_description": "Work gloves",
+        "line_item_amount_gross": "50.00"
+      },
+      {
+        "line_item_quantity": "3",
+        "line_item_description": "Hex key set",
+        "line_item_amount_gross": "45.00"
+      },
+      {
+        "line_item_description": "Torque wrench",
+        "line_item_amount_gross": "317.50"
+      }
+    ]
+  },
+  "eval0004": {
+    "fields": {
+      "vendor_name": "Harbour Signs",
+      "document_id": "INV-1004",
+      "date_issue": "July 3, 2026",
+      "amount_total_gross": "$95.00"
+    },
+    "line_items": [
+      {
+        "line_item_quantity": "1",
+        "line_item_description": "Window decal, large",
+        "line_item_amount_gross": "95.00"
+      }
+    ]
+  },
+  "eval0005": {
+    "fields": {
+      "vendor_name": "Beacon Electrics",
+      "document_id": "INV-1005",
+      "tax_detail_rate": ["8.25%", "5%"],
+      "amount_total_gross": "1320.00"
+    },
+    "line_items": [
+      {
+        "line_item_quantity": "10",
+        "line_item_description": "Cable reel, 25 m",
+        "line_item_amount_gross": "900.00"
+      },
+      {
+        "line_item_quantity": "4",
+        "line_item_description": "Junction box",
+        "line_item_amount_gross": "42.00"
+      },
+      {
+        "line_item_quantity": "1",
+        "line_item_description": "Delivery",
+        "line_item_amount_gross": "0.00"
+      }
+    ]
+  }
+}

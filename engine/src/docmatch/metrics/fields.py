@@ -110,11 +110,11 @@ def read_prediction(path: Path) -> Prediction:
         raise PredictionError(
             f'{path} is not a prediction: expected a JSON object with "fields", a '
             f'fieldtype to one value, a list of values, or null, and "line_items", a '
-            f"list of those. {_first_problem(error)}"
+            f"list of those. {first_problem(error)}"
         ) from error
 
 
-def _first_problem(error: ValidationError) -> str:
+def first_problem(error: ValidationError, within: int = 0) -> str:
     """The first thing pydantic objected to, named by where it is in the file.
 
     The path is spelled out to the fieldtype, `line_items.0.line_item_quantity`
@@ -123,10 +123,14 @@ def _first_problem(error: ValidationError) -> str:
     branch of `str | list[str] | None` is reported once per branch, and each
     error carries the branch it failed on as one more step of the path, which
     names pydantic's union rather than anything in the file.
+
+    `within` is how many leading steps name the thing holding the prediction
+    rather than the prediction, which is one document id for a whole run's
+    predictions and nothing for a single document's.
     """
     first = error.errors()[0]
     loc = first["loc"]
-    nests = 3 if loc[:1] == ("line_items",) else 2
+    nests = within + (3 if loc[within : within + 1] == ("line_items",) else 2)
     where = ".".join(str(part) for part in loc[:nests])
     named = f"{where} is the first problem" if where else "The file itself"
     return f"{named}: {first['msg'].lower()}."

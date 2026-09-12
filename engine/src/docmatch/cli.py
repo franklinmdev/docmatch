@@ -5,6 +5,14 @@ which is how a human checks that the dataset loads. `docmatch score
 <document-id> --prediction <file>` scores a predicted document, its header
 fields and its line items, against those labels, which is how a human checks
 the metrics on a real document before they are run over a subset.
+
+`docmatch subset` re-derives the committed fixed subset from the split it was
+drawn from, which is how a reader checks that the pinned list is still the one
+the seed draws. `docmatch eval --predictions <file>` scores a whole run over
+that subset, which is the command every number in the README comes from.
+
+Rendering lives here rather than beside each metric: the numbers are the
+engine's, the terminal is this module's.
 """
 
 import argparse
@@ -15,6 +23,14 @@ from pathlib import Path
 
 from docmatch.docile.annotation import Annotation, FieldExtraction
 from docmatch.docile.dataset import DocileDataset, DocileError
+from docmatch.evals import manifest
+from docmatch.evals.manifest import Manifest, ManifestError
+from docmatch.evals.run import (
+    FieldTypeTotals,
+    SubsetScore,
+    read_predictions,
+    score_subset,
+)
 from docmatch.metrics.fields import (
     FieldScore,
     PredictionError,
@@ -23,6 +39,7 @@ from docmatch.metrics.fields import (
     score_fields,
 )
 from docmatch.metrics.line_items import (
+    CellAccuracy,
     LineItemScore,
     labeled_line_items,
     score_line_items,
@@ -96,7 +113,7 @@ def render_score(document_id: str, fields: FieldScore, rows: LineItemScore) -> s
         *_ratios("Line-item score", rows),
         "",
         f"Cell accuracy ({len(rows.per_fieldtype)})",
-        *_accuracies(rows),
+        *_accuracies(rows.per_fieldtype),
     ]
     return "\n".join([*lines, ""])
 
@@ -129,16 +146,16 @@ def _values(score: FieldScore) -> list[str]:
     return lines
 
 
-def _accuracies(score: LineItemScore) -> list[str]:
+def _accuracies(accuracies: Sequence[CellAccuracy]) -> list[str]:
     """Per-cell accuracy per LIR fieldtype, over the cells the labels carry.
 
     A fieldtype the prediction invented has no labeled cell to be accurate
     about, so its ratio column is blank and only the count is printed.
     """
-    width = _width(each.fieldtype for each in score.per_fieldtype)
+    width = _width(each.fieldtype for each in accuracies)
     blank = " " * len("0.000")
     lines = []
-    for each in score.per_fieldtype:
+    for each in accuracies:
         accuracy = f"{each.accuracy:.3f}" if each.labeled else blank
         spurious = f", {each.spurious} spurious" if each.spurious else ""
         lines.append(
@@ -148,13 +165,35 @@ def _accuracies(score: LineItemScore) -> list[str]:
     return lines
 
 
+def render_subset(path: Path, pinned: Manifest, note: tuple[str, str]) -> str:
+    """The pinned subset, and what just happened to it."""
+    return "\n".join(
+        [
+            "Fixed subset",
+            *_rows(
+                ("manifest", str(path)),
+                ("split", pinned.split),
+                ("seed", str(pinned.seed)),
+                ("size", str(pinned.size)),
+                note,
+            ),
+            "",
+        ]
+    )
+
+
+def _rows(*rows: tuple[str, str]) -> list[str]:
+    """Labeled values in one column, the way every block here lines them up."""
+    width = _width(label for label, _ in rows)
+    return [f"  {label.ljust(width)}  {value}" for label, value in rows]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="docmatch", description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("document_id", help="a DocILE document id")
-    common.add_argument(
+    dataset = argparse.ArgumentParser(add_help=False)
+    dataset.add_argument(
         "--data-dir",
         type=Path,
         default=None,
@@ -163,12 +202,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"(default: ${DATA_DIR_VARIABLE}, else {DEFAULT_DATA_DIR})"
         ),
     )
+    document = argparse.ArgumentParser(add_help=False)
+    document.add_argument("document_id", help="a DocILE document id")
 
     subcommands.add_parser(
-        "show", parents=[common], help="print the labels for one document"
+        "show",
+        parents=[document, dataset],
+        help="print the labels for one document",
     )
     score = subcommands.add_parser(
-        "score", parents=[common], help="score a prediction against those labels"
+        "score",
+        parents=[document, dataset],
+        help="score a prediction against those labels",
     )
     score.add_argument(
         "--prediction",
@@ -176,25 +221,205 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help='a JSON object with "fields" and "line_items"',
     )
+    evaluate = subcommands.add_parser(
+        "eval",
+        parents=[dataset],
+        help="score a run of predictions over the fixed subset",
+    )
+    evaluate.add_argument(
+        "--predictions",
+        type=Path,
+        required=True,
+        help="a JSON object keyed by document id, each holding one prediction",
+    )
+    evaluate.add_argument(
+        "--manifest",
+        type=Path,
+        default=manifest.MANIFEST,
+        help=f"the subset to score over (default: {manifest.MANIFEST.name})",
+    )
+    subset = subcommands.add_parser(
+        "subset",
+        parents=[dataset],
+        help="check that the seed still draws the pinned subset",
+    )
+    subset.add_argument(
+        "--manifest",
+        type=Path,
+        default=manifest.MANIFEST,
+        help=f"the pinned subset (default: {manifest.MANIFEST.name} beside the code)",
+    )
+    subset.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help=f"draw with this seed, only with --write (default: {manifest.SEED})",
+    )
+    subset.add_argument(
+        "--size",
+        type=int,
+        default=None,
+        help=(
+            "draw this many documents, only with --write, and only for a "
+            f"fixture: the benchmark subset is {manifest.SIZE} documents"
+        ),
+    )
+    subset.add_argument(
+        "--write",
+        action="store_true",
+        help="draw the subset and write the manifest, replacing any there",
+    )
 
     arguments = parser.parse_args(argv)
-    dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
+    if arguments.command == "subset" and not arguments.write:
+        drawing = [
+            flag
+            for flag, given in (("--seed", arguments.seed), ("--size", arguments.size))
+            if given is not None
+        ]
+        if drawing:
+            # Silently checking the pinned seed while the caller asked about
+            # another one would be a wrong answer, not a missing feature.
+            subset.error(f"{' and '.join(drawing)} draws a subset, so it needs --write")
     try:
-        annotation = dataset.annotation(arguments.document_id)
-        output = _run(arguments, annotation)
-    except (DocileError, PredictionError) as error:
+        output, exit_code = _run(arguments)
+    except (DocileError, PredictionError, ManifestError) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
     print(output, end="")
-    return 0
+    return exit_code
 
 
-def _run(arguments: argparse.Namespace, annotation: Annotation) -> str:
+def _run(arguments: argparse.Namespace) -> tuple[str, int]:
+    """The report the command asked for, and what to exit with.
+
+    A command reports a number even when the answer is bad news, so the exit
+    code travels beside the report rather than in an exception.
+    """
+    dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
+    if arguments.command == "subset":
+        return _subset(arguments, dataset)
+    if arguments.command == "eval":
+        run = score_subset(
+            dataset,
+            manifest.load(arguments.manifest),
+            read_predictions(arguments.predictions),
+        )
+        return render_eval(arguments.manifest, run), 0
+    annotation = dataset.annotation(arguments.document_id)
     if arguments.command == "show":
-        return render(arguments.document_id, annotation)
+        return render(arguments.document_id, annotation), 0
     prediction = read_prediction(arguments.prediction)
-    return render_score(
-        arguments.document_id,
-        score_fields(labeled_fields(annotation), prediction.header),
-        score_line_items(labeled_line_items(annotation), prediction.rows),
+    return (
+        render_score(
+            arguments.document_id,
+            score_fields(labeled_fields(annotation), prediction.header),
+            score_line_items(labeled_line_items(annotation), prediction.rows),
+        ),
+        0,
     )
+
+
+def _subset(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
+    """Write the pinned subset, or check that the seed still draws it.
+
+    Not reproducing is a failure and exits non-zero, but the report is still
+    printed: what the seed draws now is the thing worth looking at.
+    """
+    if arguments.write:
+        written = manifest.selected(
+            dataset.document_ids(manifest.SPLIT),
+            split=manifest.SPLIT,
+            seed=manifest.SEED if arguments.seed is None else arguments.seed,
+            size=manifest.SIZE if arguments.size is None else arguments.size,
+        )
+        manifest.write(written, arguments.manifest)
+        return render_subset(arguments.manifest, written, ("written", "yes")), 0
+
+    pinned = manifest.load(arguments.manifest)
+    drawn = pinned.reproduced_from(dataset.document_ids(pinned.split))
+    note = (
+        "reproduced",
+        "yes" if drawn == pinned.document_ids else _drift(pinned, drawn),
+    )
+    return (
+        render_subset(arguments.manifest, pinned, note),
+        0 if note[1] == "yes" else 1,
+    )
+
+
+def render_eval(path: Path, run: SubsetScore) -> str:
+    """A whole run over the fixed subset as a block a human can paste anywhere.
+
+    Counts and ratios only: `run` explains why no label text appears here.
+    """
+    predicted = len(run.documents) - len(run.not_predicted)
+    lines = [
+        "Fixed subset",
+        *_rows(
+            ("manifest", str(path)),
+            ("split", run.manifest.split),
+            ("size", str(run.manifest.size)),
+            ("predicted", str(predicted)),
+            ("not predicted", str(len(run.not_predicted))),
+            ("not pinned", str(len(run.unpinned))),
+        ),
+        "",
+        *_listed("Not predicted", run.not_predicted),
+        *_listed("Not pinned", run.unpinned),
+        *_ratios("Field score", run.fields),
+        "",
+        f"Fields ({len(run.per_fieldtype)})",
+        *_totals(run.per_fieldtype),
+        "",
+        *_ratios("Line-item score", run.line_items),
+        "",
+        f"Cell accuracy ({len(run.per_cell_fieldtype)})",
+        *_accuracies(run.per_cell_fieldtype),
+    ]
+    return "\n".join([*lines, ""])
+
+
+def _listed(title: str, document_ids: Sequence[str]) -> list[str]:
+    """The documents behind a count, in manifest then predictions-file order.
+
+    A count alone cannot be acted on, and a run that left out a third of the
+    subset is a broken run rather than a low score.
+    """
+    if not document_ids:
+        return []
+    return [
+        f"{title} ({len(document_ids)})",
+        *(f"  {each}" for each in document_ids),
+        "",
+    ]
+
+
+def _totals(totals: Sequence[FieldTypeTotals]) -> list[str]:
+    """Every KILE fieldtype and how it went, in the words `_ratios` uses.
+
+    F1 leads because it is the column being compared; precision and recall
+    follow from the counts beside it.
+    """
+    width = _width(each.fieldtype for each in totals)
+    lines = []
+    for each in totals:
+        spurious = f", {each.spurious} spurious" if each.spurious else ""
+        lines.append(
+            f"  {each.fieldtype.ljust(width)}  {each.f1:.3f}  "
+            f"{each.matched} matched, {each.missing} missing{spurious}"
+        )
+    return lines
+
+
+def _drift(pinned: Manifest, drawn: Sequence[str]) -> str:
+    """What the seed draws now that the manifest does not pin.
+
+    Order counts as drift, not only membership: a prefix of the subset is
+    itself a sample, so the order the seed draws in is part of what is pinned.
+    """
+    documents = set(pinned.document_ids)
+    unpinned = [document_id for document_id in drawn if document_id not in documents]
+    if not unpinned:
+        return "no, the same documents in a different order"
+    return f"no, {len(unpinned)} of the {pinned.size} documents are not pinned"

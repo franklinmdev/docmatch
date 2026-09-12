@@ -1,0 +1,15 @@
+{
+  "field_extractions": [
+    {"bbox": [0.08, 0.10, 0.42, 0.13], "fieldtype": "vendor_name", "page": 0, "text": "Pinefield Catering"},
+    {"bbox": [0.70, 0.10, 0.92, 0.13], "fieldtype": "document_id", "page": 0, "text": "INV-1006"},
+    {"bbox": [0.70, 0.14, 0.92, 0.17], "fieldtype": "date_issue", "page": 0, "text": "SEP12/26"},
+    {"bbox": [0.70, 0.80, 0.92, 0.83], "fieldtype": "amount_total_gross", "page": 0, "text": "76.40"}
+  ],
+  "line_item_extractions": [
+    {"bbox": [0.10, 0.50, 0.16, 0.53], "fieldtype": "line_item_quantity", "line_item_id": 1, "page": 0, "text": "2"},
+    {"bbox": [0.20, 0.50, 0.55, 0.53], "fieldtype": "line_item_description", "line_item_id": 1, "page": 0, "text": "Lunch platter"},
+    {"bbox": [0.78, 0.50, 0.92, 0.53], "fieldtype": "line_item_amount_gross", "line_item_id": 1, "page": 0, "text": "76.40"}
+  ],
+  "line_item_headers": [],
+  "metadata": {"cluster_id": 0, "currency": "usd", "document_type": "tax_invoice", "language": "eng", "original_filename": "synthetic-eval-0006", "page_count": 1, "page_sizes_at_200dpi": [[1654, 2339]], "source": "synthetic"}
+}
