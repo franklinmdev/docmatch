@@ -1,0 +1,24 @@
+{
+  "field_extractions": [
+    {"bbox": [0.08, 0.10, 0.42, 0.13], "fieldtype": "vendor_name", "page": 0, "text": "Northwind Paper Co"},
+    {"bbox": [0.08, 0.14, 0.42, 0.20], "fieldtype": "vendor_address", "page": 0, "text": "14 Mill Lane\nRiverport, RP 11000"},
+    {"bbox": [0.70, 0.10, 0.92, 0.13], "fieldtype": "document_id", "page": 0, "text": "INV-1001"},
+    {"bbox": [0.70, 0.14, 0.92, 0.17], "fieldtype": "date_issue", "page": 0, "text": "03/04/26"},
+    {"bbox": [0.70, 0.18, 0.92, 0.21], "fieldtype": "date_due", "page": 0, "text": "04/03/26"},
+    {"bbox": [0.70, 0.76, 0.92, 0.79], "fieldtype": "amount_total_tax", "page": 0, "text": "18.00"},
+    {"bbox": [0.70, 0.80, 0.92, 0.83], "fieldtype": "amount_total_gross", "page": 0, "text": "118.00"},
+    {"bbox": [0.60, 0.80, 0.69, 0.83], "fieldtype": "currency_code_amount_due", "page": 0, "text": "USD"}
+  ],
+  "line_item_extractions": [
+    {"bbox": [0.10, 0.50, 0.16, 0.53], "fieldtype": "line_item_quantity", "line_item_id": 1, "page": 0, "text": "2"},
+    {"bbox": [0.17, 0.50, 0.19, 0.53], "fieldtype": "line_item_units_of_measure", "line_item_id": 1, "page": 0, "text": "BOX"},
+    {"bbox": [0.20, 0.50, 0.55, 0.53], "fieldtype": "line_item_description", "line_item_id": 1, "page": 0, "text": "A4 copier paper, 500 sheets"},
+    {"bbox": [0.78, 0.50, 0.92, 0.53], "fieldtype": "line_item_amount_gross", "line_item_id": 1, "page": 0, "text": "60.00"},
+    {"bbox": [0.10, 0.55, 0.16, 0.58], "fieldtype": "line_item_quantity", "line_item_id": 2, "page": 0, "text": "1"},
+    {"bbox": [0.17, 0.55, 0.19, 0.58], "fieldtype": "line_item_units_of_measure", "line_item_id": 2, "page": 0, "text": "EA"},
+    {"bbox": [0.20, 0.55, 0.55, 0.58], "fieldtype": "line_item_description", "line_item_id": 2, "page": 0, "text": "Stapler, heavy duty"},
+    {"bbox": [0.78, 0.55, 0.92, 0.58], "fieldtype": "line_item_amount_gross", "line_item_id": 2, "page": 0, "text": "40.00"}
+  ],
+  "line_item_headers": [],
+  "metadata": {"cluster_id": 0, "currency": "usd", "document_type": "tax_invoice", "language": "eng", "original_filename": "synthetic-eval-0001", "page_count": 1, "page_sizes_at_200dpi": [[1654, 2339]], "source": "synthetic"}
+}

@@ -1,0 +1,20 @@
+{
+  "field_extractions": [
+    {"bbox": [0.08, 0.10, 0.42, 0.13], "fieldtype": "vendor_name", "page": 0, "text": "Beacon Electrics"},
+    {"bbox": [0.08, 0.88, 0.42, 0.91], "fieldtype": "vendor_name", "page": 0, "text": "Beacon Electrics"},
+    {"bbox": [0.70, 0.10, 0.92, 0.13], "fieldtype": "document_id", "page": 0, "text": "INV-1005"},
+    {"bbox": [0.60, 0.70, 0.69, 0.73], "fieldtype": "tax_detail_rate", "page": 0, "text": "8.25%"},
+    {"bbox": [0.60, 0.74, 0.69, 0.77], "fieldtype": "tax_detail_rate", "page": 0, "text": "5%"},
+    {"bbox": [0.70, 0.80, 0.92, 0.83], "fieldtype": "amount_total_gross", "page": 0, "text": "1.320,00"}
+  ],
+  "line_item_extractions": [
+    {"bbox": [0.10, 0.50, 0.16, 0.53], "fieldtype": "line_item_quantity", "line_item_id": 1, "page": 0, "text": "10"},
+    {"bbox": [0.20, 0.50, 0.55, 0.53], "fieldtype": "line_item_description", "line_item_id": 1, "page": 0, "text": "Cable reel, 25 m"},
+    {"bbox": [0.78, 0.50, 0.92, 0.53], "fieldtype": "line_item_amount_gross", "line_item_id": 1, "page": 0, "text": "900,00"},
+    {"bbox": [0.10, 0.55, 0.16, 0.58], "fieldtype": "line_item_quantity", "line_item_id": 2, "page": 0, "text": "4"},
+    {"bbox": [0.20, 0.55, 0.55, 0.58], "fieldtype": "line_item_description", "line_item_id": 2, "page": 0, "text": "Junction box"},
+    {"bbox": [0.78, 0.55, 0.92, 0.58], "fieldtype": "line_item_amount_gross", "line_item_id": 2, "page": 0, "text": "420,00"}
+  ],
+  "line_item_headers": [],
+  "metadata": {"cluster_id": 0, "currency": "usd", "document_type": "tax_invoice", "language": "eng", "original_filename": "synthetic-eval-0005", "page_count": 1, "page_sizes_at_200dpi": [[1654, 2339]], "source": "synthetic"}
+}

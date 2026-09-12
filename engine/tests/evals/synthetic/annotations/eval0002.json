@@ -1,0 +1,11 @@
+{
+  "field_extractions": [
+    {"bbox": [0.08, 0.10, 0.42, 0.13], "fieldtype": "vendor_name", "page": 0, "text": "Cedar Freight Ltd"},
+    {"bbox": [0.70, 0.10, 0.92, 0.13], "fieldtype": "document_id", "page": 0, "text": "INV-1002"},
+    {"bbox": [0.70, 0.14, 0.92, 0.17], "fieldtype": "date_issue", "page": 0, "text": "2026-03-05"},
+    {"bbox": [0.70, 0.80, 0.92, 0.83], "fieldtype": "amount_total_gross", "page": 0, "text": "250.00"}
+  ],
+  "line_item_extractions": [],
+  "line_item_headers": [],
+  "metadata": {"cluster_id": 0, "currency": "usd", "document_type": "tax_invoice", "language": "eng", "original_filename": "synthetic-eval-0002", "page_count": 1, "page_sizes_at_200dpi": [[1654, 2339]], "source": "synthetic"}
+}

@@ -38,3 +38,18 @@ def data_dir(tmp_path: Path) -> Path:
     split = tmp_path / "val.json"
     split.write_text('["syn0002", "syn0001"]', encoding="utf-8")
     return tmp_path
+
+
+SYNTHETIC_SUBSET = Path(__file__).parents[2] / "tests" / "evals" / "synthetic"
+
+
+@pytest.fixture
+def synthetic_subset() -> Path:
+    """The committed corpus the eval command runs on in CI.
+
+    A dataset in DocILE's shape, a manifest drawn from it, and a predictions
+    file covering all but one of the pinned documents plus one the manifest
+    does not pin. No real document content, so it is committed and CI needs no
+    dataset.
+    """
+    return SYNTHETIC_SUBSET
