@@ -1,9 +1,15 @@
-"""Scoring a predicted set of KILE header fields against the labeled set.
+"""Scoring one set of fields against another, and reading a prediction file.
 
 A label and a prediction are both a fieldtype with one or more values, so the
 score is a comparison of two mappings, one fieldtype at a time. Every value
 goes through `normalization` first, so the number measures extraction rather
 than formatting.
+
+A document's KILE header is one such set. So is a single line item, whose cells
+are fields carrying LIR fieldtypes, which is why `score_fields` and
+`by_fieldtype` are written in terms of fields rather than headers and why
+`line_items` scores a row by calling them. What is particular to the header
+lives here; what is particular to a table lives there.
 
 Absence is explicit on both sides. A fieldtype the label carries and the
 prediction does not is a miss; one the prediction carries and the label does
@@ -32,37 +38,60 @@ a guess about layout, and the cost falls on every backend equally, so it does
 not move the comparison this benchmark exists to make.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import RootModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-from docmatch.docile.annotation import Annotation
+from docmatch.docile.annotation import Annotation, FieldExtraction
 from docmatch.metrics.normalization import normalize
+from docmatch.metrics.score import Score
 
 FieldValues = Mapping[str, Sequence[str]]
-"""Header fields as the scorer takes them: a fieldtype and every value under it."""
+"""Fields as a scorer takes them: a fieldtype and every value under it."""
+
+WrittenValues = dict[str, str | list[str] | None]
+"""Fields as a hand-written file writes them: one value, a list, or `null`."""
 
 
-class Prediction(RootModel[dict[str, str | list[str] | None]]):
-    """The fields a run claims a document carries, as a hand-written JSON object.
+class Prediction(BaseModel):
+    """What a run claims one document says: its header fields and its rows.
 
-    One value, a list of values, or `null` for a field the document does not
-    carry: `{"vendor_name": "Acme", "tax_detail_rate": ["8.25%", "5%"],
-    "date_due": null}`.
+    `{"fields": {...}, "line_items": [{...}, {...}]}`, where each of those
+    objects carries a fieldtype to one value, a list of values, or `null` for a
+    field the document does not have. Either part may be left out, which is a
+    claim that the document carries none of it, not a claim that it was not
+    looked at. Any other key is rejected rather than ignored, so a file that
+    puts fieldtypes at the top level is reported as the mistake it is instead
+    of scoring as an empty prediction.
     """
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    fields: WrittenValues = {}
+    line_items: tuple[WrittenValues, ...] = ()
+
     @property
-    def fields(self) -> dict[str, tuple[str, ...]]:
-        """The prediction as field values, with absences kept as empty."""
-        return {
-            fieldtype: () if value is None else _values(value)
-            for fieldtype, value in self.root.items()
-        }
+    def header(self) -> FieldValues:
+        """The predicted header as the field scorer takes it."""
+        return _values(self.fields)
+
+    @property
+    def rows(self) -> tuple[FieldValues, ...]:
+        """The predicted line items as the line-item scorer takes them."""
+        return tuple(_values(row) for row in self.line_items)
 
 
-def _values(value: str | list[str]) -> tuple[str, ...]:
+def _values(written: WrittenValues) -> dict[str, tuple[str, ...]]:
+    """One written object as field values, with absences kept as empty."""
+    return {
+        fieldtype: () if value is None else _texts(value)
+        for fieldtype, value in written.items()
+    }
+
+
+def _texts(value: str | list[str]) -> tuple[str, ...]:
     texts = [value] if isinstance(value, str) else value
     return tuple(text for text in texts if text.strip())
 
@@ -79,25 +108,45 @@ def read_prediction(path: Path) -> Prediction:
         raise PredictionError(f"cannot read the prediction {path}: {error}") from error
     except ValidationError as error:
         raise PredictionError(
-            f"{path} is not a prediction: expected a JSON object of fieldtype to one "
-            f"value, a list of values, or null. {_first_problem(error)}"
+            f'{path} is not a prediction: expected a JSON object with "fields", a '
+            f'fieldtype to one value, a list of values, or null, and "line_items", a '
+            f"list of those. {_first_problem(error)}"
         ) from error
 
 
 def _first_problem(error: ValidationError) -> str:
-    """The first thing pydantic objected to, named by where it is in the file."""
+    """The first thing pydantic objected to, named by where it is in the file.
+
+    The path is spelled out to the fieldtype, `line_items.0.line_item_quantity`
+    rather than `line_items`, because a prediction nests and the half it went
+    wrong in is not enough to find it by. It stops there: a value that fits no
+    branch of `str | list[str] | None` is reported once per branch, and each
+    error carries the branch it failed on as one more step of the path, which
+    names pydantic's union rather than anything in the file.
+    """
     first = error.errors()[0]
-    fieldtype = next((str(part) for part in first["loc"]), None)
-    where = f"{fieldtype} is the first problem" if fieldtype else "The file itself"
-    return f"{where}: {first['msg'].lower()}."
+    loc = first["loc"]
+    nests = 3 if loc[:1] == ("line_items",) else 2
+    where = ".".join(str(part) for part in loc[:nests])
+    named = f"{where} is the first problem" if where else "The file itself"
+    return f"{named}: {first['msg'].lower()}."
+
+
+def by_fieldtype(fields: Iterable[FieldExtraction]) -> dict[str, tuple[str, ...]]:
+    """Labels grouped by fieldtype, in document order, as a scorer takes them.
+
+    DocILE localizes every occurrence, so a fieldtype may appear more than
+    once, whether the labels are a document's header or one line item's cells.
+    """
+    grouped: dict[str, tuple[str, ...]] = {}
+    for field in fields:
+        grouped[field.fieldtype] = (*grouped.get(field.fieldtype, ()), field.text)
+    return grouped
 
 
 def labeled_fields(annotation: Annotation) -> dict[str, tuple[str, ...]]:
     """The document's KILE labels grouped by fieldtype, in document order."""
-    grouped: dict[str, tuple[str, ...]] = {}
-    for field in annotation.fields:
-        grouped[field.fieldtype] = (*grouped.get(field.fieldtype, ()), field.text)
-    return grouped
+    return by_fieldtype(annotation.fields)
 
 
 @dataclass(frozen=True)
@@ -117,12 +166,8 @@ class FieldTypeScore:
 
 
 @dataclass(frozen=True)
-class FieldScore:
-    """One document's field score, per fieldtype and in aggregate.
-
-    The counts are the part that aggregates across documents; the ratios are
-    derived from them, so a later micro-average sums counts rather than means.
-    """
+class FieldScore(Score):
+    """One set of fields scored against another, per fieldtype and in aggregate."""
 
     per_fieldtype: tuple[FieldTypeScore, ...]
 
@@ -137,27 +182,6 @@ class FieldScore:
     @property
     def false_positives(self) -> int:
         return sum(len(each.spurious) for each in self.per_fieldtype)
-
-    @property
-    def precision(self) -> float:
-        """Of what was predicted, how much was labeled. Vacuously 1.0 if nothing was."""
-        return _ratio(self.true_positives, self.true_positives + self.false_positives)
-
-    @property
-    def recall(self) -> float:
-        """Of what was labeled, how much was predicted. Vacuously 1.0 if nothing was."""
-        return _ratio(self.true_positives, self.true_positives + self.false_negatives)
-
-    @property
-    def f1(self) -> float:
-        precision, recall = self.precision, self.recall
-        if precision + recall == 0:
-            return 0.0
-        return 2 * precision * recall / (precision + recall)
-
-
-def _ratio(part: int, whole: int) -> float:
-    return 1.0 if whole == 0 else part / whole
 
 
 def score_fields(labeled: FieldValues, predicted: FieldValues) -> FieldScore:

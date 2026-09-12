@@ -119,7 +119,7 @@ def test_labeled_fields_groups_an_annotation_by_fieldtype() -> None:
 
 
 @pytest.mark.parametrize(
-    ("body", "expected"),
+    ("written", "expected"),
     [
         ('{"vendor_name": "Acme"}', {"vendor_name": ("Acme",)}),
         ('{"tax_detail_rate": ["8.25%", "5%"]}', {"tax_detail_rate": ("8.25%", "5%")}),
@@ -128,16 +128,40 @@ def test_labeled_fields_groups_an_annotation_by_fieldtype() -> None:
     ],
 )
 def test_a_prediction_file_takes_one_value_a_list_or_an_absence(
-    body: str, expected: dict[str, tuple[str, ...]]
+    written: str, expected: dict[str, tuple[str, ...]]
 ) -> None:
-    assert Prediction.model_validate_json(body).fields == expected
+    prediction = Prediction.model_validate_json(f'{{"fields": {written}}}')
+
+    assert prediction.header == expected
+
+
+def test_a_prediction_carries_header_fields_and_line_items() -> None:
+    prediction = Prediction.model_validate_json(
+        """
+        {
+          "fields": {"vendor_name": "Acme"},
+          "line_items": [{"line_item_description": "Blue widget"}]
+        }
+        """
+    )
+
+    assert prediction.header == {"vendor_name": ("Acme",)}
+    assert prediction.rows == ({"line_item_description": ("Blue widget",)},)
+
+
+def test_a_prediction_may_leave_either_part_out() -> None:
+    """Leaving a part out claims the document has none of it."""
+    prediction = Prediction.model_validate_json('{"fields": {"vendor_name": "Acme"}}')
+
+    assert prediction.rows == ()
+    assert Prediction.model_validate_json("{}").header == {}
 
 
 def test_an_absent_value_is_neither_predicted_nor_wrong() -> None:
     """Absence is written down, not inferred from a missing key."""
-    prediction = Prediction.model_validate_json('{"date_due": null}')
+    prediction = Prediction.model_validate_json('{"fields": {"date_due": null}}')
 
-    score = score_fields({}, prediction.fields)
+    score = score_fields({}, prediction.header)
 
     assert score.false_positives == 0
 
