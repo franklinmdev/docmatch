@@ -70,9 +70,35 @@ the ambiguous `JU` are not. That costs one label in the annotated set, a German
 `JUNI`, and is worth it: matching on the first three letters alone would read
 any word beginning `MAY` or `DEC` as a month.
 
-**Currency**, for `currency_code_amount_due`, canonicalized to its ISO 4217
-code. `$` is read as USD, which is true of this corpus and would not be true of
-one carrying Canadian or Australian documents.
+**Currency**, for `currency_code_amount_due` and `line_item_currency`,
+canonicalized to its ISO 4217 code. `$` is read as USD, which is true of this
+corpus and would not be true of one carrying Canadian or Australian documents.
+
+Line-item fieldtypes
+--------------------
+
+A line item's cells are fields like any other and take the same rules, so the
+sets above name LIR fieldtypes beside the KILE ones. Which rule each cell gets
+is decided by what its values are, measured across the 38,678 labeled rows of
+the annotated set:
+
+- The money and count cells take the number rule, which reads 97.9% of
+  `line_item_amount_gross`, 99.3% of `line_item_unit_price_gross` and 98.9% of
+  `line_item_quantity`. `line_item_position` is here too, at 99.1%, so that a
+  row printed `01.` and a row printed `1` are one position.
+- `line_item_tax_rate` takes it as well, although the rule reads only 13.5% of
+  its 96 cells: the rest are a single letter, a tax code mislabeled as a rate,
+  and the rule hands those to the text rule untouched.
+- `line_item_date` takes the date rule, which reads 78.8%. What it does not
+  read is a date missing its year (`06/21`), a period written as two dates, or
+  a weekday, all of which stay text rather than become the wrong day.
+- `line_item_code`, `line_item_order_id` and `line_item_hts_number` stay text
+  even though the number rule can read 63.9%, 79.9% and 100% of them. They are
+  identifiers, so their leading zeros and their dots are content: reading
+  `8471.30.0100` as a number would make it agree with `8471.300100`.
+- `line_item_description`, `line_item_person_name` and
+  `line_item_units_of_measure` are text, and `line_item_currency` takes the
+  currency rule, which reads 97.3% of it.
 """
 
 import re
@@ -80,7 +106,7 @@ import unicodedata
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-DATE_FIELDTYPES = frozenset({"date_issue", "date_due"})
+DATE_FIELDTYPES = frozenset({"date_issue", "date_due", "line_item_date"})
 NUMBER_FIELDTYPES = frozenset(
     {
         "amount_due",
@@ -92,9 +118,20 @@ NUMBER_FIELDTYPES = frozenset(
         "tax_detail_net",
         "tax_detail_rate",
         "tax_detail_tax",
+        "line_item_amount_gross",
+        "line_item_amount_net",
+        "line_item_discount_amount",
+        "line_item_discount_rate",
+        "line_item_position",
+        "line_item_quantity",
+        "line_item_tax",
+        "line_item_tax_rate",
+        "line_item_unit_price_gross",
+        "line_item_unit_price_net",
+        "line_item_weight",
     }
 )
-CURRENCY_FIELDTYPES = frozenset({"currency_code_amount_due"})
+CURRENCY_FIELDTYPES = frozenset({"currency_code_amount_due", "line_item_currency"})
 
 
 def normalize(fieldtype: str, text: str) -> str:

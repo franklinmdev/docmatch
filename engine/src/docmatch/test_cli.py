@@ -128,6 +128,34 @@ def prediction_file(directory: Path, body: str) -> Path:
     return path
 
 
+PREDICTION = """
+{
+  "fields": {
+    "vendor_name": "Synthetic  Supplies Ltd",
+    "document_id": "SYN-0002",
+    "date_issue": "February 1, 2026",
+    "amount_total_gross": "$236.00",
+    "date_due": null
+  },
+  "line_items": [
+    {
+      "line_item_quantity": "1",
+      "line_item_description": "Red widget",
+      "line_item_amount_gross": "$136.00",
+      "line_item_tax": "0.00"
+    },
+    {
+      "line_item_quantity": "2",
+      "line_item_description": "Blue widget",
+      "line_item_amount_gross": "100"
+    }
+  ]
+}
+"""
+"""One reformatted header hit, one wrong, one missing, and the two rows of the
+table in the other order: the first exact, the second short a unit of measure
+and carrying a tax cell the label does not."""
+
 EXPECTED_SCORE_OUTPUT = "\n".join(
     [
         "Document syn0001",
@@ -146,26 +174,29 @@ EXPECTED_SCORE_OUTPUT = "\n".join(
         "  vendor_address      missing   12 example way testville, ex 00000",
         "  vendor_name         matched   synthetic supplies ltd",
         "",
+        # Every cell of the reordered rows lines up, so only the row short a
+        # unit of measure is wrong, and only that fieldtype is inaccurate.
+        "Line-item score",
+        "  precision  0.500",
+        "  recall     0.500",
+        "  F1         0.500",
+        "  1 matched, 1 missing, 1 spurious",
+        "",
+        "Cell accuracy (5)",
+        "  line_item_amount_gross" + " " * 6 + "1.000  2 of 2",
+        "  line_item_description" + " " * 7 + "1.000  2 of 2",
+        "  line_item_quantity" + " " * 10 + "1.000  2 of 2",
+        "  line_item_tax" + " " * 15 + "       0 of 0, 1 spurious",
+        "  line_item_units_of_measure  0.000  0 of 1",
+        "",
     ]
 )
 
 
-def test_score_reports_the_number_and_every_fieldtype(
+def test_score_reports_both_numbers_and_what_went_into_them(
     data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A hand-written prediction: one reformatted hit, one wrong, one missing."""
-    path = prediction_file(
-        tmp_path,
-        """
-        {
-          "vendor_name": "Synthetic  Supplies Ltd",
-          "document_id": "SYN-0002",
-          "date_issue": "February 1, 2026",
-          "amount_total_gross": "$236.00",
-          "date_due": null
-        }
-        """,
-    )
+    path = prediction_file(tmp_path, PREDICTION)
 
     exit_code = main(
         ["score", "syn0001", "--prediction", str(path), "--data-dir", str(data_dir)]
@@ -178,7 +209,7 @@ def test_score_reports_the_number_and_every_fieldtype(
 def test_score_reports_an_unreadable_prediction_without_a_traceback(
     data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    path = prediction_file(tmp_path, '{"vendor_name": {"text": "Acme"}}')
+    path = prediction_file(tmp_path, '{"fields": {"vendor_name": {"text": "Acme"}}}')
 
     exit_code = main(
         ["score", "syn0001", "--prediction", str(path), "--data-dir", str(data_dir)]
@@ -201,6 +232,101 @@ def test_score_reports_a_prediction_file_that_is_not_there(
 
     assert exit_code == 1
     assert str(absent) in capsys.readouterr().err
+
+
+EXPECTED_HEADER_ONLY_SCORE = "\n".join(
+    [
+        "Document syn0002",
+        "",
+        "Field score",
+        "  precision  1.000",
+        "  recall     0.333",
+        "  F1         0.500",
+        "  1 matched, 2 missing, 0 spurious",
+        "",
+        "Fields (3)",
+        "  amount_total_gross  missing   40",
+        "  document_id         missing   syn-0002",
+        "  vendor_name         matched   synthetic supplies ltd",
+        "",
+        # No table on either side is an agreement about nothing, not a zero:
+        # 355 of the 5,680 annotated documents carry no line items at all.
+        "Line-item score",
+        "  precision  1.000",
+        "  recall     1.000",
+        "  F1         1.000",
+        "  0 matched, 0 missing, 0 spurious",
+        "",
+        "Cell accuracy (0)",
+        "",
+    ]
+)
+
+
+def test_score_handles_a_document_with_no_line_items(
+    data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = prediction_file(
+        tmp_path, '{"fields": {"vendor_name": "Synthetic Supplies Ltd"}}'
+    )
+
+    exit_code = main(
+        ["score", "syn0002", "--prediction", str(path), "--data-dir", str(data_dir)]
+    )
+
+    assert capsys.readouterr().out == EXPECTED_HEADER_ONLY_SCORE
+    assert exit_code == 0
+
+
+def test_score_reports_rows_predicted_for_a_document_that_has_none(
+    data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Recall is vacuously whole; precision is what an invented table costs."""
+    path = prediction_file(
+        tmp_path, '{"line_items": [{"line_item_description": "Invented"}]}'
+    )
+
+    exit_code = main(
+        ["score", "syn0002", "--prediction", str(path), "--data-dir", str(data_dir)]
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "  0 matched, 0 missing, 1 spurious" in out
+    assert "  line_item_description         0 of 0, 1 spurious" in out
+
+
+def test_score_names_the_row_and_the_fieldtype_of_a_bad_cell(
+    data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Which half of a prediction is wrong is not enough to find the cell by."""
+    path = prediction_file(
+        tmp_path, '{"line_items": [{}, {"line_item_quantity": {"n": 2}}]}'
+    )
+
+    exit_code = main(
+        ["score", "syn0001", "--prediction", str(path), "--data-dir", str(data_dir)]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "line_items.1.line_item_quantity is the first problem" in captured.err
+
+
+def test_score_reports_a_prediction_written_at_the_top_level(
+    data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Fieldtypes outside "fields" would otherwise score as an empty prediction."""
+    path = prediction_file(tmp_path, '{"vendor_name": "Acme"}')
+
+    exit_code = main(
+        ["score", "syn0001", "--prediction", str(path), "--data-dir", str(data_dir)]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "vendor_name" in captured.err
 
 
 def test_score_still_reports_the_dataset_errors_show_reports(

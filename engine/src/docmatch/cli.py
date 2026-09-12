@@ -2,9 +2,9 @@
 
 `docmatch show <document-id>` prints the labels DocILE holds for a document,
 which is how a human checks that the dataset loads. `docmatch score
-<document-id> --prediction <file>` scores a set of predicted header fields
-against those labels, which is how a human checks the metric on a real
-document before it is run over a subset.
+<document-id> --prediction <file>` scores a predicted document, its header
+fields and its line items, against those labels, which is how a human checks
+the metrics on a real document before they are run over a subset.
 """
 
 import argparse
@@ -22,6 +22,12 @@ from docmatch.metrics.fields import (
     read_prediction,
     score_fields,
 )
+from docmatch.metrics.line_items import (
+    LineItemScore,
+    labeled_line_items,
+    score_line_items,
+)
+from docmatch.metrics.score import Score
 
 DATA_DIR_VARIABLE = "DOCMATCH_DATA_DIR"
 DEFAULT_DATA_DIR = Path("data/docile")
@@ -77,26 +83,41 @@ VERDICTS = ("matched", "missing", "spurious")
 """The three things that can happen to a value."""
 
 
-def render_score(document_id: str, score: FieldScore) -> str:
-    """The document's field score as a block a human can read in a terminal."""
-    ratios = (
-        ("precision", score.precision),
-        ("recall", score.recall),
-        ("F1", score.f1),
-    )
-    ratio_width = _width(name for name, _ in ratios)
+def render_score(document_id: str, fields: FieldScore, rows: LineItemScore) -> str:
+    """The document's two scores as a block a human can read in a terminal."""
     lines = [
         f"Document {document_id}",
         "",
-        "Field score",
-        *(f"  {name.ljust(ratio_width)}  {value:.3f}" for name, value in ratios),
+        *_ratios("Field score", fields),
+        "",
+        f"Fields ({len(fields.per_fieldtype)})",
+        *_values(fields),
+        "",
+        *_ratios("Line-item score", rows),
+        "",
+        f"Cell accuracy ({len(rows.per_fieldtype)})",
+        *_accuracies(rows),
+    ]
+    return "\n".join([*lines, ""])
+
+
+def _ratios(title: str, score: Score) -> list[str]:
+    """Precision, recall, F1, and the counts they come from."""
+    named = (("precision", score.precision), ("recall", score.recall), ("F1", score.f1))
+    width = _width(name for name, _ in named)
+    return [
+        title,
+        *(f"  {name.ljust(width)}  {value:.3f}" for name, value in named),
         f"  {score.true_positives} matched, {score.false_negatives} missing, "
         f"{score.false_positives} spurious",
-        "",
-        f"Fields ({len(score.per_fieldtype)})",
     ]
+
+
+def _values(score: FieldScore) -> list[str]:
+    """Every header value and what became of it, the fieldtype named once."""
     width = _width(each.fieldtype for each in score.per_fieldtype)
     verdict_width = _width(VERDICTS)
+    lines = []
     for each in score.per_fieldtype:
         name = each.fieldtype.ljust(width)
         for verdict, values in zip(
@@ -105,7 +126,26 @@ def render_score(document_id: str, score: FieldScore) -> str:
             for value in values:
                 lines.append(f"  {name}  {verdict.ljust(verdict_width)}  {value}")
                 name = " " * width  # the fieldtype is named once, then hangs
-    return "\n".join([*lines, ""])
+    return lines
+
+
+def _accuracies(score: LineItemScore) -> list[str]:
+    """Per-cell accuracy per LIR fieldtype, over the cells the labels carry.
+
+    A fieldtype the prediction invented has no labeled cell to be accurate
+    about, so its ratio column is blank and only the count is printed.
+    """
+    width = _width(each.fieldtype for each in score.per_fieldtype)
+    blank = " " * len("0.000")
+    lines = []
+    for each in score.per_fieldtype:
+        accuracy = f"{each.accuracy:.3f}" if each.labeled else blank
+        spurious = f", {each.spurious} spurious" if each.spurious else ""
+        lines.append(
+            f"  {each.fieldtype.ljust(width)}  {accuracy}  "
+            f"{each.correct} of {each.labeled}{spurious}"
+        )
+    return lines
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -134,7 +174,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--prediction",
         type=Path,
         required=True,
-        help="a JSON object of fieldtype to a value, a list of values, or null",
+        help='a JSON object with "fields" and "line_items"',
     )
 
     arguments = parser.parse_args(argv)
@@ -153,5 +193,8 @@ def _run(arguments: argparse.Namespace, annotation: Annotation) -> str:
     if arguments.command == "show":
         return render(arguments.document_id, annotation)
     prediction = read_prediction(arguments.prediction)
-    score = score_fields(labeled_fields(annotation), prediction.fields)
-    return render_score(arguments.document_id, score)
+    return render_score(
+        arguments.document_id,
+        score_fields(labeled_fields(annotation), prediction.header),
+        score_line_items(labeled_line_items(annotation), prediction.rows),
+    )
