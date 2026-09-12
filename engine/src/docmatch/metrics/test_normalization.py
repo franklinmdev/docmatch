@@ -10,7 +10,7 @@ so no label text is committed.
 
 import pytest
 
-from docmatch.metrics.normalization import normalize
+from docmatch.metrics.normalization import normalize, reads, reads_number, rule
 
 
 def agree(fieldtype: str, left: str, right: str) -> bool:
@@ -130,3 +130,44 @@ def test_a_line_item_cell_takes_the_same_rule_as_a_header_field(
 def test_an_identifier_keeps_its_zeros_and_dots(fieldtype: str, text: str) -> None:
     """The number rule could read these; reading them would lose the identifier."""
     assert normalize(fieldtype, text) == text
+
+
+@pytest.mark.parametrize(
+    ("fieldtype", "expected"),
+    [
+        ("amount_due", "number"),
+        ("line_item_date", "date"),
+        ("currency_code_amount_due", "currency"),
+        ("vendor_name", "text"),
+    ],
+)
+def test_a_fieldtype_names_the_rule_its_values_go_through(
+    fieldtype: str, expected: str
+) -> None:
+    assert rule(fieldtype) == expected
+
+
+@pytest.mark.parametrize(
+    ("fieldtype", "text", "expected"),
+    [
+        ("date_issue", "SEP18/26", True),
+        ("date_issue", "on delivery", False),
+        ("amount_due", "US$ 2,460.00", True),
+        ("amount_due", "not charged", False),
+        ("currency_code_amount_due", "US$", True),
+        ("currency_code_amount_due", "zar", False),
+        ("vendor_name", "Synthetic Supplies Ltd", True),
+    ],
+)
+def test_reading_a_value_is_the_other_half_of_normalizing_it(
+    fieldtype: str, text: str, expected: bool
+) -> None:
+    """A value its rule cannot read is the one the text rule ends up with."""
+    assert reads(fieldtype, text) is expected
+    assert (normalize(fieldtype, text) != normalize("vendor_name", text)) <= expected
+
+
+def test_the_number_rule_can_be_asked_about_a_fieldtype_it_does_not_have() -> None:
+    """What reading an identifier as a number would cost is why it is text."""
+    assert reads_number("8471.30.0100") is True
+    assert reads("line_item_hts_number", "8471.30.0100") is True, "the text rule"

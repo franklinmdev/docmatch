@@ -103,6 +103,7 @@ the annotated set:
 
 import re
 import unicodedata
+from collections.abc import Callable
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
@@ -134,15 +135,34 @@ NUMBER_FIELDTYPES = frozenset(
 CURRENCY_FIELDTYPES = frozenset({"currency_code_amount_due", "line_item_currency"})
 
 
+def rule(fieldtype: str) -> str:
+    """The name of the rule a fieldtype's values go through.
+
+    One place decides this, so that normalizing a value and asking whether the
+    rule reads it can never disagree about which rule that is.
+    """
+    if fieldtype in NUMBER_FIELDTYPES:
+        return "number"
+    if fieldtype in DATE_FIELDTYPES:
+        return "date"
+    if fieldtype in CURRENCY_FIELDTYPES:
+        return "currency"
+    return "text"
+
+
 def normalize(fieldtype: str, text: str) -> str:
     """The comparable form of one field value, by the rule its fieldtype picks."""
-    if fieldtype in NUMBER_FIELDTYPES:
-        return normalize_number(text)
-    if fieldtype in DATE_FIELDTYPES:
-        return normalize_date(text)
-    if fieldtype in CURRENCY_FIELDTYPES:
-        return normalize_currency(text)
-    return normalize_text(text)
+    return _NORMALIZERS[rule(fieldtype)](text)
+
+
+def reads(fieldtype: str, text: str) -> bool:
+    """Whether that rule reads the value, or hands it to the text rule instead.
+
+    This is what the coverage percentages above are the share of, and
+    `docmatch corpus` is what counts them.
+    """
+    reader = _READERS.get(rule(fieldtype))
+    return True if reader is None else reader(text)
 
 
 def normalize_text(text: str) -> str:
@@ -162,15 +182,38 @@ _NUMBER = re.compile(
 
 def normalize_number(text: str) -> str:
     """An amount or rate as a plain decimal string, or the text rule if unreadable."""
-    match = _NUMBER.match("".join(unicodedata.normalize("NFKC", text).split()))
+    value = _read_number(text)
+    return f"{value.normalize():f}" if value is not None else normalize_text(text)
+
+
+def reads_number(text: str) -> bool:
+    """Whether the number rule reads this value, whichever fieldtype carries it.
+
+    Asked of a fieldtype the rule is not wired to, it says what reading that
+    fieldtype as a number would cost: the identifiers below are text because
+    the answer is high, not because it is low.
+    """
+    return _read_number(text) is not None
+
+
+def prepared_number(text: str) -> str:
+    """A value in the form the number rule reads: composed, and no whitespace.
+
+    Public for the same reason `prepared_date` is: a survey of how the corpus
+    writes its numbers looks at the text the rule looks at.
+    """
+    return "".join(unicodedata.normalize("NFKC", text).split())
+
+
+def _read_number(text: str) -> Decimal | None:
+    """The amount or rate a value spells, or nothing if it does not spell one."""
+    match = _NUMBER.match(prepared_number(text))
     if match is None:
-        return normalize_text(text)
+        return None
     value = _read_separators(match["body"].rstrip(".,"))
     if value is None:
-        return normalize_text(text)
-    if "-" in match["lead"] + match["trail"]:
-        value = -value
-    return f"{value.normalize():f}"
+        return None
+    return -value if "-" in match["lead"] + match["trail"] else value
 
 
 def _read_separators(body: str) -> Decimal | None:
@@ -198,7 +241,7 @@ def _split_at(body: str, decimal_point: str) -> Decimal:
     return Decimal(f"{digits or '0'}.{fraction or '0'}")
 
 
-_MONTHS = {
+MONTHS = {
     name: number
     for number, name in enumerate(
         (
@@ -226,14 +269,28 @@ _YEAR_PIVOT = 69
 
 def normalize_date(text: str) -> str:
     """A date as `YYYY-MM-DD`, or the text rule if it is not one calendar day."""
-    day = _read_date(_ORDINAL.sub("", unicodedata.normalize("NFKC", text).upper()))
+    day = _read_date(prepared_date(text))
     return day.isoformat() if day is not None else normalize_text(text)
+
+
+def reads_date(text: str) -> bool:
+    """Whether the date rule reads this value as one calendar day."""
+    return _read_date(prepared_date(text)) is not None
+
+
+def prepared_date(text: str) -> str:
+    """A value in the form the date rule reads: upper case, no ordinal suffixes.
+
+    Public because a survey of how the corpus writes its dates asks the same
+    question of the same text the rule sees, rather than of its own copy.
+    """
+    return _ORDINAL.sub("", unicodedata.normalize("NFKC", text).upper())
 
 
 def _read_date(text: str) -> date | None:
     month: int | None = None
     for word in re.findall(r"[A-Z]+", text):
-        named = _month(word)
+        named = names_a_month(word)
         if named is None or month is not None:
             return None  # a word that is not a month, or a second month name
         month = named
@@ -255,11 +312,15 @@ def _read_date(text: str) -> date | None:
         return None
 
 
-def _month(word: str) -> int | None:
-    """The month a word names, by the abbreviation it spells: `SEP`, `SEPT`, `MARCH`."""
+def names_a_month(word: str) -> int | None:
+    """The month a word names, by the abbreviation it spells: `SEP`, `SEPT`, `MARCH`.
+
+    Public so that a survey of what this strictness costs can ask the rule
+    itself rather than a second copy of it.
+    """
     if len(word) < 3:
         return None
-    named = [number for name, number in _MONTHS.items() if name.startswith(word)]
+    named = [number for name, number in MONTHS.items() if name.startswith(word)]
     return named[0] if len(named) == 1 else None
 
 
@@ -297,3 +358,22 @@ def normalize_currency(text: str) -> str:
     """A currency as its ISO 4217 code, or the text rule if it is not one we know."""
     code = _CURRENCIES.get(normalize_text(text).upper())
     return code.casefold() if code is not None else normalize_text(text)
+
+
+def reads_currency(text: str) -> bool:
+    """Whether the currency rule knows this currency."""
+    return normalize_text(text).upper() in _CURRENCIES
+
+
+_NORMALIZERS: dict[str, Callable[[str], str]] = {
+    "number": normalize_number,
+    "date": normalize_date,
+    "currency": normalize_currency,
+    "text": normalize_text,
+}
+_READERS: dict[str, Callable[[str], bool]] = {
+    "number": reads_number,
+    "date": reads_date,
+    "currency": reads_currency,
+}
+"""The text rule is absent on purpose: it reads everything it is given."""
