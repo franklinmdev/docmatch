@@ -49,10 +49,11 @@ def render(document_id: str, annotation: Annotation) -> str:
 
 
 def _width(fieldtypes: Iterable[str]) -> int:
-    """The column the values line up in, wide enough for every fieldtype.
+    """The column the values line up in, wide enough for every name given.
 
-    It takes the names rather than the fields, because the two renderers line up
-    different things: labels carry a fieldtype, scored entries carry a name.
+    It takes the names themselves rather than the objects holding them: both
+    renderers line up a fieldtype, but each holds it on a different type, and
+    the score block lines up its own labels the same way.
     """
     return max((len(fieldtype) for fieldtype in fieldtypes), default=0)
 
@@ -73,36 +74,36 @@ def _aligned(fields: Sequence[FieldExtraction], indent: int, width: int) -> list
 
 
 VERDICTS = ("matched", "missing", "spurious")
-"""The three things that can happen to a value, widest last for the column."""
+"""The three things that can happen to a value."""
 
 
 def render_score(document_id: str, score: FieldScore) -> str:
     """The document's field score as a block a human can read in a terminal."""
+    ratios = (
+        ("precision", score.precision),
+        ("recall", score.recall),
+        ("F1", score.f1),
+    )
+    ratio_width = _width(name for name, _ in ratios)
     lines = [
         f"Document {document_id}",
         "",
         "Field score",
-        *(
-            f"  {name.ljust(len('precision'))}  {value:.3f}"
-            for name, value in (
-                ("precision", score.precision),
-                ("recall", score.recall),
-                ("F1", score.f1),
-            )
-        ),
+        *(f"  {name.ljust(ratio_width)}  {value:.3f}" for name, value in ratios),
         f"  {score.true_positives} matched, {score.false_negatives} missing, "
         f"{score.false_positives} spurious",
         "",
         f"Fields ({len(score.per_fieldtype)})",
     ]
     width = _width(each.fieldtype for each in score.per_fieldtype)
+    verdict_width = _width(VERDICTS)
     for each in score.per_fieldtype:
         name = each.fieldtype.ljust(width)
         for verdict, values in zip(
             VERDICTS, (each.matched, each.missing, each.spurious), strict=True
         ):
             for value in values:
-                lines.append(f"  {name}  {verdict.ljust(len(VERDICTS[-1]))}  {value}")
+                lines.append(f"  {name}  {verdict.ljust(verdict_width)}  {value}")
                 name = " " * width  # the fieldtype is named once, then hangs
     return "\n".join([*lines, ""])
 
