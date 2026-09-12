@@ -54,11 +54,11 @@ class MicroAverage(Score):
     """Several scores as one score, by summing counts rather than averaging ratios.
 
     Micro, not macro, and the difference is not cosmetic on this corpus. A
-    document's line-item table holds anything from no rows to 34 of them, and
-    most hold few, so averaging each document's F1 would let a one-row table
-    weigh as much as a thirty-row one and the number would track table size
-    rather than extraction. Summing the counts gives every row, and every
-    header value, the same weight.
+    document's line-item table holds anything from no rows to the 110 of the
+    largest in the annotated set, so averaging each document's F1 would let a
+    one-row table weigh as much as a hundred-row one and the number would
+    track table size rather than extraction. Summing the counts gives every
+    row, and every header value, the same weight.
     """
 
     parts: tuple[Score, ...]
