@@ -120,3 +120,104 @@ def test_show_handles_a_document_with_no_line_items(
 
     assert capsys.readouterr().out == EXPECTED_HEADER_ONLY_OUTPUT
     assert exit_code == 0
+
+
+def prediction_file(directory: Path, body: str) -> Path:
+    path = directory / "prediction.json"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+EXPECTED_SCORE_OUTPUT = "\n".join(
+    [
+        "Document syn0001",
+        "",
+        "Field score",
+        "  precision  0.750",
+        "  recall     0.600",
+        "  F1         0.667",
+        "  3 matched, 2 missing, 1 spurious",
+        "",
+        "Fields (5)",
+        "  amount_total_gross  matched   236",
+        "  date_issue          matched   2026-02-01",
+        "  document_id         missing   syn-0001",
+        "                      spurious  syn-0002",
+        "  vendor_address      missing   12 example way testville, ex 00000",
+        "  vendor_name         matched   synthetic supplies ltd",
+        "",
+    ]
+)
+
+
+def test_score_reports_the_number_and_every_fieldtype(
+    data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A hand-written prediction: one reformatted hit, one wrong, one missing."""
+    path = prediction_file(
+        tmp_path,
+        """
+        {
+          "vendor_name": "Synthetic  Supplies Ltd",
+          "document_id": "SYN-0002",
+          "date_issue": "February 1, 2026",
+          "amount_total_gross": "$236.00",
+          "date_due": null
+        }
+        """,
+    )
+
+    exit_code = main(
+        ["score", "syn0001", "--prediction", str(path), "--data-dir", str(data_dir)]
+    )
+
+    assert capsys.readouterr().out == EXPECTED_SCORE_OUTPUT
+    assert exit_code == 0
+
+
+def test_score_reports_an_unreadable_prediction_without_a_traceback(
+    data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = prediction_file(tmp_path, '{"vendor_name": {"text": "Acme"}}')
+
+    exit_code = main(
+        ["score", "syn0001", "--prediction", str(path), "--data-dir", str(data_dir)]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert str(path) in captured.err
+
+
+def test_score_reports_a_prediction_file_that_is_not_there(
+    data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    absent = tmp_path / "absent.json"
+
+    exit_code = main(
+        ["score", "syn0001", "--prediction", str(absent), "--data-dir", str(data_dir)]
+    )
+
+    assert exit_code == 1
+    assert str(absent) in capsys.readouterr().err
+
+
+def test_score_still_reports_the_dataset_errors_show_reports(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = prediction_file(tmp_path, "{}")
+
+    exit_code = main(
+        [
+            "score",
+            "syn0001",
+            "--prediction",
+            str(path),
+            "--data-dir",
+            str(tmp_path / "absent"),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "README.md" in capsys.readouterr().err

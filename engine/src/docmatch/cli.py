@@ -1,17 +1,27 @@
 """The docmatch command line.
 
-One command so far: `docmatch show <document-id>` prints the labels DocILE
-holds for a document, which is how a human checks that the dataset loads.
+`docmatch show <document-id>` prints the labels DocILE holds for a document,
+which is how a human checks that the dataset loads. `docmatch score
+<document-id> --prediction <file>` scores a set of predicted header fields
+against those labels, which is how a human checks the metric on a real
+document before it is run over a subset.
 """
 
 import argparse
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from docmatch.docile.annotation import Annotation, FieldExtraction
 from docmatch.docile.dataset import DocileDataset, DocileError
+from docmatch.metrics.fields import (
+    FieldScore,
+    PredictionError,
+    labeled_fields,
+    read_prediction,
+    score_fields,
+)
 
 DATA_DIR_VARIABLE = "DOCMATCH_DATA_DIR"
 DEFAULT_DATA_DIR = Path("data/docile")
@@ -28,18 +38,23 @@ def resolve_data_dir(given: Path | None) -> Path:
 def render(document_id: str, annotation: Annotation) -> str:
     """The document's labels as a block a human can read in a terminal."""
     lines = [f"Document {document_id}", "", f"KILE fields ({len(annotation.fields)})"]
-    lines += _aligned(annotation.fields, indent=2, width=_width(annotation.fields))
+    width = _width(field.fieldtype for field in annotation.fields)
+    lines += _aligned(annotation.fields, indent=2, width=width)
     lines += ["", f"LIR line items ({len(annotation.line_items)})"]
-    table_width = _width(annotation.cells)
+    table_width = _width(cell.fieldtype for cell in annotation.cells)
     for item in annotation.line_items:
         lines.append(f"  line item {item.line_item_id}")
         lines += _aligned(item.cells, indent=4, width=table_width)
     return "\n".join([*lines, ""])
 
 
-def _width(fields: Sequence[FieldExtraction]) -> int:
-    """The column the values line up in, wide enough for every fieldtype."""
-    return max((len(field.fieldtype) for field in fields), default=0)
+def _width(fieldtypes: Iterable[str]) -> int:
+    """The column the values line up in, wide enough for every fieldtype.
+
+    It takes the names rather than the fields, because the two renderers line up
+    different things: labels carry a fieldtype, scored entries carry a name.
+    """
+    return max((len(fieldtype) for fieldtype in fieldtypes), default=0)
 
 
 def _aligned(fields: Sequence[FieldExtraction], indent: int, width: int) -> list[str]:
@@ -57,13 +72,48 @@ def _aligned(fields: Sequence[FieldExtraction], indent: int, width: int) -> list
     return lines
 
 
+VERDICTS = ("matched", "missing", "spurious")
+"""The three things that can happen to a value, widest last for the column."""
+
+
+def render_score(document_id: str, score: FieldScore) -> str:
+    """The document's field score as a block a human can read in a terminal."""
+    lines = [
+        f"Document {document_id}",
+        "",
+        "Field score",
+        *(
+            f"  {name.ljust(len('precision'))}  {value:.3f}"
+            for name, value in (
+                ("precision", score.precision),
+                ("recall", score.recall),
+                ("F1", score.f1),
+            )
+        ),
+        f"  {score.true_positives} matched, {score.false_negatives} missing, "
+        f"{score.false_positives} spurious",
+        "",
+        f"Fields ({len(score.per_fieldtype)})",
+    ]
+    width = _width(each.fieldtype for each in score.per_fieldtype)
+    for each in score.per_fieldtype:
+        name = each.fieldtype.ljust(width)
+        for verdict, values in zip(
+            VERDICTS, (each.matched, each.missing, each.spurious), strict=True
+        ):
+            for value in values:
+                lines.append(f"  {name}  {verdict.ljust(len(VERDICTS[-1]))}  {value}")
+                name = " " * width  # the fieldtype is named once, then hangs
+    return "\n".join([*lines, ""])
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="docmatch", description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    show = subcommands.add_parser("show", help="print the labels for one document")
-    show.add_argument("document_id", help="a DocILE document id")
-    show.add_argument(
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("document_id", help="a DocILE document id")
+    common.add_argument(
         "--data-dir",
         type=Path,
         default=None,
@@ -73,12 +123,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
 
+    subcommands.add_parser(
+        "show", parents=[common], help="print the labels for one document"
+    )
+    score = subcommands.add_parser(
+        "score", parents=[common], help="score a prediction against those labels"
+    )
+    score.add_argument(
+        "--prediction",
+        type=Path,
+        required=True,
+        help="a JSON object of fieldtype to a value, a list of values, or null",
+    )
+
     arguments = parser.parse_args(argv)
     dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
     try:
         annotation = dataset.annotation(arguments.document_id)
-    except DocileError as error:
+        output = _run(arguments, annotation)
+    except (DocileError, PredictionError) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
-    print(render(arguments.document_id, annotation), end="")
+    print(output, end="")
     return 0
+
+
+def _run(arguments: argparse.Namespace, annotation: Annotation) -> str:
+    if arguments.command == "show":
+        return render(arguments.document_id, annotation)
+    prediction = read_prediction(arguments.prediction)
+    score = score_fields(labeled_fields(annotation), prediction.fields)
+    return render_score(arguments.document_id, score)

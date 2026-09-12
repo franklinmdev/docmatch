@@ -187,6 +187,39 @@ uv run docmatch show <document-id>
 Document ids are the entries of `data/docile/trainval.json`. Pass `--data-dir`,
 or set `DOCMATCH_DATA_DIR`, to read a dataset kept outside the repository.
 
+Score a predicted set of KILE header fields against those labels. A prediction
+is a JSON object of fieldtype to one value, a list of values, or `null` for a
+field the document does not carry:
+
+```json
+{
+  "vendor_name": "Synthetic Supplies Ltd",
+  "date_issue": "March 4, 2026",
+  "amount_due": "US$ 503,70",
+  "tax_detail_rate": ["8.25%", "5%"],
+  "date_due": null
+}
+```
+
+```bash
+uv run docmatch score <document-id> --prediction prediction.json
+```
+
+The command reports precision, recall, and F1 for the document, then every
+fieldtype and whether each of its values matched, was missed, or was spurious.
+Both sides are normalized first, so `US$ 503,70`, `$503.70`, and `503.7` are
+one amount and `March 4, 2026` and `3/4/2026` are one day. The rules, and the
+measurements behind them, are documented in
+`engine/src/docmatch/metrics/normalization.py`. The values above are made up:
+DocILE may not be redistributed, so no label text is committed anywhere in this
+repository.
+
+This score is not comparable with the DocILE leaderboard, which matches a
+prediction to a label by the overlap of their bounding boxes. The backends this
+engine benchmarks return text and no boxes, so the score here is over
+normalized text; what has to stay comparable is this repository's own number
+across commits.
+
 ## Extraction backends
 
 The `Extractor` interface is the seam. Backends are compared, not chosen up front. List prices as published by vendors at the time of writing; verify before relying on them.
