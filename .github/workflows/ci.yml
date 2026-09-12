@@ -39,3 +39,16 @@ jobs:
 
       - name: Test
         run: uv run pytest
+
+      # The eval on the committed synthetic subset: six documents in DocILE's
+      # shape with predictions to match, so the whole path from manifest to
+      # report runs on every push while the real dataset never leaves the
+      # machine it was downloaded on. The numbers this prints are the
+      # harness's own, not a benchmark; the README's numbers come from the
+      # same command run locally against `data/docile`.
+      - name: Eval
+        run: >-
+          uv run docmatch eval
+          --data-dir engine/tests/evals/synthetic
+          --manifest engine/tests/evals/synthetic/subset.json
+          --predictions engine/tests/evals/synthetic/predictions.json

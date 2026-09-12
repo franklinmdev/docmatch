@@ -8,7 +8,8 @@ the metrics on a real document before they are run over a subset.
 
 `docmatch subset` re-derives the committed fixed subset from the split it was
 drawn from, which is how a reader checks that the pinned list is still the one
-the seed draws.
+the seed draws. `docmatch eval --predictions <file>` scores a whole run over
+that subset, which is the command every number in the README comes from.
 
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
@@ -24,6 +25,12 @@ from docmatch.docile.annotation import Annotation, FieldExtraction
 from docmatch.docile.dataset import DocileDataset, DocileError
 from docmatch.evals import manifest as manifests
 from docmatch.evals.manifest import Manifest, ManifestError
+from docmatch.evals.run import (
+    FieldTypeTotals,
+    SubsetScore,
+    read_predictions,
+    score_subset,
+)
 from docmatch.metrics.fields import (
     FieldScore,
     PredictionError,
@@ -32,6 +39,7 @@ from docmatch.metrics.fields import (
     score_fields,
 )
 from docmatch.metrics.line_items import (
+    CellAccuracy,
     LineItemScore,
     labeled_line_items,
     score_line_items,
@@ -105,7 +113,7 @@ def render_score(document_id: str, fields: FieldScore, rows: LineItemScore) -> s
         *_ratios("Line-item score", rows),
         "",
         f"Cell accuracy ({len(rows.per_fieldtype)})",
-        *_accuracies(rows),
+        *_accuracies(rows.per_fieldtype),
     ]
     return "\n".join([*lines, ""])
 
@@ -138,16 +146,16 @@ def _values(score: FieldScore) -> list[str]:
     return lines
 
 
-def _accuracies(score: LineItemScore) -> list[str]:
+def _accuracies(accuracies: Sequence[CellAccuracy]) -> list[str]:
     """Per-cell accuracy per LIR fieldtype, over the cells the labels carry.
 
     A fieldtype the prediction invented has no labeled cell to be accurate
     about, so its ratio column is blank and only the count is printed.
     """
-    width = _width(each.fieldtype for each in score.per_fieldtype)
+    width = _width(each.fieldtype for each in accuracies)
     blank = " " * len("0.000")
     lines = []
-    for each in score.per_fieldtype:
+    for each in accuracies:
         accuracy = f"{each.accuracy:.3f}" if each.labeled else blank
         spurious = f", {each.spurious} spurious" if each.spurious else ""
         lines.append(
@@ -213,6 +221,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help='a JSON object with "fields" and "line_items"',
     )
+    evaluate = subcommands.add_parser(
+        "eval",
+        parents=[dataset],
+        help="score a run of predictions over the fixed subset",
+    )
+    evaluate.add_argument(
+        "--predictions",
+        type=Path,
+        required=True,
+        help="a JSON object keyed by document id, each holding one prediction",
+    )
+    evaluate.add_argument(
+        "--manifest",
+        type=Path,
+        default=manifests.MANIFEST,
+        help=f"the subset to score over (default: {manifests.MANIFEST.name})",
+    )
     subset = subcommands.add_parser(
         "subset",
         parents=[dataset],
@@ -268,6 +293,13 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
     dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
     if arguments.command == "subset":
         return _subset(arguments, dataset)
+    if arguments.command == "eval":
+        run = score_subset(
+            dataset,
+            manifests.load(arguments.manifest),
+            read_predictions(arguments.predictions),
+        )
+        return render_eval(arguments.manifest, run), 0
     annotation = dataset.annotation(arguments.document_id)
     if arguments.command == "show":
         return render(arguments.document_id, annotation), 0
@@ -308,6 +340,70 @@ def _subset(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str,
         render_subset(arguments.manifest, manifest, note),
         0 if note[1] == "yes" else 1,
     )
+
+
+def render_eval(path: Path, run: SubsetScore) -> str:
+    """A whole run over the fixed subset as a block a human can paste anywhere.
+
+    Counts and ratios only: `run` explains why no label text appears here.
+    """
+    predicted = len(run.documents) - len(run.not_predicted)
+    lines = [
+        "Fixed subset",
+        *_rows(
+            ("manifest", str(path)),
+            ("split", run.manifest.split),
+            ("size", str(run.manifest.size)),
+            ("predicted", str(predicted)),
+            ("not predicted", str(len(run.not_predicted))),
+            ("not pinned", str(len(run.unpinned))),
+        ),
+        "",
+        *_listed("Not predicted", run.not_predicted),
+        *_listed("Not pinned", run.unpinned),
+        *_ratios("Field score", run.fields),
+        "",
+        f"Fields ({len(run.per_fieldtype)})",
+        *_totals(run.per_fieldtype),
+        "",
+        *_ratios("Line-item score", run.line_items),
+        "",
+        f"Cell accuracy ({len(run.per_cell_fieldtype)})",
+        *_accuracies(run.per_cell_fieldtype),
+    ]
+    return "\n".join([*lines, ""])
+
+
+def _listed(title: str, document_ids: Sequence[str]) -> list[str]:
+    """The documents behind a count, in manifest then predictions-file order.
+
+    A count alone cannot be acted on, and a run that left out a third of the
+    subset is a broken run rather than a low score.
+    """
+    if not document_ids:
+        return []
+    return [
+        f"{title} ({len(document_ids)})",
+        *(f"  {each}" for each in document_ids),
+        "",
+    ]
+
+
+def _totals(totals: Sequence[FieldTypeTotals]) -> list[str]:
+    """Every KILE fieldtype and how it went, in the words `_ratios` uses.
+
+    F1 leads because it is the column being compared; precision and recall
+    follow from the counts beside it.
+    """
+    width = _width(each.fieldtype for each in totals)
+    lines = []
+    for each in totals:
+        spurious = f", {each.spurious} spurious" if each.spurious else ""
+        lines.append(
+            f"  {each.fieldtype.ljust(width)}  {each.f1:.3f}  "
+            f"{each.matched} matched, {each.missing} missing{spurious}"
+        )
+    return lines
 
 
 def _drift(manifest: Manifest, drawn: Sequence[str]) -> str:

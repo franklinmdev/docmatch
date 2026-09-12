@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from docmatch.cli import main
-from docmatch.evals.manifest import load, select, write
+from docmatch.evals.manifest import Manifest, load, select, write
 
 EXPECTED_SHOW_OUTPUT = "\n".join(
     [
@@ -508,3 +508,178 @@ def test_subset_reports_a_split_the_dataset_does_not_have(
 
     assert exit_code == 1
     assert "val.json" in capsys.readouterr().err
+
+
+EXPECTED_EVAL_OUTPUT = "\n".join(
+    [
+        "Fixed subset",
+        "  manifest       {manifest}",
+        "  split          val",
+        "  size           5",
+        "  predicted      4",
+        "  not predicted  1",
+        "  not pinned     1",
+        "",
+        # A pinned document nobody predicted and a predicted document nobody
+        # pinned are both named, because a count cannot be acted on.
+        "Not predicted (1)",
+        "  eval0006",
+        "",
+        "Not pinned (1)",
+        "  eval0001",
+        "",
+        "Field score",
+        "  precision  0.875",
+        "  recall     0.700",
+        "  F1         0.778",
+        "  14 matched, 6 missing, 2 spurious",
+        "",
+        "Fields (6)",
+        "  amount_total_gross  0.750  3 matched, 2 missing",
+        "  date_issue          0.800  2 matched, 1 missing",
+        "  document_id         0.667  3 matched, 2 missing, 1 spurious",
+        "  tax_detail_rate     1.000  2 matched, 0 missing",
+        "  vendor_email        0.000  0 matched, 0 missing, 1 spurious",
+        "  vendor_name         0.889  4 matched, 1 missing",
+        "",
+        "Line-item score",
+        "  precision  0.571",
+        "  recall     0.571",
+        "  F1         0.571",
+        "  4 matched, 3 missing, 3 spurious",
+        "",
+        "Cell accuracy (3)",
+        "  line_item_amount_gross  0.714  5 of 7, 2 spurious",
+        "  line_item_description   0.857  6 of 7, 1 spurious",
+        "  line_item_quantity      0.714  5 of 7, 1 spurious",
+        "",
+    ]
+)
+"""What CI sees. The counts behind it are checked in `evals/test_run.py`; this
+pins the report that carries them."""
+
+
+def evaluate(synthetic_subset: Path, *arguments: str) -> list[str]:
+    return [
+        "eval",
+        "--data-dir",
+        str(synthetic_subset),
+        "--manifest",
+        str(synthetic_subset / "subset.json"),
+        "--predictions",
+        str(synthetic_subset / "predictions.json"),
+        *arguments,
+    ]
+
+
+def test_eval_reports_both_numbers_over_the_subset(
+    synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = main(evaluate(synthetic_subset))
+
+    assert capsys.readouterr().out == EXPECTED_EVAL_OUTPUT.format(
+        manifest=synthetic_subset / "subset.json"
+    )
+    assert exit_code == 0
+
+
+def test_eval_prints_no_label_text(
+    synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rule 6: the report is pasted into a commit message, so it carries counts."""
+    main(evaluate(synthetic_subset))
+
+    out = capsys.readouterr().out
+    assert "Junction box" not in out
+    assert "Beacon" not in out
+
+
+def test_eval_scores_the_committed_subset_by_default(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The command in the README names a predictions file and nothing else."""
+    predictions = tmp_path / "predictions.json"
+    predictions.write_text("{}", encoding="utf-8")
+
+    exit_code = main(
+        [
+            "eval",
+            "--predictions",
+            str(predictions),
+            "--data-dir",
+            str(tmp_path / "absent"),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "README.md" in capsys.readouterr().err
+
+
+def test_eval_reports_a_predictions_file_that_is_not_there(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    absent = tmp_path / "absent.json"
+
+    exit_code = main(
+        [
+            "eval",
+            "--data-dir",
+            str(synthetic_subset),
+            "--manifest",
+            str(synthetic_subset / "subset.json"),
+            "--predictions",
+            str(absent),
+        ]
+    )
+
+    assert exit_code == 1
+    assert str(absent) in capsys.readouterr().err
+
+
+def test_eval_names_the_document_of_a_bad_prediction(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "predictions.json"
+    path.write_text('{"eval0002": {"fields": {"vendor_name": 7}}}', encoding="utf-8")
+
+    exit_code = main(
+        [
+            "eval",
+            "--data-dir",
+            str(synthetic_subset),
+            "--manifest",
+            str(synthetic_subset / "subset.json"),
+            "--predictions",
+            str(path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "eval0002.fields.vendor_name is the first problem" in captured.err
+
+
+def test_eval_reports_a_pinned_document_the_dataset_does_not_hold(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A dataset that cannot satisfy the manifest produces no number at all."""
+    manifest = tmp_path / "subset.json"
+    write(Manifest(split="val", seed=1, size=1, document_ids=("eval9999",)), manifest)
+    predictions = tmp_path / "predictions.json"
+    predictions.write_text("{}", encoding="utf-8")
+
+    exit_code = main(
+        [
+            "eval",
+            "--data-dir",
+            str(synthetic_subset),
+            "--manifest",
+            str(manifest),
+            "--predictions",
+            str(predictions),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "eval9999" in capsys.readouterr().err
