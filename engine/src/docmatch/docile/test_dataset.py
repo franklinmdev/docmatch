@@ -4,7 +4,6 @@ Every case builds its own dataset from the synthetic fixture, so the suite
 runs in CI with no dataset present.
 """
 
-import shutil
 from pathlib import Path
 
 import pytest
@@ -15,15 +14,10 @@ from docmatch.docile.dataset import (
     DocumentNotFoundError,
 )
 
-FIXTURE = Path(__file__).parent / "fixtures" / "synthetic_annotation.json"
-
 
 @pytest.fixture
-def dataset(tmp_path: Path) -> DocileDataset:
-    annotations = tmp_path / "annotations"
-    annotations.mkdir()
-    shutil.copy(FIXTURE, annotations / "syn0001.json")
-    return DocileDataset(tmp_path)
+def dataset(data_dir: Path) -> DocileDataset:
+    return DocileDataset(data_dir)
 
 
 def test_loads_the_annotation_for_a_document_id(dataset: DocileDataset) -> None:

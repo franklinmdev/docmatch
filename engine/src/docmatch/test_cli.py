@@ -4,23 +4,11 @@ Every case builds a dataset from the synthetic fixture in a temporary
 directory, so the suite runs in CI with no dataset present.
 """
 
-import shutil
 from pathlib import Path
 
 import pytest
 
 from docmatch.cli import main
-
-FIXTURE = Path(__file__).parent / "docile" / "fixtures" / "synthetic_annotation.json"
-
-
-@pytest.fixture
-def data_dir(tmp_path: Path) -> Path:
-    annotations = tmp_path / "annotations"
-    annotations.mkdir()
-    shutil.copy(FIXTURE, annotations / "syn0001.json")
-    return tmp_path
-
 
 EXPECTED_SHOW_OUTPUT = "\n".join(
     [
