@@ -167,6 +167,26 @@ curl -O "https://docile-dataset-rossum.s3.eu-west-1.amazonaws.com/$DOCILE_TOKEN/
 
 Upstream's `download_dataset.sh` does the same thing. Note that its `--help` names this subset `labeled-trainval`, which 404s; `annotated-trainval` is the working name.
 
+## Running the engine
+
+From a clean checkout, with [uv](https://docs.astral.sh/uv/) installed:
+
+```bash
+uv sync            # create the virtualenv, install the engine and its dev tools
+uv run ruff check  # lint
+uv run pytest      # tests; these need no dataset and are what CI runs
+```
+
+With DocILE downloaded into `data/docile`, print the labels the dataset holds
+for one document, its KILE header fields and its LIR line items:
+
+```bash
+uv run docmatch show <document-id>
+```
+
+Document ids are the entries of `data/docile/trainval.json`. Pass `--data-dir`,
+or set `DOCMATCH_DATA_DIR`, to read a dataset kept outside the repository.
+
 ## Extraction backends
 
 The `Extractor` interface is the seam. Backends are compared, not chosen up front. List prices as published by vendors at the time of writing; verify before relying on them.
@@ -199,15 +219,24 @@ Deliberately cut: schema DSLs, document-parsing SaaS as a foundation, Celery and
 
 A phase is done when its number is in this README with the commit that produced it, the eval that produced it runs in CI, and the next phase can start from a clean checkout.
 
-## Repository layout, planned
+## Repository layout
 
 ```text
 docmatch/
-  engine/            Python: extraction, validation, resolution, matching, evals
-  apps/review/       Next.js review inbox
-  data/              ignored: datasets, generated fixtures, private sets
-  docs/              decision records
+  pyproject.toml       uv workspace root: dev tooling, lint and test configuration
+  uv.lock              pinned for every machine and for CI
+  engine/              the Python engine, a uv workspace member
+    pyproject.toml     the docmatch package and its `docmatch` command
+    src/docmatch/      extraction, validation, resolution, matching, evals
+  apps/review/         Next.js review inbox, from phase 4
+  data/                ignored: datasets, generated fixtures, private sets
+  docs/                decision records
+  .github/workflows/   CI: ruff and pytest on every push
 ```
+
+Tests live next to the code they test, so `src/docmatch/docile/dataset.py` is
+tested by `src/docmatch/docile/test_dataset.py`. The eval suite will live under
+`engine/tests/evals`.
 
 ## Contributing
 

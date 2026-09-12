@@ -1,0 +1,19 @@
+{
+  "field_extractions": [
+    {"bbox": [0.08, 0.10, 0.42, 0.13], "fieldtype": "vendor_name", "page": 0, "text": "Synthetic Supplies Ltd"},
+    {"bbox": [0.70, 0.10, 0.92, 0.13], "fieldtype": "document_id", "page": 0, "text": "SYN-0002"},
+    {"bbox": [0.70, 0.80, 0.92, 0.83], "fieldtype": "amount_total_gross", "page": 0, "text": "40.00"}
+  ],
+  "line_item_extractions": [],
+  "line_item_headers": [],
+  "metadata": {
+    "cluster_id": 0,
+    "currency": "eur",
+    "document_type": "invoice",
+    "language": "eng",
+    "original_filename": "synthetic-0002",
+    "page_count": 1,
+    "page_sizes_at_200dpi": [[1654, 2339]],
+    "source": "synthetic"
+  }
+}

@@ -1,0 +1,198 @@
+{
+  "field_extractions": [
+    {
+      "bbox": [
+        0.08,
+        0.1,
+        0.42,
+        0.13
+      ],
+      "fieldtype": "vendor_name",
+      "page": 0,
+      "text": "Synthetic Supplies Ltd"
+    },
+    {
+      "bbox": [
+        0.08,
+        0.14,
+        0.42,
+        0.2
+      ],
+      "fieldtype": "vendor_address",
+      "page": 0,
+      "text": "12 Example Way\nTestville, EX 00000"
+    },
+    {
+      "bbox": [
+        0.7,
+        0.1,
+        0.92,
+        0.13
+      ],
+      "fieldtype": "document_id",
+      "page": 0,
+      "text": "SYN-0001"
+    },
+    {
+      "bbox": [
+        0.7,
+        0.14,
+        0.92,
+        0.17
+      ],
+      "fieldtype": "date_issue",
+      "page": 0,
+      "text": "02/01/26"
+    },
+    {
+      "bbox": [
+        0.7,
+        0.8,
+        0.92,
+        0.83
+      ],
+      "fieldtype": "amount_total_gross",
+      "page": 0,
+      "text": "236.00"
+    }
+  ],
+  "line_item_extractions": [
+    {
+      "bbox": [
+        0.1,
+        0.55,
+        0.16,
+        0.58
+      ],
+      "fieldtype": "line_item_quantity",
+      "line_item_id": 2,
+      "page": 0,
+      "text": "1"
+    },
+    {
+      "bbox": [
+        0.17,
+        0.55,
+        0.19,
+        0.58
+      ],
+      "fieldtype": "line_item_units_of_measure",
+      "line_item_id": 2,
+      "page": 0,
+      "text": "EA"
+    },
+    {
+      "bbox": [
+        0.2,
+        0.55,
+        0.55,
+        0.58
+      ],
+      "fieldtype": "line_item_description",
+      "line_item_id": 2,
+      "page": 0,
+      "text": "Red widget"
+    },
+    {
+      "bbox": [
+        0.78,
+        0.55,
+        0.92,
+        0.58
+      ],
+      "fieldtype": "line_item_amount_gross",
+      "line_item_id": 2,
+      "page": 0,
+      "text": "136.00"
+    },
+    {
+      "bbox": [
+        0.1,
+        0.5,
+        0.16,
+        0.53
+      ],
+      "fieldtype": "line_item_quantity",
+      "line_item_id": 1,
+      "page": 0,
+      "text": "2"
+    },
+    {
+      "bbox": [
+        0.2,
+        0.5,
+        0.55,
+        0.53
+      ],
+      "fieldtype": "line_item_description",
+      "line_item_id": 1,
+      "page": 0,
+      "text": "Blue widget"
+    },
+    {
+      "bbox": [
+        0.78,
+        0.5,
+        0.92,
+        0.53
+      ],
+      "fieldtype": "line_item_amount_gross",
+      "line_item_id": 1,
+      "page": 0,
+      "text": "100.00"
+    }
+  ],
+  "line_item_headers": [
+    {
+      "bbox": [
+        0.1,
+        0.45,
+        0.16,
+        0.48
+      ],
+      "fieldtype": "line_item_quantity",
+      "line_item_id": 0,
+      "page": 0,
+      "text": "QTY"
+    },
+    {
+      "bbox": [
+        0.2,
+        0.45,
+        0.55,
+        0.48
+      ],
+      "fieldtype": "line_item_description",
+      "line_item_id": 0,
+      "page": 0,
+      "text": "DESCRIPTION"
+    },
+    {
+      "bbox": [
+        0.78,
+        0.45,
+        0.92,
+        0.48
+      ],
+      "fieldtype": "line_item_amount_gross",
+      "line_item_id": 0,
+      "page": 0,
+      "text": "AMOUNT"
+    }
+  ],
+  "metadata": {
+    "cluster_id": 0,
+    "currency": "eur",
+    "document_type": "tax_invoice",
+    "language": "eng",
+    "original_filename": "synthetic-0001",
+    "page_count": 1,
+    "page_sizes_at_200dpi": [
+      [
+        1654,
+        2339
+      ]
+    ],
+    "source": "synthetic"
+  }
+}
