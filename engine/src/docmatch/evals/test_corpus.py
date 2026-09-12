@@ -7,6 +7,8 @@ what these pin is that each probe counts the thing its name says.
 
 from collections.abc import Sequence
 
+import pytest
+
 from docmatch.docile.annotation import (
     Annotation,
     DocumentMetadata,
@@ -14,6 +16,7 @@ from docmatch.docile.annotation import (
     LineItemCell,
 )
 from docmatch.evals.corpus import Survey, survey
+from docmatch.metrics.normalization import normalize
 
 BOX = (0.0, 0.0, 1.0, 1.0)
 """Where a label sits, which no count here depends on."""
@@ -168,6 +171,21 @@ def test_counts_which_ordering_an_ambiguous_numeric_date_proves() -> None:
     )
 
     assert (report.dates.month_first, report.dates.day_first) == (1, 1)
+
+
+@pytest.mark.parametrize("text", ["12/13/2026", "02/28/26", "1/31/1999"])
+def test_a_date_the_survey_calls_month_first_is_read_month_first(text: str) -> None:
+    """What ties the probe's eligibility test to the rule's, since it copies it.
+
+    Both have to agree on what an ambiguous numeric date is. A change to one
+    that the other does not follow would leave the count measuring a case the
+    rule never reaches, which is the failure this whole command exists against.
+    """
+    report = surveyed(document(header(("date_issue", text))))
+
+    month = normalize("date_issue", text).split("-")[1]
+    assert report.dates.month_first == 1
+    assert int(month) == int(text.split("/")[0]), "the rule read it month first too"
 
 
 def test_counts_the_date_labels_the_month_rules_strictness_turns_on() -> None:

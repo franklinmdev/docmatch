@@ -34,12 +34,12 @@ import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from itertools import groupby
 
 from docmatch.docile.annotation import Annotation, FieldExtraction
 from docmatch.metrics.fields import by_fieldtype
 from docmatch.metrics.normalization import (
     MONTHS,
+    Rule,
     names_a_month,
     normalize,
     normalize_text,
@@ -79,7 +79,7 @@ class Coverage:
     """How much of one fieldtype the rules can read."""
 
     fieldtype: str
-    rule: str
+    rule: Rule
     header: bool
     """Whether this is a KILE fieldtype; the rest are a line item's cells."""
     labels: int
@@ -101,7 +101,7 @@ class Coverage:
 class RuleCoverage:
     """How much of everything one rule is given it can read."""
 
-    rule: str
+    rule: Rule
     labels: int
     read: int
 
@@ -172,20 +172,17 @@ class Survey:
         return self._by_rule(header=False)
 
     def _by_rule(self, *, header: bool) -> tuple[RuleCoverage, ...]:
-        counted = sorted(
-            (each for each in self.coverage if each.header == header),
-            key=lambda each: each.rule,
-        )
+        grouped: dict[Rule, list[Coverage]] = {}
+        for each in self.coverage:
+            if each.header == header:
+                grouped.setdefault(each.rule, []).append(each)
         return tuple(
             RuleCoverage(
                 rule=name,
                 labels=sum(each.labels for each in group),
                 read=sum(each.read for each in group),
             )
-            for name, group in (
-                (name, tuple(group))
-                for name, group in groupby(counted, key=lambda each: each.rule)
-            )
+            for name, group in sorted(grouped.items())
         )
 
 

@@ -36,6 +36,8 @@ both a miss and a false positive. That is 160 of the 71,513 labels, 0.22%, and
 it is left alone on purpose: collapsing repeated lines inside a value would be
 a guess about layout, and the cost falls on every backend equally, so it does
 not move the comparison this benchmark exists to make.
+
+Both counts are recomputed by `docmatch corpus`.
 """
 
 from collections.abc import Iterable, Mapping, Sequence

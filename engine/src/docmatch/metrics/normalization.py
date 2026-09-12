@@ -117,6 +117,7 @@ import unicodedata
 from collections.abc import Callable
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from typing import Literal
 
 DATE_FIELDTYPES = frozenset({"date_issue", "date_due", "line_item_date"})
 NUMBER_FIELDTYPES = frozenset(
@@ -145,8 +146,16 @@ NUMBER_FIELDTYPES = frozenset(
 )
 CURRENCY_FIELDTYPES = frozenset({"currency_code_amount_due", "line_item_currency"})
 
+Rule = Literal["number", "date", "currency", "text"]
+"""The four rules, named. A fieldtype picks one and every value takes it.
 
-def rule(fieldtype: str) -> str:
+Spelled as a type rather than as four strings so that a rule named wrong
+anywhere, in a dispatch table or in a caller counting one of them, is an error
+rather than a branch that never runs.
+"""
+
+
+def rule(fieldtype: str) -> Rule:
     """The name of the rule a fieldtype's values go through.
 
     One place decides this, so that normalizing a value and asking whether the
@@ -376,13 +385,13 @@ def reads_currency(text: str) -> bool:
     return normalize_text(text).upper() in _CURRENCIES
 
 
-_NORMALIZERS: dict[str, Callable[[str], str]] = {
+_NORMALIZERS: dict[Rule, Callable[[str], str]] = {
     "number": normalize_number,
     "date": normalize_date,
     "currency": normalize_currency,
     "text": normalize_text,
 }
-_READERS: dict[str, Callable[[str], bool]] = {
+_READERS: dict[Rule, Callable[[str], bool]] = {
     "number": reads_number,
     "date": reads_date,
     "currency": reads_currency,

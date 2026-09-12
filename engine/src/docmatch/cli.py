@@ -394,17 +394,17 @@ def render_corpus(root: Path, surveyed: Survey) -> str:
     Grouped that way so the report and the docstrings can be read side by side,
     which is the whole point of taking the counts again.
     """
-    corpse = surveyed.corpus
+    annotated = surveyed.corpus
     dates, repeats = surveyed.dates, surveyed.repeats
     lines = [
         f"Corpus  {root}, {surveyed.split}",
         *_counted(
-            ("documents", corpse.documents),
-            ("KILE labels", corpse.fields),
-            ("LIR cells", corpse.cells),
-            ("line items", corpse.rows),
-            ("documents with no table", corpse.without_a_table),
-            ("largest table", corpse.largest_table),
+            ("documents", annotated.documents),
+            ("KILE labels", annotated.fields),
+            ("LIR cells", annotated.cells),
+            ("line items", annotated.rows),
+            ("documents with no table", annotated.without_a_table),
+            ("largest table", annotated.largest_table),
         ),
         "",
         "Rules read, of the header labels",
@@ -443,10 +443,19 @@ def render_corpus(root: Path, surveyed: Survey) -> str:
 def _counted(*rows: tuple[str, int]) -> list[str]:
     """Labeled counts, the labels in one column and the numbers in another."""
     width = _width(label for label, _ in rows)
-    figures = max((len(str(count)) for _, count in rows), default=0)
+    figures = _figures(count for _, count in rows)
     return [
         f"  {label.ljust(width)}  {str(count).rjust(figures)}" for label, count in rows
     ]
+
+
+def _figures(counts: Iterable[int]) -> int:
+    """The column the counts line up in, wide enough for every one given.
+
+    The other half of `_width`: a name is padded on the right and a count on
+    the left, and every block here lines up some of both.
+    """
+    return max((len(str(count)) for count in counts), default=0)
 
 
 def _census(title: str, counted: Census) -> list[str]:
@@ -466,7 +475,7 @@ def _census(title: str, counted: Census) -> list[str]:
 def _coverage(rules: Sequence[RuleCoverage]) -> list[str]:
     """What share of everything a rule is given it reads, and of how many."""
     width = _width(each.rule for each in rules)
-    read = max((len(str(each.read)) for each in rules), default=0)
+    read = _figures(each.read for each in rules)
     return [
         f"  {each.rule.ljust(width)}  {each.share:6.1%}  "
         f"{str(each.read).rjust(read)} of {each.labels}"
@@ -483,7 +492,7 @@ def _fieldtypes(coverage: Sequence[Coverage]) -> list[str]:
     """
     width = _width(each.fieldtype for each in coverage)
     rules = _width(each.rule for each in coverage)
-    labels = max((len(str(each.labels)) for each in coverage), default=0)
+    labels = _figures(each.labels for each in coverage)
     lines = []
     for each in coverage:
         read = " " * 6 if each.rule == "text" else f"{each.share:6.1%}"
