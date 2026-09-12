@@ -95,3 +95,28 @@ def test_an_explicit_data_dir_beats_the_environment(
 
     assert capsys.readouterr().out == EXPECTED_SHOW_OUTPUT
     assert exit_code == 0
+
+
+EXPECTED_HEADER_ONLY_OUTPUT = "\n".join(
+    [
+        "Document syn0002",
+        "",
+        "KILE fields (3)",
+        "  vendor_name" + " " * 9 + "Synthetic Supplies Ltd",
+        "  document_id" + " " * 9 + "SYN-0002",
+        "  amount_total_gross" + " " * 2 + "40.00",
+        "",
+        "LIR line items (0)",
+        "",
+    ]
+)
+
+
+def test_show_handles_a_document_with_no_line_items(
+    data_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Plenty of real invoices carry no line-item table at all."""
+    exit_code = main(["show", "syn0002", "--data-dir", str(data_dir)])
+
+    assert capsys.readouterr().out == EXPECTED_HEADER_ONLY_OUTPUT
+    assert exit_code == 0

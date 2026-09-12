@@ -12,9 +12,9 @@ import pytest
 
 from docmatch.docile.annotation import Annotation
 
-SYNTHETIC_ANNOTATION = (
-    Path(__file__).parent / "docile" / "fixtures" / "synthetic_annotation.json"
-)
+FIXTURES = Path(__file__).parent / "docile" / "fixtures"
+SYNTHETIC_ANNOTATION = FIXTURES / "synthetic_annotation.json"
+SYNTHETIC_HEADER_ONLY = FIXTURES / "synthetic_header_only.json"
 
 
 @pytest.fixture
@@ -25,8 +25,13 @@ def synthetic_annotation() -> Annotation:
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    """A DocILE dataset directory holding the synthetic document as `syn0001`."""
+    """A DocILE dataset directory holding two synthetic documents.
+
+    `syn0001` has a line-item table; `syn0002` is header only, which 355 of
+    the 5,680 real annotated documents are.
+    """
     annotations = tmp_path / "annotations"
     annotations.mkdir()
     shutil.copy(SYNTHETIC_ANNOTATION, annotations / "syn0001.json")
+    shutil.copy(SYNTHETIC_HEADER_ONLY, annotations / "syn0002.json")
     return tmp_path
