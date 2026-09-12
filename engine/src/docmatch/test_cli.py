@@ -234,6 +234,68 @@ def test_score_reports_a_prediction_file_that_is_not_there(
     assert str(absent) in capsys.readouterr().err
 
 
+EXPECTED_HEADER_ONLY_SCORE = "\n".join(
+    [
+        "Document syn0002",
+        "",
+        "Field score",
+        "  precision  1.000",
+        "  recall     0.333",
+        "  F1         0.500",
+        "  1 matched, 2 missing, 0 spurious",
+        "",
+        "Fields (3)",
+        "  amount_total_gross  missing   40",
+        "  document_id         missing   syn-0002",
+        "  vendor_name         matched   synthetic supplies ltd",
+        "",
+        # No table on either side is an agreement about nothing, not a zero:
+        # 355 of the 5,680 annotated documents carry no line items at all.
+        "Line-item score",
+        "  precision  1.000",
+        "  recall     1.000",
+        "  F1         1.000",
+        "  0 matched, 0 missing, 0 spurious",
+        "",
+        "Cell accuracy (0)",
+        "",
+    ]
+)
+
+
+def test_score_handles_a_document_with_no_line_items(
+    data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = prediction_file(
+        tmp_path, '{"fields": {"vendor_name": "Synthetic Supplies Ltd"}}'
+    )
+
+    exit_code = main(
+        ["score", "syn0002", "--prediction", str(path), "--data-dir", str(data_dir)]
+    )
+
+    assert capsys.readouterr().out == EXPECTED_HEADER_ONLY_SCORE
+    assert exit_code == 0
+
+
+def test_score_reports_rows_predicted_for_a_document_that_has_none(
+    data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Recall is vacuously whole; precision is what an invented table costs."""
+    path = prediction_file(
+        tmp_path, '{"line_items": [{"line_item_description": "Invented"}]}'
+    )
+
+    exit_code = main(
+        ["score", "syn0002", "--prediction", str(path), "--data-dir", str(data_dir)]
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "  0 matched, 0 missing, 1 spurious" in out
+    assert "  line_item_description         0 of 0, 1 spurious" in out
+
+
 def test_score_names_the_row_and_the_fieldtype_of_a_bad_cell(
     data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
