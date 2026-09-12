@@ -28,8 +28,8 @@ def data_dir(tmp_path: Path) -> Path:
     """A DocILE dataset directory holding two synthetic documents.
 
     `syn0001` has a line-item table; `syn0002` is header only, which 355 of
-    the 5,680 real annotated documents are. A `val` split lists both, in the
-    order a split file's order means nothing.
+    the 5,680 real annotated documents are, as `docmatch corpus` counts them.
+    A `val` split lists both, in the order a split file's order means nothing.
     """
     annotations = tmp_path / "annotations"
     annotations.mkdir()

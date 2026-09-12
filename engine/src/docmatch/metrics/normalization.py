@@ -50,29 +50,40 @@ point is decided from the digits, not from a locale:
   thousands (`$2,500`), and everything else is a decimal point.
 
 A lone `.` is therefore always a decimal point. That is measured, not assumed:
-across the 5,680 annotated documents, 23 amount values are European thousands
-written with a lone dot, the way `123.456` means 123456, against 74 tax rates
-of the shape `7.250%`, which a thousands reading would inflate by a thousand.
-Reading the rate right is worth the 23.
+273 number labels in the annotated set are written with a lone dot and exactly
+three digits after it, which is the one shape the two readings disagree about.
+250 of them are line-item cells, quantities and unit prices and line amounts
+where three decimals are ordinary, and 9 are tax rates of the shape `7.250%`;
+a thousands reading would inflate every one of those by a thousand. The 14
+header amounts left over, the ones written `123.456` for 123456, are what the
+rule costs.
 
 **Date**, for `date_issue` and `date_due`, canonicalized to `YYYY-MM-DD`.
 Ordinal suffixes are dropped and a two-digit year pivots at 69, so `99` is 1999
 and `20` is 2020. An all-numeric date that does not start with a four-digit
-year is read month first: in this corpus 3,338 numeric dates prove month-first
-ordering against 15 that prove day-first, so day-first is the rarer mislabel
+year is read month first: in this corpus 18,151 numeric dates prove month-first
+ordering against 17 that prove day-first, so day-first is the rarer mislabel
 and not a locale worth detecting. A date the rule cannot read falls back to
 text rather than becoming the wrong day, which is what happens to a day-first
 date whose day is past the twelfth.
 
 A word names a month when it is at least three letters and starts exactly one
 English month name, so `SEP`, `SEPT` and `MARCH` are months while `MAYBE` and
-the ambiguous `JU` are not. That costs one label in the annotated set, a German
-`JUNI`, and is worth it: matching on the first three letters alone would read
-any word beginning `MAY` or `DEC` as a month.
+the ambiguous `JU` are not. Four labels in the annotated set turn on that
+strictness, one of them a German `JUNI` the rule therefore does not read, and
+it is worth them: matching on the first three letters alone would read any word
+beginning `MAY` or `DEC` as a month.
 
 **Currency**, for `currency_code_amount_due` and `line_item_currency`,
 canonicalized to its ISO 4217 code. `$` is read as USD, which is true of this
 corpus and would not be true of one carrying Canadian or Australian documents.
+
+Of the header labels, the rules read 98.5% of the dates, 99.8% of the amounts
+and 98.4% of the currencies. The rest is OCR damage and values that are not of
+their kind, and every one of those falls back to text.
+
+Every count and every percentage in this docstring is recomputed by `docmatch
+corpus`, which is what keeps a rule change from leaving one of them behind.
 
 Line-item fieldtypes
 --------------------

@@ -85,9 +85,12 @@ Cells within a row
 
 A fieldtype can appear more than once in one row, most often a service period
 written as two `line_item_date` cells. 10,201 of the 38,678 labeled rows repeat
-a fieldtype, and 6,453 still do after normalization, so a row is a fieldtype
+a fieldtype, and 6,400 still do after normalization, so a row is a fieldtype
 with a set of values rather than a fieldtype with a value, exactly as a header
 is. That falls out of reusing `score_fields`.
+
+Those two counts, and the 110 rows of the largest table, are recomputed by
+`docmatch corpus`.
 """
 
 from collections import Counter
