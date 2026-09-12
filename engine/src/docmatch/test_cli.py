@@ -34,15 +34,18 @@ EXPECTED_SHOW_OUTPUT = "\n".join(
         "  date_issue" + " " * 10 + "02/01/26",
         "  amount_total_gross" + " " * 2 + "236.00",
         "",
+        # One column for the whole table, not one per line item: only item 2
+        # carries a unit of measure, and it sets the width for both.
         "LIR line items (2)",
         "  line item 1",
-        "    line_item_quantity" + " " * 6 + "2",
-        "    line_item_description" + " " * 3 + "Blue widget",
-        "    line_item_amount_gross" + " " * 2 + "100.00",
+        "    line_item_quantity" + " " * 10 + "2",
+        "    line_item_description" + " " * 7 + "Blue widget",
+        "    line_item_amount_gross" + " " * 6 + "100.00",
         "  line item 2",
-        "    line_item_quantity" + " " * 6 + "1",
-        "    line_item_description" + " " * 3 + "Red widget",
-        "    line_item_amount_gross" + " " * 2 + "136.00",
+        "    line_item_quantity" + " " * 10 + "1",
+        "    line_item_units_of_measure" + " " * 2 + "EA",
+        "    line_item_description" + " " * 7 + "Red widget",
+        "    line_item_amount_gross" + " " * 6 + "136.00",
         "",
     ]
 )

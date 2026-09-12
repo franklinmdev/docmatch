@@ -28,21 +28,26 @@ def resolve_data_dir(given: Path | None) -> Path:
 def render(document_id: str, annotation: Annotation) -> str:
     """The document's labels as a block a human can read in a terminal."""
     lines = [f"Document {document_id}", "", f"KILE fields ({len(annotation.fields)})"]
-    lines += _aligned(annotation.fields, indent=2)
+    lines += _aligned(annotation.fields, indent=2, width=_width(annotation.fields))
     lines += ["", f"LIR line items ({len(annotation.line_items)})"]
+    table_width = _width(annotation.cells)
     for item in annotation.line_items:
         lines.append(f"  line item {item.line_item_id}")
-        lines += _aligned(item.cells, indent=4)
+        lines += _aligned(item.cells, indent=4, width=table_width)
     return "\n".join([*lines, ""])
 
 
-def _aligned(fields: Sequence[FieldExtraction], indent: int) -> list[str]:
+def _width(fields: Sequence[FieldExtraction]) -> int:
+    """The column the values line up in, wide enough for every fieldtype."""
+    return max((len(field.fieldtype) for field in fields), default=0)
+
+
+def _aligned(fields: Sequence[FieldExtraction], indent: int, width: int) -> list[str]:
     """One `fieldtype text` line per field, values in a single column.
 
     Addresses and descriptions carry line breaks; those continue in the value
     column rather than resetting to the left margin.
     """
-    width = max((len(field.fieldtype) for field in fields), default=0)
     value_column = " " * (indent + width + 2)
     lines = []
     for field in fields:

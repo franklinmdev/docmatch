@@ -71,6 +71,18 @@
     },
     {
       "bbox": [
+        0.17,
+        0.55,
+        0.19,
+        0.58
+      ],
+      "fieldtype": "line_item_units_of_measure",
+      "line_item_id": 2,
+      "page": 0,
+      "text": "EA"
+    },
+    {
+      "bbox": [
         0.2,
         0.55,
         0.55,
