@@ -101,3 +101,32 @@ def test_a_word_names_a_month_only_when_it_starts_exactly_one(
 ) -> None:
     """`JU` could be June or July, and `MAYBE` is not May."""
     assert normalize("date_issue", text) == expected
+
+
+@pytest.mark.parametrize(
+    ("fieldtype", "left", "right"),
+    [
+        ("line_item_amount_gross", "US$ 2,460.00", "2460"),
+        ("line_item_quantity", "2.00", "2"),
+        ("line_item_position", "01.", "1"),
+        ("line_item_date", "SEP18/26", "2026-09-18"),
+        ("line_item_currency", "US$", "usd"),
+    ],
+)
+def test_a_line_item_cell_takes_the_same_rule_as_a_header_field(
+    fieldtype: str, left: str, right: str
+) -> None:
+    assert agree(fieldtype, left, right)
+
+
+@pytest.mark.parametrize(
+    ("fieldtype", "text"),
+    [
+        ("line_item_code", "0080"),
+        ("line_item_order_id", "0080"),
+        ("line_item_hts_number", "8471.30.0100"),
+    ],
+)
+def test_an_identifier_keeps_its_zeros_and_dots(fieldtype: str, text: str) -> None:
+    """The number rule could read these; reading them would lose the identifier."""
+    assert normalize(fieldtype, text) == text
