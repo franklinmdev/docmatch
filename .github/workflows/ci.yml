@@ -10,7 +10,7 @@ concurrency:
 
 jobs:
   checks:
-    name: lint and test
+    name: lint, typecheck and test
     runs-on: ubuntu-latest
     # Every push, plus pull requests from forks. Pull requests from a branch of
     # this repository are already covered by the push event.
@@ -33,6 +33,9 @@ jobs:
 
       - name: Lint
         run: uv run ruff check
+
+      - name: Typecheck
+        run: uv run mypy
 
       - name: Test
         run: uv run pytest

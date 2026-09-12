@@ -2,7 +2,7 @@
 
 import pytest
 
-from docmatch.docile.annotation import Annotation, FieldExtraction
+from docmatch.docile.annotation import Annotation, DocumentMetadata, FieldExtraction
 from docmatch.metrics.fields import Prediction, labeled_fields, score_fields
 
 
@@ -109,7 +109,7 @@ def test_labeled_fields_groups_an_annotation_by_fieldtype() -> None:
             ),
         ],
         cells=[],
-        metadata={"page_count": 2},
+        metadata=DocumentMetadata(page_count=2),
     )
 
     assert labeled_fields(annotation) == {

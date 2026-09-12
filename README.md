@@ -174,6 +174,7 @@ From a clean checkout, with [uv](https://docs.astral.sh/uv/) installed:
 ```bash
 uv sync            # create the virtualenv, install the engine and its dev tools
 uv run ruff check  # lint
+uv run mypy        # typecheck, strict, with the pydantic plugin
 uv run pytest      # tests; these need no dataset and are what CI runs
 ```
 
@@ -256,7 +257,7 @@ A phase is done when its number is in this README with the commit that produced 
 
 ```text
 docmatch/
-  pyproject.toml       uv workspace root: dev tooling, lint and test configuration
+  pyproject.toml       uv workspace root: dev tooling, lint, typecheck, test config
   uv.lock              pinned for every machine and for CI
   engine/              the Python engine, a uv workspace member
     pyproject.toml     the docmatch package and its `docmatch` command
@@ -264,7 +265,7 @@ docmatch/
   apps/review/         Next.js review inbox, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
   docs/                decision records
-  .github/workflows/   CI: ruff and pytest on every push
+  .github/workflows/   CI: ruff, mypy and pytest on every push
 ```
 
 Tests live next to the code they test, so `src/docmatch/docile/dataset.py` is
