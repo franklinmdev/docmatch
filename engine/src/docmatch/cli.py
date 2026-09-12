@@ -11,6 +11,9 @@ drawn from, which is how a reader checks that the pinned list is still the one
 the seed draws. `docmatch eval --predictions <file>` scores a whole run over
 that subset, which is the command every number in the README comes from.
 
+`docmatch corpus` recomputes the counts the rules in `metrics` are justified
+by, which is how a reader checks the numbers the docstrings there assert.
+
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
 """
@@ -22,8 +25,9 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from docmatch.docile.annotation import Annotation, FieldExtraction
-from docmatch.docile.dataset import DocileDataset, DocileError
-from docmatch.evals import manifest
+from docmatch.docile.dataset import DatasetNotFoundError, DocileDataset, DocileError
+from docmatch.evals import corpus, manifest
+from docmatch.evals.corpus import Census, Coverage, RuleCoverage, Survey
 from docmatch.evals.manifest import Manifest, ManifestError
 from docmatch.evals.run import (
     FieldTypeTotals,
@@ -238,6 +242,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=manifest.MANIFEST,
         help=f"the subset to score over (default: {manifest.MANIFEST.name})",
     )
+    counts = subcommands.add_parser(
+        "corpus",
+        parents=[dataset],
+        help="recompute the counts the rules in metrics are justified by",
+    )
+    counts.add_argument(
+        "--split",
+        default=corpus.SPLIT,
+        help=f"the split to count over (default: {corpus.SPLIT})",
+    )
     subset = subcommands.add_parser(
         "subset",
         parents=[dataset],
@@ -299,6 +313,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
     dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
     if arguments.command == "subset":
         return _subset(arguments, dataset)
+    if arguments.command == "corpus":
+        return _corpus(arguments, dataset)
     if arguments.command == "eval":
         run = score_subset(
             dataset,
@@ -346,6 +362,137 @@ def _subset(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str,
         render_subset(arguments.manifest, pinned, note),
         0 if note[1] == "yes" else 1,
     )
+
+
+def _corpus(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
+    """Recompute the counts, or say that there is nothing here to count.
+
+    A dataset that was never downloaded is the one error this command does not
+    report as one. DocILE is not committed and CI never has it, so a survey of
+    it is skipped rather than failed, the way a test is skipped when what it
+    needs is absent.
+    """
+    try:
+        document_ids = dataset.document_ids(arguments.split)
+    except DatasetNotFoundError:
+        return f"Corpus\n  skipped, no dataset at {dataset.root}\n", 0
+    return (
+        render_corpus(
+            dataset.root,
+            corpus.survey(
+                (dataset.annotation(document_id) for document_id in document_ids),
+                arguments.split,
+            ),
+        ),
+        0,
+    )
+
+
+def render_corpus(root: Path, surveyed: Survey) -> str:
+    """Every count the survey took, under the module whose docstring asserts it.
+
+    Grouped that way so the report and the docstrings can be read side by side,
+    which is the whole point of taking the counts again.
+    """
+    corpse = surveyed.corpus
+    dates, repeats = surveyed.dates, surveyed.repeats
+    lines = [
+        f"Corpus  {root}, {surveyed.split}",
+        *_counted(
+            ("documents", corpse.documents),
+            ("KILE labels", corpse.fields),
+            ("LIR cells", corpse.cells),
+            ("line items", corpse.rows),
+            ("documents with no table", corpse.without_a_table),
+            ("largest table", corpse.largest_table),
+        ),
+        "",
+        "Rules read, of the header labels",
+        *_coverage(surveyed.header_rules),
+        "",
+        "Rules read, of the line-item cells",
+        *_coverage(surveyed.cell_rules),
+        "",
+        f"Fieldtypes ({len(surveyed.coverage)})",
+        *_fieldtypes(surveyed.coverage),
+        "",
+        "metrics/normalization.py",
+        *_counted(
+            ("numeric dates proving month first", dates.month_first),
+            ("numeric dates proving day first", dates.day_first),
+            ("dates the month rule's strictness turns on", dates.three_letter_months),
+        ),
+        *_census("numbers written with a lone dot and three digits", surveyed.lone_dot),
+        "",
+        "metrics/fields.py",
+        *_counted(
+            ("header fieldtypes labeled more than once", repeats.fieldtypes),
+            ("  of those, one value written twice", repeats.one_value),
+            ("labels repeating a line inside one box", repeats.within_a_label),
+        ),
+        "",
+        "metrics/line_items.py",
+        *_counted(
+            ("rows repeating a fieldtype", repeats.rows),
+            ("  of those, still after normalizing", repeats.rows_after_normalization),
+        ),
+    ]
+    return "\n".join([*lines, ""])
+
+
+def _counted(*rows: tuple[str, int]) -> list[str]:
+    """Labeled counts, the labels in one column and the numbers in another."""
+    width = _width(label for label, _ in rows)
+    figures = max((len(str(count)) for _, count in rows), default=0)
+    return [
+        f"  {label.ljust(width)}  {str(count).rjust(figures)}" for label, count in rows
+    ]
+
+
+def _census(title: str, counted: Census) -> list[str]:
+    """How a shape is spread over the fieldtypes carrying it, and how many in all.
+
+    The total is what the rule it justifies was weighed against; the fieldtypes
+    are what says which way the weighing went, because what a value means is
+    what its fieldtype says it means.
+    """
+    total = sum(count for _, count in counted)
+    return [
+        f"  {title} ({total})",
+        *(f"  {line}" for line in _counted(*counted)),
+    ]
+
+
+def _coverage(rules: Sequence[RuleCoverage]) -> list[str]:
+    """What share of everything a rule is given it reads, and of how many."""
+    width = _width(each.rule for each in rules)
+    read = max((len(str(each.read)) for each in rules), default=0)
+    return [
+        f"  {each.rule.ljust(width)}  {each.share:6.1%}  "
+        f"{str(each.read).rjust(read)} of {each.labels}"
+        for each in rules
+    ]
+
+
+def _fieldtypes(coverage: Sequence[Coverage]) -> list[str]:
+    """Every fieldtype, its rule, how many labels it has, and how many are read.
+
+    A text fieldtype has no share to report, because the text rule reads
+    everything; what is worth reporting there is how much of it the number rule
+    would read, which is why three of them are text at all.
+    """
+    width = _width(each.fieldtype for each in coverage)
+    rules = _width(each.rule for each in coverage)
+    labels = max((len(str(each.labels)) for each in coverage), default=0)
+    lines = []
+    for each in coverage:
+        read = " " * 6 if each.rule == "text" else f"{each.share:6.1%}"
+        note = f"  {each.number_share:6.1%} as a number" if each.rule == "text" else ""
+        lines.append(
+            f"  {each.fieldtype.ljust(width)}  {each.rule.ljust(rules)}  "
+            f"{str(each.labels).rjust(labels)}  {read}{note}".rstrip()
+        )
+    return lines
 
 
 def render_eval(path: Path, run: SubsetScore) -> str:

@@ -236,6 +236,92 @@ def test_score_reports_a_prediction_file_that_is_not_there(
     assert str(absent) in capsys.readouterr().err
 
 
+def corpus_report(data_dir: Path) -> str:
+    """The whole report for the two synthetic documents, as the terminal prints it."""
+    return "\n".join(
+        [
+            f"Corpus  {data_dir}, val",
+            "  documents                2",
+            "  KILE labels              8",
+            "  LIR cells                7",
+            "  line items               2",
+            "  documents with no table  1",
+            "  largest table            2",
+            "",
+            "Rules read, of the header labels",
+            "  date    100.0%  1 of 1",
+            "  number  100.0%  2 of 2",
+            "  text    100.0%  5 of 5",
+            "",
+            "Rules read, of the line-item cells",
+            "  number  100.0%  4 of 4",
+            "  text    100.0%  3 of 3",
+            "",
+            "Fieldtypes (9)",
+            "  amount_total_gross          number  2  100.0%",
+            "  date_issue                  date    1  100.0%",
+            # The number rule reads `SYN-0001` as -1, which is the whole reason
+            # an identifier is text.
+            "  document_id                 text    2          100.0% as a number",
+            "  line_item_amount_gross      number  2  100.0%",
+            "  line_item_description       text    2            0.0% as a number",
+            "  line_item_quantity          number  2  100.0%",
+            "  line_item_units_of_measure  text    1            0.0% as a number",
+            "  vendor_address              text    1            0.0% as a number",
+            "  vendor_name                 text    2            0.0% as a number",
+            "",
+            "metrics/normalization.py",
+            "  numeric dates proving month first           0",
+            "  numeric dates proving day first             0",
+            "  dates the month rule's strictness turns on  0",
+            "  numbers written with a lone dot and three digits (0)",
+            "",
+            "metrics/fields.py",
+            "  header fieldtypes labeled more than once  0",
+            "    of those, one value written twice       0",
+            "  labels repeating a line inside one box    0",
+            "",
+            "metrics/line_items.py",
+            "  rows repeating a fieldtype           0",
+            "    of those, still after normalizing  0",
+            "",
+        ]
+    )
+
+
+def test_corpus_counts_the_dataset_under_the_module_that_asserts_each_count(
+    data_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = main(["corpus", "--data-dir", str(data_dir), "--split", "val"])
+
+    assert capsys.readouterr().out == corpus_report(data_dir)
+    assert exit_code == 0
+
+
+def test_corpus_is_skipped_rather_than_failed_without_a_dataset(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """CI has no dataset, and a survey it cannot take is not a broken engine."""
+    absent = tmp_path / "absent"
+
+    exit_code = main(["corpus", "--data-dir", str(absent)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0, "a missing dataset must not fail the command"
+    assert captured.out == f"Corpus\n  skipped, no dataset at {absent}\n"
+    assert captured.err == ""
+
+
+def test_corpus_still_reports_a_dataset_that_lacks_the_split(
+    data_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A downloaded dataset missing `trainval` is wrong, not absent."""
+    exit_code = main(["corpus", "--data-dir", str(data_dir)])
+
+    assert exit_code == 1
+    assert "trainval.json" in capsys.readouterr().err
+
+
 EXPECTED_HEADER_ONLY_SCORE = "\n".join(
     [
         "Document syn0002",
