@@ -139,6 +139,31 @@ def test_a_missing_row_and_an_extra_row_in_one_table() -> None:
     assert (score.precision, score.recall) == (2 / 3, 2 / 3)
 
 
+def test_a_tie_on_agreement_is_broken_towards_the_correct_row() -> None:
+    """Two pairings agree on two cells; only one of them reproduces a row.
+
+    Pairing the lone quantity with the lone quantity is exact and leaves the
+    lone description to agree on its description. Pairing the full row with the
+    lone quantity agrees just as often and reproduces nothing. Which one a
+    solver happens to return must not decide the number.
+    """
+    labeled = [
+        row(line_item_quantity="2"),
+        row(line_item_quantity="2", line_item_description="Widget"),
+        row(line_item_description="Widget"),
+    ]
+    predicted = [
+        row(line_item_quantity="1", line_item_description="Widget"),
+        row(line_item_quantity="2"),
+    ]
+
+    score = score_line_items(labeled, predicted)
+
+    assert sum(each.cells.true_positives for each in score.rows) == 2
+    assert score.true_positives == 1, "the tie is broken towards the exact row"
+    assert score.rows[0].predicted == 1
+
+
 def test_a_row_paired_but_wrong_is_both_a_miss_and_a_false_positive() -> None:
     """A substitution: the label went unpredicted and the output carries a row
     the label does not have, so it is counted on both sides."""

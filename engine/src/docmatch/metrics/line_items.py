@@ -34,6 +34,29 @@ same one. What differs is the test for two cells being equal: DocILE overlaps
 their boxes where this module compares their normalized text, for the reason
 `normalization` gives.
 
+When several pairings are optimal
+---------------------------------
+
+Maximizing agreeing cells does not always pick one pairing, and the tied
+pairings need not agree on how many rows come out exactly right. Over 4,000
+random small tables, 118 had an optimum reachable two ways, one crediting a
+correct row and the other not. Leaving the choice to the solver would make the
+number depend on the solver, which is the one thing a benchmark meant to stay
+comparable across commits cannot afford.
+
+So a pair is worth its agreeing cells times a scale larger than the number of
+pairs, plus one more for being exact. No amount of exactness can buy a single
+agreeing cell, so agreement is still maximized first; among the pairings that
+maximize it, the solver takes one crediting the most correct rows. That is the
+generous reading, and the right one here: the pairing is an artifact of scoring
+rather than something a backend chose, so a backend should not lose a row to
+it. Precision, recall and F1 are then fully determined.
+
+Per-cell accuracy is not, quite. Two pairings equal on both counts can still
+spread their agreeing cells over different fieldtypes. It is a diagnostic for
+reading which column a backend is losing rather than the number the benchmark
+reports, so that is where the matter is left.
+
 When a row is correct
 ---------------------
 
@@ -83,6 +106,11 @@ def labeled_line_items(annotation: Annotation) -> tuple[FieldValues, ...]:
     return tuple(by_fieldtype(item.cells) for item in annotation.line_items)
 
 
+def _is_exact(cells: FieldScore) -> bool:
+    """Every labeled cell predicted and nothing else: one row reproduced."""
+    return cells.false_negatives == 0 and cells.false_positives == 0
+
+
 @dataclass(frozen=True)
 class RowScore:
     """One labeled row beside the predicted row it was paired with, or neither.
@@ -101,8 +129,7 @@ class RowScore:
         return (
             self.labeled is not None
             and self.predicted is not None
-            and self.cells.false_negatives == 0
-            and self.cells.false_positives == 0
+            and _is_exact(self.cells)
         )
 
 
@@ -194,11 +221,25 @@ def score_line_items(
 
 
 def _pair(agreement: Sequence[Sequence[FieldScore]]) -> dict[int, int]:
-    """The predicted row each labeled row is paired with, agreeing rows only."""
+    """The predicted row each labeled row is paired with, agreeing rows only.
+
+    Both objectives go into one matrix rather than one solve each: a pair is
+    worth its agreeing cells times `scale`, plus one more for being exact.
+    `scale` is larger than the number of pairs, so no amount of exactness can
+    buy a single agreeing cell and the solver maximizes agreement first.
+    """
     if not agreement or not agreement[0]:
         return {}
     cells = [[each.true_positives for each in row] for row in agreement]
-    labeled, predicted = linear_sum_assignment(cells, maximize=True)
+    scale = min(len(cells), len(cells[0])) + 1
+    worth = [
+        [
+            count * scale + (1 if count > 0 and _is_exact(each) else 0)
+            for count, each in zip(counts, row, strict=True)
+        ]
+        for counts, row in zip(cells, agreement, strict=True)
+    ]
+    labeled, predicted = linear_sum_assignment(worth, maximize=True)
     return {
         int(gold): int(guess)
         for gold, guess in zip(labeled, predicted, strict=True)
