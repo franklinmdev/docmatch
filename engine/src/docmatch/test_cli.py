@@ -683,3 +683,14 @@ def test_eval_reports_a_pinned_document_the_dataset_does_not_hold(
 
     assert exit_code == 1
     assert "eval9999" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag", ["--seed", "--size"])
+def test_subset_refuses_to_draw_without_writing(
+    flag: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Checking the pinned seed while asked about another one is a wrong answer."""
+    with pytest.raises(SystemExit):
+        main(["subset", flag, "5"])
+
+    assert "--write" in capsys.readouterr().err

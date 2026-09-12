@@ -23,7 +23,7 @@ from pathlib import Path
 
 from docmatch.docile.annotation import Annotation, FieldExtraction
 from docmatch.docile.dataset import DocileDataset, DocileError
-from docmatch.evals import manifest as manifests
+from docmatch.evals import manifest
 from docmatch.evals.manifest import Manifest, ManifestError
 from docmatch.evals.run import (
     FieldTypeTotals,
@@ -165,16 +165,16 @@ def _accuracies(accuracies: Sequence[CellAccuracy]) -> list[str]:
     return lines
 
 
-def render_subset(path: Path, manifest: Manifest, note: tuple[str, str]) -> str:
+def render_subset(path: Path, pinned: Manifest, note: tuple[str, str]) -> str:
     """The pinned subset, and what just happened to it."""
     return "\n".join(
         [
             "Fixed subset",
             *_rows(
                 ("manifest", str(path)),
-                ("split", manifest.split),
-                ("seed", str(manifest.seed)),
-                ("size", str(manifest.size)),
+                ("split", pinned.split),
+                ("seed", str(pinned.seed)),
+                ("size", str(pinned.size)),
                 note,
             ),
             "",
@@ -235,8 +235,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     evaluate.add_argument(
         "--manifest",
         type=Path,
-        default=manifests.MANIFEST,
-        help=f"the subset to score over (default: {manifests.MANIFEST.name})",
+        default=manifest.MANIFEST,
+        help=f"the subset to score over (default: {manifest.MANIFEST.name})",
     )
     subset = subcommands.add_parser(
         "subset",
@@ -246,26 +246,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     subset.add_argument(
         "--manifest",
         type=Path,
-        default=manifests.MANIFEST,
-        help=f"the pinned subset (default: {manifests.MANIFEST.name} beside the code)",
+        default=manifest.MANIFEST,
+        help=f"the pinned subset (default: {manifest.MANIFEST.name} beside the code)",
     )
     subset.add_argument(
         "--seed",
         type=int,
         default=None,
-        help=(
-            "draw with this seed instead of the manifest's, which only means "
-            f"anything with --write (default for a new manifest: {manifests.SEED})"
-        ),
+        help=f"draw with this seed, only with --write (default: {manifest.SEED})",
     )
     subset.add_argument(
         "--size",
         type=int,
         default=None,
         help=(
-            "draw this many documents instead of the manifest's, which only "
-            "means anything with --write and is for a fixture: the benchmark "
-            f"subset is {manifests.SIZE} documents (default: {manifests.SIZE})"
+            "draw this many documents, only with --write, and only for a "
+            f"fixture: the benchmark subset is {manifest.SIZE} documents"
         ),
     )
     subset.add_argument(
@@ -275,6 +271,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     arguments = parser.parse_args(argv)
+    if arguments.command == "subset" and not arguments.write:
+        drawing = [
+            flag
+            for flag, given in (("--seed", arguments.seed), ("--size", arguments.size))
+            if given is not None
+        ]
+        if drawing:
+            # Silently checking the pinned seed while the caller asked about
+            # another one would be a wrong answer, not a missing feature.
+            subset.error(f"{' and '.join(drawing)} draws a subset, so it needs --write")
     try:
         output, exit_code = _run(arguments)
     except (DocileError, PredictionError, ManifestError) as error:
@@ -296,7 +302,7 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
     if arguments.command == "eval":
         run = score_subset(
             dataset,
-            manifests.load(arguments.manifest),
+            manifest.load(arguments.manifest),
             read_predictions(arguments.predictions),
         )
         return render_eval(arguments.manifest, run), 0
@@ -321,23 +327,23 @@ def _subset(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str,
     printed: what the seed draws now is the thing worth looking at.
     """
     if arguments.write:
-        manifest = manifests.selected(
-            dataset.document_ids(manifests.SPLIT),
-            split=manifests.SPLIT,
-            seed=manifests.SEED if arguments.seed is None else arguments.seed,
-            size=manifests.SIZE if arguments.size is None else arguments.size,
+        written = manifest.selected(
+            dataset.document_ids(manifest.SPLIT),
+            split=manifest.SPLIT,
+            seed=manifest.SEED if arguments.seed is None else arguments.seed,
+            size=manifest.SIZE if arguments.size is None else arguments.size,
         )
-        manifests.write(manifest, arguments.manifest)
-        return render_subset(arguments.manifest, manifest, ("written", "yes")), 0
+        manifest.write(written, arguments.manifest)
+        return render_subset(arguments.manifest, written, ("written", "yes")), 0
 
-    manifest = manifests.load(arguments.manifest)
-    drawn = manifest.reproduced_from(dataset.document_ids(manifest.split))
+    pinned = manifest.load(arguments.manifest)
+    drawn = pinned.reproduced_from(dataset.document_ids(pinned.split))
     note = (
         "reproduced",
-        "yes" if drawn == manifest.document_ids else _drift(manifest, drawn),
+        "yes" if drawn == pinned.document_ids else _drift(pinned, drawn),
     )
     return (
-        render_subset(arguments.manifest, manifest, note),
+        render_subset(arguments.manifest, pinned, note),
         0 if note[1] == "yes" else 1,
     )
 
@@ -406,14 +412,14 @@ def _totals(totals: Sequence[FieldTypeTotals]) -> list[str]:
     return lines
 
 
-def _drift(manifest: Manifest, drawn: Sequence[str]) -> str:
+def _drift(pinned: Manifest, drawn: Sequence[str]) -> str:
     """What the seed draws now that the manifest does not pin.
 
     Order counts as drift, not only membership: a prefix of the subset is
     itself a sample, so the order the seed draws in is part of what is pinned.
     """
-    pinned = set(manifest.document_ids)
-    unpinned = [document_id for document_id in drawn if document_id not in pinned]
+    documents = set(pinned.document_ids)
+    unpinned = [document_id for document_id in drawn if document_id not in documents]
     if not unpinned:
         return "no, the same documents in a different order"
-    return f"no, {len(unpinned)} of the {manifest.size} documents are not pinned"
+    return f"no, {len(unpinned)} of the {pinned.size} documents are not pinned"
