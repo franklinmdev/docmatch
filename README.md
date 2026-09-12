@@ -188,17 +188,32 @@ uv run docmatch show <document-id>
 Document ids are the entries of `data/docile/trainval.json`. Pass `--data-dir`,
 or set `DOCMATCH_DATA_DIR`, to read a dataset kept outside the repository.
 
-Score a predicted set of KILE header fields against those labels. A prediction
-is a JSON object of fieldtype to one value, a list of values, or `null` for a
-field the document does not carry:
+Score a predicted document against those labels. A prediction carries the KILE
+header fields under `fields` and the LIR line items under `line_items`, one
+object per row. In either, a fieldtype carries one value, a list of values, or
+`null` for a field the document does not have:
 
 ```json
 {
-  "vendor_name": "Synthetic Supplies Ltd",
-  "date_issue": "March 4, 2026",
-  "amount_due": "US$ 503,70",
-  "tax_detail_rate": ["8.25%", "5%"],
-  "date_due": null
+  "fields": {
+    "vendor_name": "Synthetic Supplies Ltd",
+    "date_issue": "March 4, 2026",
+    "amount_due": "US$ 503,70",
+    "tax_detail_rate": ["8.25%", "5%"],
+    "date_due": null
+  },
+  "line_items": [
+    {
+      "line_item_description": "Blue widget",
+      "line_item_quantity": "2",
+      "line_item_amount_gross": "100.00"
+    },
+    {
+      "line_item_description": "Red widget",
+      "line_item_quantity": "1",
+      "line_item_amount_gross": "403.70"
+    }
+  ]
 }
 ```
 
@@ -206,19 +221,31 @@ field the document does not carry:
 uv run docmatch score <document-id> --prediction prediction.json
 ```
 
-The command reports precision, recall, and F1 for the document, then every
-fieldtype and whether each of its values matched, was missed, or was spurious.
-Both sides are normalized first, so `US$ 503,70`, `$503.70`, and `503.7` are
-one amount and `March 4, 2026` and `3/4/2026` are one day. The rules, and the
-measurements behind them, are documented in
+The command reports two numbers. The field score is precision, recall, and F1
+over header values, then every fieldtype and whether each of its values
+matched, was missed, or was spurious. The line-item score is precision,
+recall, and F1 over whole rows, then per-cell accuracy for every LIR
+fieldtype.
+
+Rows are paired by the assignment that agrees on the most cells, never by
+position, so predicting the table in a different order costs nothing. A row
+counts as correct only when every one of its cells matches and it carries no
+cell the label does not; partial credit lives in the per-cell accuracy, where
+it can be read as what it is. Both decisions, and the numbers behind them, are
+documented in `engine/src/docmatch/metrics/line_items.py`.
+
+Both sides are normalized before anything is compared, so `US$ 503,70`,
+`$503.70`, and `503.7` are one amount and `March 4, 2026` and `3/4/2026` are
+one day. A line item's cells take the same rules as a header field. The rules,
+and the measurements behind them, are documented in
 `engine/src/docmatch/metrics/normalization.py`. The values above are made up:
 DocILE may not be redistributed, so no label text is committed anywhere in this
 repository.
 
-This score is not comparable with the DocILE leaderboard, which matches a
+Neither score is comparable with the DocILE leaderboard, which matches a
 prediction to a label by the overlap of their bounding boxes. The backends this
-engine benchmarks return text and no boxes, so the score here is over
-normalized text; what has to stay comparable is this repository's own number
+engine benchmarks return text and no boxes, so the scores here are over
+normalized text; what has to stay comparable is this repository's own numbers
 across commits.
 
 ## Extraction backends
@@ -244,7 +271,7 @@ The `Extractor` interface is the seam. Backends are compared, not chosen up fron
 | Queue | Postgres-backed worker | No second datastore for a single-node system. |
 | API | FastAPI | Thin, typed, boring. |
 | Tracing | Langfuse | Open source, self-hostable, per-stage cost and latency. |
-| Evals | pytest plus a metrics module | Ground-truth extraction needs field-level and assignment metrics, not judge models. |
+| Evals | pytest plus a metrics module, `scipy` for the row assignment | Ground-truth extraction needs field-level and assignment metrics, not judge models. Pairing predicted line items to labeled ones is the rectangular assignment problem, which is a solved one. |
 | Review UI | Next.js, TypeScript | One page, timeboxed. |
 
 Deliberately cut: schema DSLs, document-parsing SaaS as a foundation, Celery and Redis, judge-model eval frameworks, graph orchestration until phase 4 proves the need.
