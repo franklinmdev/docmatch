@@ -12,6 +12,7 @@ from docmatch.docile.dataset import (
     DatasetNotFoundError,
     DocileDataset,
     DocumentNotFoundError,
+    SplitNotFoundError,
 )
 
 
@@ -55,3 +56,32 @@ def test_refuses_a_document_id_that_is_not_a_plain_id(
     """Document ids come from the command line, so they never build a path."""
     with pytest.raises(ValueError):
         dataset.annotation(document_id)
+
+
+def test_reads_the_document_ids_of_a_split(dataset: DocileDataset) -> None:
+    assert dataset.document_ids("val") == ("syn0002", "syn0001")
+
+
+def test_names_the_split_file_it_could_not_find(dataset: DocileDataset) -> None:
+    with pytest.raises(SplitNotFoundError) as raised:
+        dataset.document_ids("test")
+
+    assert "test.json" in str(raised.value)
+
+
+def test_tells_a_missing_dataset_apart_from_a_missing_split(tmp_path: Path) -> None:
+    absent = tmp_path / "never-downloaded"
+
+    with pytest.raises(DatasetNotFoundError) as raised:
+        DocileDataset(absent).document_ids("val")
+
+    assert str(absent) in str(raised.value)
+
+
+@pytest.mark.parametrize("split", ["", "../val", "val/all", "."])
+def test_refuses_a_split_name_that_is_not_a_plain_name(
+    dataset: DocileDataset, split: str
+) -> None:
+    """Split names come from the command line, so they never build a path."""
+    with pytest.raises(ValueError):
+        dataset.document_ids(split)
