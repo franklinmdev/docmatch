@@ -50,29 +50,40 @@ point is decided from the digits, not from a locale:
   thousands (`$2,500`), and everything else is a decimal point.
 
 A lone `.` is therefore always a decimal point. That is measured, not assumed:
-across the 5,680 annotated documents, 23 amount values are European thousands
-written with a lone dot, the way `123.456` means 123456, against 74 tax rates
-of the shape `7.250%`, which a thousands reading would inflate by a thousand.
-Reading the rate right is worth the 23.
+273 number labels in the annotated set are written with a lone dot and exactly
+three digits after it, which is the one shape the two readings disagree about.
+250 of them are line-item cells, quantities and unit prices and line amounts
+where three decimals are ordinary, and 9 are tax rates of the shape `7.250%`;
+a thousands reading would inflate every one of those by a thousand. The 14
+header amounts left over, the ones written `123.456` for 123456, are what the
+rule costs.
 
 **Date**, for `date_issue` and `date_due`, canonicalized to `YYYY-MM-DD`.
 Ordinal suffixes are dropped and a two-digit year pivots at 69, so `99` is 1999
 and `20` is 2020. An all-numeric date that does not start with a four-digit
-year is read month first: in this corpus 3,338 numeric dates prove month-first
-ordering against 15 that prove day-first, so day-first is the rarer mislabel
+year is read month first: in this corpus 18,151 numeric dates prove month-first
+ordering against 17 that prove day-first, so day-first is the rarer mislabel
 and not a locale worth detecting. A date the rule cannot read falls back to
 text rather than becoming the wrong day, which is what happens to a day-first
 date whose day is past the twelfth.
 
 A word names a month when it is at least three letters and starts exactly one
 English month name, so `SEP`, `SEPT` and `MARCH` are months while `MAYBE` and
-the ambiguous `JU` are not. That costs one label in the annotated set, a German
-`JUNI`, and is worth it: matching on the first three letters alone would read
-any word beginning `MAY` or `DEC` as a month.
+the ambiguous `JU` are not. Four labels in the annotated set turn on that
+strictness, one of them a German `JUNI` the rule therefore does not read, and
+it is worth them: matching on the first three letters alone would read any word
+beginning `MAY` or `DEC` as a month.
 
 **Currency**, for `currency_code_amount_due` and `line_item_currency`,
 canonicalized to its ISO 4217 code. `$` is read as USD, which is true of this
 corpus and would not be true of one carrying Canadian or Australian documents.
+
+Of the header labels, the rules read 98.5% of the dates, 99.8% of the amounts
+and 98.4% of the currencies. The rest is OCR damage and values that are not of
+their kind, and every one of those falls back to text.
+
+Every count and every percentage in this docstring is recomputed by `docmatch
+corpus`, which is what keeps a rule change from leaving one of them behind.
 
 Line-item fieldtypes
 --------------------
@@ -103,8 +114,10 @@ the annotated set:
 
 import re
 import unicodedata
+from collections.abc import Callable
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from typing import Literal
 
 DATE_FIELDTYPES = frozenset({"date_issue", "date_due", "line_item_date"})
 NUMBER_FIELDTYPES = frozenset(
@@ -133,16 +146,43 @@ NUMBER_FIELDTYPES = frozenset(
 )
 CURRENCY_FIELDTYPES = frozenset({"currency_code_amount_due", "line_item_currency"})
 
+Rule = Literal["number", "date", "currency", "text"]
+"""The four rules, named. A fieldtype picks one and every value takes it.
+
+Spelled as a type rather than as four strings so that a rule named wrong
+anywhere, in a dispatch table or in a caller counting one of them, is an error
+rather than a branch that never runs.
+"""
+
+
+def rule(fieldtype: str) -> Rule:
+    """The name of the rule a fieldtype's values go through.
+
+    One place decides this, so that normalizing a value and asking whether the
+    rule reads it can never disagree about which rule that is.
+    """
+    if fieldtype in NUMBER_FIELDTYPES:
+        return "number"
+    if fieldtype in DATE_FIELDTYPES:
+        return "date"
+    if fieldtype in CURRENCY_FIELDTYPES:
+        return "currency"
+    return "text"
+
 
 def normalize(fieldtype: str, text: str) -> str:
     """The comparable form of one field value, by the rule its fieldtype picks."""
-    if fieldtype in NUMBER_FIELDTYPES:
-        return normalize_number(text)
-    if fieldtype in DATE_FIELDTYPES:
-        return normalize_date(text)
-    if fieldtype in CURRENCY_FIELDTYPES:
-        return normalize_currency(text)
-    return normalize_text(text)
+    return _NORMALIZERS[rule(fieldtype)](text)
+
+
+def reads(fieldtype: str, text: str) -> bool:
+    """Whether that rule reads the value, or hands it to the text rule instead.
+
+    This is what the coverage percentages above are the share of, and
+    `docmatch corpus` is what counts them.
+    """
+    reader = _READERS.get(rule(fieldtype))
+    return True if reader is None else reader(text)
 
 
 def normalize_text(text: str) -> str:
@@ -162,15 +202,38 @@ _NUMBER = re.compile(
 
 def normalize_number(text: str) -> str:
     """An amount or rate as a plain decimal string, or the text rule if unreadable."""
-    match = _NUMBER.match("".join(unicodedata.normalize("NFKC", text).split()))
+    value = _read_number(text)
+    return f"{value.normalize():f}" if value is not None else normalize_text(text)
+
+
+def reads_number(text: str) -> bool:
+    """Whether the number rule reads this value, whichever fieldtype carries it.
+
+    Asked of a fieldtype the rule is not wired to, it says what reading that
+    fieldtype as a number would cost: the identifiers below are text because
+    the answer is high, not because it is low.
+    """
+    return _read_number(text) is not None
+
+
+def prepared_number(text: str) -> str:
+    """A value in the form the number rule reads: composed, and no whitespace.
+
+    Public for the same reason `prepared_date` is: a survey of how the corpus
+    writes its numbers looks at the text the rule looks at.
+    """
+    return "".join(unicodedata.normalize("NFKC", text).split())
+
+
+def _read_number(text: str) -> Decimal | None:
+    """The amount or rate a value spells, or nothing if it does not spell one."""
+    match = _NUMBER.match(prepared_number(text))
     if match is None:
-        return normalize_text(text)
+        return None
     value = _read_separators(match["body"].rstrip(".,"))
     if value is None:
-        return normalize_text(text)
-    if "-" in match["lead"] + match["trail"]:
-        value = -value
-    return f"{value.normalize():f}"
+        return None
+    return -value if "-" in match["lead"] + match["trail"] else value
 
 
 def _read_separators(body: str) -> Decimal | None:
@@ -198,7 +261,7 @@ def _split_at(body: str, decimal_point: str) -> Decimal:
     return Decimal(f"{digits or '0'}.{fraction or '0'}")
 
 
-_MONTHS = {
+MONTHS = {
     name: number
     for number, name in enumerate(
         (
@@ -226,14 +289,28 @@ _YEAR_PIVOT = 69
 
 def normalize_date(text: str) -> str:
     """A date as `YYYY-MM-DD`, or the text rule if it is not one calendar day."""
-    day = _read_date(_ORDINAL.sub("", unicodedata.normalize("NFKC", text).upper()))
+    day = _read_date(prepared_date(text))
     return day.isoformat() if day is not None else normalize_text(text)
+
+
+def reads_date(text: str) -> bool:
+    """Whether the date rule reads this value as one calendar day."""
+    return _read_date(prepared_date(text)) is not None
+
+
+def prepared_date(text: str) -> str:
+    """A value in the form the date rule reads: upper case, no ordinal suffixes.
+
+    Public because a survey of how the corpus writes its dates asks the same
+    question of the same text the rule sees, rather than of its own copy.
+    """
+    return _ORDINAL.sub("", unicodedata.normalize("NFKC", text).upper())
 
 
 def _read_date(text: str) -> date | None:
     month: int | None = None
     for word in re.findall(r"[A-Z]+", text):
-        named = _month(word)
+        named = names_a_month(word)
         if named is None or month is not None:
             return None  # a word that is not a month, or a second month name
         month = named
@@ -255,11 +332,15 @@ def _read_date(text: str) -> date | None:
         return None
 
 
-def _month(word: str) -> int | None:
-    """The month a word names, by the abbreviation it spells: `SEP`, `SEPT`, `MARCH`."""
+def names_a_month(word: str) -> int | None:
+    """The month a word names, by the abbreviation it spells: `SEP`, `SEPT`, `MARCH`.
+
+    Public so that a survey of what this strictness costs can ask the rule
+    itself rather than a second copy of it.
+    """
     if len(word) < 3:
         return None
-    named = [number for name, number in _MONTHS.items() if name.startswith(word)]
+    named = [number for name, number in MONTHS.items() if name.startswith(word)]
     return named[0] if len(named) == 1 else None
 
 
@@ -297,3 +378,22 @@ def normalize_currency(text: str) -> str:
     """A currency as its ISO 4217 code, or the text rule if it is not one we know."""
     code = _CURRENCIES.get(normalize_text(text).upper())
     return code.casefold() if code is not None else normalize_text(text)
+
+
+def reads_currency(text: str) -> bool:
+    """Whether the currency rule knows this currency."""
+    return normalize_text(text).upper() in _CURRENCIES
+
+
+_NORMALIZERS: dict[Rule, Callable[[str], str]] = {
+    "number": normalize_number,
+    "date": normalize_date,
+    "currency": normalize_currency,
+    "text": normalize_text,
+}
+_READERS: dict[Rule, Callable[[str], bool]] = {
+    "number": reads_number,
+    "date": reads_date,
+    "currency": reads_currency,
+}
+"""The text rule is absent on purpose: it reads everything it is given."""

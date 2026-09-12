@@ -22,7 +22,7 @@ Multi-valued fieldtypes
 
 DocILE localizes every occurrence of a value on the page, so a document whose
 vendor name is printed in the letterhead and again in the footer carries
-`vendor_name` twice. An extractor reports values, not occurrences, and 6,929 of
+`vendor_name` twice. An extractor reports values, not occurrences, and 7,067 of
 the 9,836 repeated fieldtypes in the annotated set are one value written twice.
 Both sides are therefore reduced to their distinct normalized values before
 they are compared: a value labeled twice has to be predicted once, and a
@@ -36,6 +36,8 @@ both a miss and a false positive. That is 160 of the 71,513 labels, 0.22%, and
 it is left alone on purpose: collapsing repeated lines inside a value would be
 a guess about layout, and the cost falls on every backend equally, so it does
 not move the comparison this benchmark exists to make.
+
+Both counts are recomputed by `docmatch corpus`.
 """
 
 from collections.abc import Iterable, Mapping, Sequence

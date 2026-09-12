@@ -291,6 +291,29 @@ message or an issue. CI runs the same command on a committed synthetic corpus
 in DocILE's shape, `engine/tests/evals/synthetic`, which exercises the whole
 path on every push while the dataset stays on the machine that downloaded it.
 
+### The counts behind the rules
+
+Several rules in `engine/src/docmatch/metrics` were decided by measurement
+rather than by assumption: which way an ambiguous numeric date reads, what a
+lone dot means, whether a fieldtype labeled twice carries one value or two.
+Each of those numbers is written in the docstring beside the rule it justifies,
+and one command recomputes all of them:
+
+```bash
+uv run docmatch corpus
+```
+
+It prints what the annotated set holds, what share of every fieldtype the rules
+can read, and then each count under the module whose docstring asserts it, so
+the report and the docstrings can be read side by side. Counts, shares and
+fieldtype names only, no label text, so the report can be pasted into an issue
+the way the eval report can.
+
+It is a survey and not a second eval: it scores nothing and pins nothing. With
+no dataset on the machine it prints one line and exits zero, because a survey
+that cannot be taken is not a failure of the engine. `--split` counts over one
+split; the default is `trainval`, the whole annotated set.
+
 ### Comparability
 
 Neither score is comparable with the DocILE leaderboard, which matches a
@@ -340,7 +363,7 @@ docmatch/
   engine/              the Python engine, a uv workspace member
     pyproject.toml     the docmatch package and its `docmatch` command
     src/docmatch/      extraction, validation, resolution, matching, metrics
-      evals/           the pinned subset and the run that scores it
+      evals/           the pinned subset, the run that scores it, the corpus survey
     tests/evals/       the synthetic corpus CI runs the eval on
   apps/review/         Next.js review inbox, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
