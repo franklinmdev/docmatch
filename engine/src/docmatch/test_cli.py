@@ -12,8 +12,12 @@ import pytest
 
 from docmatch.cli import main, render_extract
 from docmatch.evals.manifest import Manifest, load, select, write
+from docmatch.evals.run import read_predictions
+from docmatch.extraction import gemini
+from docmatch.extraction.conftest import write_pdf
 from docmatch.extraction.extractor import Usage
 from docmatch.extraction.run import DocumentRun, Run
+from docmatch.extraction.test_run import READING, FakeExtractor
 from docmatch.metrics.fields import Prediction
 
 EXPECTED_SHOW_OUTPUT = "\n".join(
@@ -913,3 +917,173 @@ def test_extract_checks_it_can_write_before_it_spends(
 
     assert exit_code == 1
     assert "cannot write the run to" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("given", ["NaN", "Infinity", "0", "-1"])
+def test_extract_refuses_a_cost_cap_that_is_not_a_positive_amount(
+    given: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`Decimal` takes all four; a NaN cap would raise after the first document."""
+    with pytest.raises(SystemExit):
+        main(["extract", "--out", str(tmp_path), "--cost-cap", given])
+
+    assert "invalid money value" in capsys.readouterr().err
+
+
+def a_pdf_dataset(tmp_path: Path) -> tuple[Path, Path]:
+    """Two blank PDFs in DocILE's layout, and a manifest pinning both."""
+    pdfs = tmp_path / "docile" / "pdfs"
+    pdfs.mkdir(parents=True)
+    write_pdf(pdfs / "syn0001.pdf")
+    write_pdf(pdfs / "syn0002.pdf")
+    pinned = tmp_path / "manifest.json"
+    write(
+        Manifest(split="val", seed=1, size=2, document_ids=("syn0001", "syn0002")),
+        pinned,
+    )
+    return tmp_path / "docile", pinned
+
+
+def test_extract_keeps_the_documents_read_before_it_was_interrupted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A Ctrl-C on document ninety must not lose the eighty-nine paid for.
+
+    What was read is written with a manifest covering exactly those documents,
+    so their score is over what was read and their cost is on record.
+    """
+    data_dir, pinned = a_pdf_dataset(tmp_path)
+    fake = FakeExtractor(answers=[READING, KeyboardInterrupt()])
+    monkeypatch.setattr(gemini, "extractor", lambda model: fake)
+    out = tmp_path / "run"
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(out),
+            "--data-dir",
+            str(data_dir),
+            "--manifest",
+            str(pinned),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "interrupted after 1 of 2 documents" in captured.err
+    assert list(read_predictions(out / "predictions.json")) == ["syn0001"]
+    assert load(out / "manifest.json").document_ids == ("syn0001",)
+    assert json.loads((out / "run.json").read_text())["size"] == 1
+
+
+def test_extract_keeps_the_documents_read_before_an_unexpected_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure nothing below expected still ends loudly, with the run on disk."""
+    data_dir, pinned = a_pdf_dataset(tmp_path)
+    fake = FakeExtractor(answers=[READING, RuntimeError("nothing expected this")])
+    monkeypatch.setattr(gemini, "extractor", lambda model: fake)
+    out = tmp_path / "run"
+
+    with pytest.raises(RuntimeError):
+        main(
+            [
+                "extract",
+                "--out",
+                str(out),
+                "--data-dir",
+                str(data_dir),
+                "--manifest",
+                str(pinned),
+            ]
+        )
+
+    assert list(read_predictions(out / "predictions.json")) == ["syn0001"]
+    assert load(out / "manifest.json").size == 1
+
+
+def test_extract_refuses_an_out_with_a_file_name_taken_by_a_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Found before the first document, not when the write fails after the last."""
+    data_dir, pinned = a_pdf_dataset(tmp_path)
+    fake = FakeExtractor(answers=[READING])
+    monkeypatch.setattr(gemini, "extractor", lambda model: fake)
+    out = tmp_path / "run"
+    (out / "predictions.json").mkdir(parents=True)
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(out),
+            "--data-dir",
+            str(data_dir),
+            "--manifest",
+            str(pinned),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "predictions.json is a directory there" in capsys.readouterr().err
+    assert fake.attempts == []
+
+
+def test_extract_reports_a_missing_dataset_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """One wrong --data-dir is one message, not a hundred documents with no PDF."""
+    _, pinned = a_pdf_dataset(tmp_path)
+    fake = FakeExtractor(answers=[READING])
+    monkeypatch.setattr(gemini, "extractor", lambda model: fake)
+    out = tmp_path / "run"
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(out),
+            "--data-dir",
+            str(tmp_path / "docilee"),
+            "--manifest",
+            str(pinned),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "no DocILE dataset" in captured.err
+    assert fake.attempts == []
+    assert list(out.iterdir()) == []
+
+
+def test_extract_refuses_a_model_with_no_price_before_making_the_run_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "not-a-real-key")
+    out = tmp_path / "run"
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(out),
+            "--data-dir",
+            str(tmp_path),
+            "--model",
+            "gemini-4-flash-lite-imaginary",
+        ]
+    )
+
+    assert exit_code == 1
+    assert "no price is written down" in capsys.readouterr().err
+    assert not out.exists()

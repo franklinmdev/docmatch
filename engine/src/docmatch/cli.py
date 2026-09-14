@@ -75,12 +75,19 @@ def money(given: str) -> Decimal:
 
     `Decimal` raises `InvalidOperation`, an `ArithmeticError`, which argparse
     does not turn into a message, so `--cost-cap 0,05` would end in a traceback
-    rather than in "invalid money value".
+    rather than in "invalid money value". It also accepts `NaN`, `Infinity`
+    and negatives, none of which is a cap: a NaN raises at its first
+    comparison, after the first document has been paid for, an infinity turns
+    the cap off, and a cap of nothing or less refuses every retry, the free
+    ones included.
     """
     try:
-        return Decimal(given)
+        amount = Decimal(given)
     except InvalidOperation:
         raise ValueError(given) from None
+    if not amount.is_finite() or amount <= 0:
+        raise ValueError(given)
+    return amount
 
 
 def positive(given: str) -> int:
@@ -303,7 +310,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--out",
         type=Path,
         required=True,
-        help="a directory to write predictions.json and run.json into",
+        help="a directory to write predictions.json, manifest.json and run.json into",
     )
     extract.add_argument(
         "--model",
@@ -332,7 +339,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--cost-cap",
         type=money,
         default=COST_CAP,
-        help=f"US dollars one document may cost (default: {COST_CAP})",
+        help=(
+            "US dollars one document may have spent before it is given up on "
+            f"(default: {COST_CAP})"
+        ),
     )
     extract.add_argument(
         "--limit",
@@ -458,46 +468,96 @@ def _subset(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str,
 
 
 def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
-    """Read the subset with one backend, write both files, report what it cost.
+    """Read the subset with one backend, write the run, report what it cost.
 
     A run that produced nothing at all exits non-zero. Anything less is
     reported and left to the reader: some documents fail, and the score of the
     ones that did not is still the thing worth looking at.
+
+    Documents are kept as they come. Whatever stops the run before the last
+    one, a Ctrl-C or a failure nothing below expected, the documents already
+    paid for are written with a manifest covering exactly them, so their score
+    is over what was read and their cost is on record. That is what
+    `extract_subset` yields for, and it would be lost if the run were gathered
+    up before the first write.
     """
     pinned = manifest.load(arguments.manifest)
     if arguments.limit is not None:
         pinned = pinned.first(arguments.limit)
-    # Before the first document is paid for, not after the last: an --out that
-    # cannot be written is a mistake worth a hundred documents of API spend.
-    try:
-        arguments.out.mkdir(parents=True, exist_ok=True)
-    except OSError as error:
-        raise ExtractionError(
-            f"cannot write the run to {arguments.out}: {error}"
-        ) from error
+    # The key and the price before the directory, so a run that cannot start
+    # leaves nothing behind; the directory before the first document, because
+    # an --out that cannot be written is worth a hundred documents of spend.
     backend = gemini.extractor(arguments.model)
-    extracted = Run(
-        backend=backend.name,
-        manifest=pinned,
-        long_edge=arguments.long_edge,
-        documents=tuple(
-            extract_subset(
-                backend,
-                dataset,
-                pinned,
-                long_edge=arguments.long_edge,
-                attempts=arguments.attempts,
-                cost_cap=arguments.cost_cap,
-            )
-        ),
-    )
-    write_predictions(extracted, arguments.out / "predictions.json")
-    write_manifest(extracted, arguments.out / "manifest.json")
-    write_record(extracted, arguments.out / "run.json")
+    _prepare(arguments.out)
+
+    def finished(covered: Manifest, documents: Sequence[DocumentRun]) -> Run:
+        return Run(
+            backend=backend.name,
+            manifest=covered,
+            long_edge=arguments.long_edge,
+            documents=tuple(documents),
+        )
+
+    documents: list[DocumentRun] = []
+    try:
+        for document in extract_subset(
+            backend,
+            dataset,
+            pinned,
+            long_edge=arguments.long_edge,
+            attempts=arguments.attempts,
+            cost_cap=arguments.cost_cap,
+        ):
+            documents.append(document)
+    except BaseException as stopped:
+        if documents:
+            _write(finished(pinned.first(len(documents)), documents), arguments.out)
+        if isinstance(stopped, KeyboardInterrupt):
+            kept = f"; what was read is in {arguments.out}" if documents else ""
+            raise ExtractionError(
+                f"interrupted after {len(documents)} of {pinned.size} documents{kept}"
+            ) from None
+        raise
+    extracted = finished(pinned, documents)
+    _write(extracted, arguments.out)
     return (
         render_extract(arguments.out, extracted),
         0 if extracted.predicted else 1,
     )
+
+
+RUN_FILES = ("predictions.json", "manifest.json", "run.json")
+
+
+def _prepare(out: Path) -> None:
+    """Make sure the run can be written, before the first document is paid for.
+
+    The directory is made now, and the three names checked for a directory in
+    the way of one of them: a write that fails after the run has ended costs
+    the whole run, and one that fails on the second file leaves predictions
+    beside no manifest, to be scored against the whole subset.
+    """
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise ExtractionError(f"cannot write the run to {out}: {error}") from error
+    for name in RUN_FILES:
+        if (out / name).is_dir():
+            raise ExtractionError(
+                f"cannot write the run to {out}: {name} is a directory there"
+            )
+    if not os.access(out, os.W_OK):
+        raise ExtractionError(f"cannot write the run to {out}: not writable")
+
+
+def _write(extracted: Run, out: Path) -> None:
+    """The three files of a run, or a message rather than a traceback."""
+    try:
+        write_predictions(extracted, out / RUN_FILES[0])
+        write_manifest(extracted, out / RUN_FILES[1])
+        write_record(extracted, out / RUN_FILES[2])
+    except OSError as error:
+        raise ExtractionError(f"cannot write the run to {out}: {error}") from error
 
 
 def _corpus(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
