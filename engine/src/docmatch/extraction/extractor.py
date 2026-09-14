@@ -34,7 +34,18 @@ MILLION = Decimal(1_000_000)
 
 
 class ExtractionError(Exception):
-    """A backend could not turn these pages into a reading."""
+    """A backend could not turn these pages into a reading.
+
+    `cost` is what the attempt was billed anyway. An answer that came back and
+    could not be used, because it did not fit the schema or the interaction did
+    not complete, was paid for exactly like one that could, and a run that did
+    not add it up would under-report the column the benchmark exists to compare.
+    A call that never reached the model costs nothing and leaves it at zero.
+    """
+
+    def __init__(self, message: str, cost: Decimal = Decimal(0)) -> None:
+        super().__init__(message)
+        self.cost = cost
 
 
 @dataclass(frozen=True)

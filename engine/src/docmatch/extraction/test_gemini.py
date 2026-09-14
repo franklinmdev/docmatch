@@ -9,7 +9,7 @@ from google.genai._gaos.types.interactions.interaction import Interaction
 
 from docmatch.extraction.extractor import ExtractionError
 from docmatch.extraction.gemini import INSTRUCTION, GeminiExtractor
-from docmatch.extraction.pages import PageImage
+from docmatch.extraction.pages import MIME_TYPE, PageImage
 
 PAGE = PageImage(number=1, png=b"\x89PNG\r\n\x1a\nfirst", width=1237, height=1600)
 SECOND = PageImage(number=2, png=b"\x89PNG\r\n\x1a\nsecond", width=1237, height=1600)
@@ -178,3 +178,59 @@ def test_refuses_a_model_whose_price_is_not_written_down() -> None:
         reading.extract([PAGE])
 
     assert "no price is written down" in str(raised.value)
+
+
+def test_an_answer_that_did_not_fit_still_carries_what_it_cost() -> None:
+    """The model was paid for an answer nobody could use.
+
+    The run adds this onto the document's total and weighs it against the cost
+    cap, so a document that keeps answering unusably stops costing money.
+    """
+    reading, _ = extractor(answer("not json at all", tokens=1_000_000))
+
+    with pytest.raises(ExtractionError) as raised:
+        reading.extract([PAGE])
+
+    assert raised.value.cost == Decimal("0.25") + 4 * Decimal("1.50") / 1_000_000
+
+
+def test_a_call_that_never_reached_the_model_carries_no_cost() -> None:
+    reading, _ = extractor(TimeoutError("the connection went away"))
+
+    with pytest.raises(ExtractionError) as raised:
+        reading.extract([PAGE])
+
+    assert raised.value.cost == Decimal(0)
+
+
+def test_says_what_the_api_said_was_wrong() -> None:
+    """A hundred documents carrying only `status 'failed'` cannot be diagnosed."""
+    unusable = Interaction.model_validate(
+        {"status": "failed", "errors": [{"message": "quota exceeded"}]}
+    )
+    reading, _ = extractor(unusable)
+
+    with pytest.raises(ExtractionError) as raised:
+        reading.extract([PAGE])
+
+    assert "quota exceeded" in str(raised.value)
+
+
+def test_refuses_pages_too_heavy_to_send_inline() -> None:
+    """Named here rather than retried twice against a provider rejection."""
+    heavy = PageImage(number=1, png=b"\x00" * 16_000_000, width=1237, height=1600)
+    reading, _ = extractor(answer("{}"))
+
+    with pytest.raises(ExtractionError) as raised:
+        reading.extract([heavy])
+
+    assert "20MB" in str(raised.value)
+
+
+def test_names_the_page_format_once() -> None:
+    reading, calls = extractor(answer("{}"))
+
+    reading.extract([PAGE])
+
+    (call,) = calls.calls
+    assert call["input"][2]["mime_type"] == MIME_TYPE

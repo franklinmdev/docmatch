@@ -149,15 +149,72 @@ def test_stops_retrying_a_document_that_has_spent_its_cap(
 
     So the cap counts what a document has cost so far rather than how many
     times it has been tried, which is what separates a rate limit worth
-    retrying from a document this backend cannot read.
+    retrying from a document this backend cannot read. One attempt at a dollar
+    is already past a five cent cap, so the second is refused.
     """
     extractor = FakeExtractor(
-        answers=[ExtractionError("half an answer")], cost=Decimal("1.00")
+        answers=[ExtractionError("half an answer", Decimal("1.00"))]
     )
 
     run = done(extractor, dataset, pinned, attempts=5, cost_cap=Decimal("0.05"))
 
-    assert [each.attempts for each in run.failed] == [5, 5]
+    assert [each.attempts for each in run.failed] == [1, 1]
+    assert [each.cost for each in run.failed] == [Decimal("1.00"), Decimal("1.00")]
+    assert "gave up after spending" in (run.failed[0].failure or "")
+
+
+def test_adds_up_what_a_document_was_billed_for_attempts_that_failed(
+    dataset: DocileDataset, pinned: Manifest
+) -> None:
+    """A billed failure is part of what the document cost, and of the run's cost.
+
+    An answer that came back and did not fit the schema was paid for exactly
+    like one that did. Leaving it out would under-report the column the
+    benchmark exists to compare backends on.
+    """
+    extractor = FakeExtractor(
+        answers=[ExtractionError("did not fit the schema", Decimal("0.002")), READING],
+        cost=Decimal("0.003"),
+    )
+
+    run = done(extractor, dataset, pinned)
+
+    first = run.documents[0]
+    assert first.predicted
+    assert first.attempts == 2
+    assert first.cost == Decimal("0.005")
+
+
+def test_a_call_that_never_reached_the_model_costs_nothing(
+    dataset: DocileDataset, pinned: Manifest
+) -> None:
+    extractor = FakeExtractor(answers=[ExtractionError("the connection went away")])
+
+    run = done(extractor, dataset, pinned, attempts=2)
+
+    assert run.cost == Decimal(0)
+    assert [each.attempts for each in run.failed] == [2, 2]
+
+
+def test_a_missing_pdf_fails_its_own_document_and_not_the_run(
+    tmp_path: Path, pinned: Manifest
+) -> None:
+    """A run that has already paid for eighty-nine documents must keep them.
+
+    `dataset.pdf` raises `DocumentNotFoundError`, which is a `DocileError` and
+    not a `PageError`, so this is the case that used to end the whole run and
+    write nothing at all.
+    """
+    pdfs = tmp_path / "pdfs"
+    pdfs.mkdir()
+    write_pdf(pdfs / "syn0001.pdf")
+    extractor = FakeExtractor(answers=[READING])
+
+    run = done(extractor, DocileDataset(tmp_path), pinned)
+
+    assert [each.document_id for each in run.predicted] == ["syn0001"]
+    assert [each.document_id for each in run.failed] == ["syn0002"]
+    assert "syn0002" in (run.failed[0].failure or "")
 
 
 def test_reports_a_document_whose_pages_cannot_be_rendered(

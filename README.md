@@ -333,21 +333,24 @@ schema built from DocILE's own fieldtype names, and writes the predictions
 beside a record of what each document cost.
 
 ```bash
-uv run docmatch extract --out data/runs/baseline
+uv run --env-file .env docmatch extract --out data/runs/baseline
 ```
 
-It needs a `GEMINI_API_KEY` in `.env`, beside `DOCILE_TOKEN`. The run is local
-and it costs money, which is the reason the two halves are separate commands: a
-number can be re-derived from a saved run as often as it is questioned without
-paying for the reading again.
+It needs a `GEMINI_API_KEY` in `.env`, beside `DOCILE_TOKEN` (see
+`.env.example`). Nothing in the engine reads `.env` by itself, which is what
+`--env-file` is for; exporting the key into the shell works just as well. The
+run is local and it costs money, which is the reason the two halves are
+separate commands: a number can be re-derived from a saved run as often as it
+is questioned without paying for the reading again.
 
-Two files land in the `--out` directory, both under the gitignored `data/`:
-`predictions.json`, which is the input to `docmatch eval`, and `run.json`, which
-carries per-document pages, attempts, tokens, cost, latency and any failure. So
-a benchmark row is reproduced by
+Three files land in the `--out` directory, all under the gitignored `data/`:
+`predictions.json`, which is the input to `docmatch eval`; `manifest.json`, the
+subset this run actually covered; and `run.json`, which carries per-document
+pages, attempts, tokens, cost, latency and any failure. So a benchmark row is
+reproduced by
 
 ```bash
-uv run docmatch extract --out data/runs/baseline
+uv run --env-file .env docmatch extract --out data/runs/baseline
 uv run docmatch eval --predictions data/runs/baseline/predictions.json
 ```
 
@@ -355,6 +358,20 @@ uv run docmatch eval --predictions data/runs/baseline/predictions.json
 longer side, `--attempts` and `--cost-cap` bound what one document may spend
 before it is given up on, and `--limit` reads only the first few pinned
 documents, which is how to check that a run works before paying for all of them.
+
+A `--limit` run has to be scored against the subset it covered, which is what
+the `manifest.json` beside its predictions is for:
+
+```bash
+uv run --env-file .env docmatch extract --out data/runs/check --limit 5
+uv run docmatch eval \
+  --predictions data/runs/check/predictions.json \
+  --manifest data/runs/check/manifest.json
+```
+
+Without the second flag the five predictions are scored against all 100 pinned
+documents and the ninety-five never attempted are reported as recall the
+backend lost.
 
 A document that never produced an answer is left out of the predictions file
 rather than written down as empty. `docmatch eval` scores a pinned document with
@@ -407,13 +424,16 @@ The `Extractor` interface is the seam. Backends are compared, not chosen up fron
 
 | Backend | Kind | List price | Role in the benchmark | Price read |
 |---|---|---|---|---|
-| `gemini-2.5-flash-lite` with structured output | vision LLM | $0.10 input, $0.40 output per million tokens, free tier available | cheap default | 2026-09-14 |
+| `gemini-3.1-flash-lite` with structured output | vision LLM | $0.25 input, $1.50 output per million tokens, free tier available | cheap default, the baseline row | 2026-09-14 |
+| `gemini-2.5-flash-lite` with structured output | vision LLM | $0.10 input, $0.40 output per million tokens, free tier available | cheaper, and unusable here: see below | 2026-09-14 |
 | `gpt-5-nano` or `gpt-4o-mini` with structured output | vision LLM | $0.05 and $0.15 input, $0.40 and $0.60 output per million tokens | second provider | 2026-09-14 |
 | Claude Haiku 4.5 or Sonnet 5 with structured output | vision LLM | $1 and $2 input, $5 and $10 output per million tokens | second provider | 2026-09-08 |
 | Azure Document Intelligence prebuilt-invoice | specialized document model | $10 per 1,000 pages, 500 pages per month free | commercial baseline | 2026-09-07 |
 | Google Document AI invoice parser | specialized document model | $0.10 per document of up to 10 pages, so $100 per 1,000 one-page invoices | commercial baseline, optional | 2026-09-14 |
 | Cloud Vision document OCR, then an LLM over the text | OCR-first | $1.50 per 1,000 pages, first 1,000 per month free | ablation: what layout loss costs | 2026-09-08 |
 | Docling with granite-docling-258M, local | open-weight document model | free, CPU | open-source baseline, strong on PDF tables | 2026-09-07 |
+
+`gemini-2.5-flash-lite` is the cheapest of these and is not the one the baseline row uses. On the current Interactions API it ignores `response_format` and answers in prose, or in bounding boxes; only the 3.x Flash-Lite models honour a schema there. It does obey one on the `generate_content` path the vendor documents as legacy. Both were measured on 2026-09-14 with the same two-field schema, and the difference over a hundred documents is cents, so the engine takes the model that works on the API new code is meant to use. The row stays in the table because the next reader will ask the same question.
 
 A list price is not a cost per document, and for the vision models it is not even close to one. A page becomes a number of tokens that the vendor decides: Gemini charges 258 tokens per 768 by 768 tile of the rendered page, so what this engine pays per document follows from the resolution it renders at, and two providers turn the same page into different numbers of tokens. The specialized models are billed per document or per page and have no such knob. That is why cost per document is a measured column of the benchmark rather than a figure quoted from a pricing page, and why the two kinds of backend cannot be ranked by list price alone.
 

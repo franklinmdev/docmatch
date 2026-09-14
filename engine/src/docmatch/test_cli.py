@@ -875,3 +875,41 @@ def test_extract_says_which_key_is_missing(
 
     assert exit_code == 1
     assert "GEMINI_API_KEY" in capsys.readouterr().err
+
+
+def test_extract_refuses_a_cost_cap_that_is_not_money(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A Spanish-locale typo is an argparse message, not a traceback."""
+    with pytest.raises(SystemExit):
+        main(["extract", "--out", str(tmp_path), "--cost-cap", "0,05"])
+
+    assert "invalid money value" in capsys.readouterr().err
+
+
+def test_extract_refuses_a_count_below_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Otherwise `--attempts 0` reports a mistyped flag as 100 broken documents."""
+    with pytest.raises(SystemExit):
+        main(["extract", "--out", str(tmp_path), "--attempts", "0"])
+
+    assert "invalid positive value" in capsys.readouterr().err
+
+
+def test_extract_checks_it_can_write_before_it_spends(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An --out that cannot be made is worth catching before the first document."""
+    monkeypatch.setenv("GEMINI_API_KEY", "not-a-real-key")
+    blocked = tmp_path / "file"
+    blocked.write_text("not a directory", encoding="utf-8")
+
+    exit_code = main(
+        ["extract", "--out", str(blocked / "run"), "--data-dir", str(tmp_path)]
+    )
+
+    assert exit_code == 1
+    assert "cannot write the run to" in capsys.readouterr().err

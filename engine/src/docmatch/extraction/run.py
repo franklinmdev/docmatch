@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
-from docmatch.docile.dataset import DocileDataset
+from docmatch.docile.dataset import DocileDataset, DocileError
 from docmatch.evals import manifest
 from docmatch.evals.manifest import Manifest
 from docmatch.extraction.extractor import ExtractionError, Extractor, Usage
@@ -200,13 +200,18 @@ def _document(
     """One document, retried until it is read, given up on, or too expensive."""
     try:
         pages = render(dataset.pdf(document_id), long_edge)
-    except PageError as error:
+    except (DocileError, PageError) as error:
+        # A document whose PDF is missing is this document's failure and not the
+        # run's. `dataset.pdf` raises `DocumentNotFoundError`, which is a
+        # `DocileError` and not a `PageError`, and letting it out here would end
+        # a paid run on document ninety and write none of the eighty-nine.
         return _failed(
             document_id, pages=0, attempts=0, latency=0.0, failure=str(error)
         )
 
     spent = Decimal(0)
     elapsed = 0.0
+    made = 0
     last = "no attempt was made"
     for attempt in range(1, attempts + 1):
         if attempt > 1:
@@ -214,11 +219,13 @@ def _document(
                 last = f"{last}; gave up after spending ${spent:.6f} of ${cost_cap}"
                 break
             wait(BACKOFF * 2 ** (attempt - 2))
+        made = attempt
         started = time.perf_counter()
         try:
             read = extractor.extract(pages)
         except ExtractionError as error:
             elapsed += time.perf_counter() - started
+            spent += error.cost
             last = str(error)
             continue
         spent += read.cost
@@ -235,7 +242,7 @@ def _document(
     return _failed(
         document_id,
         pages=len(pages),
-        attempts=attempts,
+        attempts=made,
         latency=elapsed,
         failure=last,
         cost=spent,

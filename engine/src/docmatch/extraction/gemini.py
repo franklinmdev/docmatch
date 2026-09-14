@@ -58,8 +58,18 @@ from google.genai._gaos.types.interactions.interaction import Interaction
 from pydantic import ValidationError
 
 from docmatch.extraction.extractor import Extraction, ExtractionError, Price, Usage
-from docmatch.extraction.pages import PageImage
+from docmatch.extraction.pages import MIME_TYPE, PageImage, total_size
 from docmatch.extraction.schema import Invoice
+
+INLINE_LIMIT = 20_000_000
+"""Bytes a request may carry inline, the whole of it, prompt included.
+
+https://ai.google.dev/gemini-api/docs/image-understanding, read 2026-09-14.
+Base64 widens the pages by a third on the way out, so the check is against what
+is sent and not against what was rendered. A document over the limit is a
+failure this backend names, rather than a provider rejection retried twice with
+a message the run report cannot explain.
+"""
 
 MODEL = "gemini-3.1-flash-lite"
 """The cheapest Gemini model that honours a response schema on this API."""
@@ -142,7 +152,7 @@ def _content(pages: Sequence[PageImage]) -> list[dict[str, Any]]:
             {
                 "type": "image",
                 "data": base64.b64encode(page.png).decode("ascii"),
-                "mime_type": "image/png",
+                "mime_type": MIME_TYPE,
             }
         )
     return content
@@ -202,6 +212,14 @@ class GeminiExtractor:
         """Read one document, or say why it could not be read."""
         if not pages:
             raise ExtractionError("a document with no pages cannot be read")
+        inline = total_size(pages) * 4 // 3
+        if inline > INLINE_LIMIT:
+            raise ExtractionError(
+                f"{len(pages)} pages come to {inline / 1_000_000:.1f}MB once "
+                f"base64 has widened them, over the {INLINE_LIMIT // 1_000_000}MB "
+                "a request may carry inline. Render smaller, or send the pages "
+                "through the Files API."
+            )
         started = time.perf_counter()
         try:
             answer = self.interactions.create(
@@ -218,30 +236,53 @@ class GeminiExtractor:
         latency = time.perf_counter() - started
         if not isinstance(answer, Interaction):
             raise ExtractionError(
-                "the backend streamed its answer, which this extractor did not ask for"
+                f"the backend answered with {type(answer).__name__} and not one "
+                "interaction. Either it streamed, which this extractor does not "
+                "ask for, or the SDK moved the class this narrows against; the "
+                "import above says where that is."
             )
+        usage = _usage(answer)
+        cost = self.price.of(usage)
         return Extraction(
-            prediction=_read(answer).prediction(),
-            usage=_usage(answer),
-            cost=self.price.of(_usage(answer)),
+            prediction=_read(answer, cost).prediction(),
+            usage=usage,
+            cost=cost,
             latency=latency,
         )
 
 
-def _read(answer: Interaction) -> Invoice:
-    """The model's JSON as an `Invoice`, or the reason it is not one."""
+def _read(answer: Interaction, cost: Decimal) -> Invoice:
+    """The model's JSON as an `Invoice`, or the reason it is not one.
+
+    Every failure here is one the model was paid for, so each carries the cost
+    out to the run that has to add it up.
+    """
     if answer.status != "completed":
-        raise ExtractionError(f"the backend returned status {answer.status!r}")
+        raise ExtractionError(
+            f"the backend returned status {answer.status!r}{_because(answer)}", cost
+        )
     text = answer.output_text
     if not text:
-        raise ExtractionError("the backend returned no text")
+        raise ExtractionError("the backend returned no text", cost)
     try:
         return Invoice.model_validate_json(text)
     except ValidationError as error:
         raise ExtractionError(
             f"the backend's answer does not fit the schema: {error.error_count()} "
-            f"problems, the first at {_where(error)}"
+            f"problems, the first at {_where(error)}",
+            cost,
         ) from error
+
+
+def _because(answer: Interaction) -> str:
+    """What the API said was wrong, when it said anything.
+
+    A status on its own is not actionable, and a hundred documents carrying
+    `status 'failed'` and nothing else is a run nobody can diagnose. The reason,
+    a safety block or a quota or a malformed request, is in `errors`.
+    """
+    errors = answer.errors or []
+    return f": {errors[0]}" if errors else ""
 
 
 def _where(error: ValidationError) -> str:

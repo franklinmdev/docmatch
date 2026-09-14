@@ -25,7 +25,7 @@ import argparse
 import os
 import sys
 from collections.abc import Iterable, Sequence
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from docmatch.docile.annotation import Annotation, FieldExtraction
@@ -68,6 +68,32 @@ from docmatch.metrics.score import Score
 
 DATA_DIR_VARIABLE = "DOCMATCH_DATA_DIR"
 DEFAULT_DATA_DIR = Path("data/docile")
+
+
+def money(given: str) -> Decimal:
+    """A dollar amount from the command line, or an error argparse can print.
+
+    `Decimal` raises `InvalidOperation`, an `ArithmeticError`, which argparse
+    does not turn into a message, so `--cost-cap 0,05` would end in a traceback
+    rather than in "invalid money value".
+    """
+    try:
+        return Decimal(given)
+    except InvalidOperation:
+        raise ValueError(given) from None
+
+
+def positive(given: str) -> int:
+    """A count from the command line that has to be at least one.
+
+    `--attempts 0` would otherwise fail every document with "no attempt was
+    made" and `--long-edge 0` would fail every one of them in the renderer,
+    reporting a mistyped flag as a hundred broken documents.
+    """
+    number = int(given)
+    if number < 1:
+        raise ValueError(given)
+    return number
 
 
 def resolve_data_dir(given: Path | None) -> Path:
@@ -292,25 +318,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     extract.add_argument(
         "--long-edge",
-        type=int,
+        type=positive,
         default=pages.LONG_EDGE,
         help=f"pixels on a page's longer side (default: {pages.LONG_EDGE})",
     )
     extract.add_argument(
         "--attempts",
-        type=int,
+        type=positive,
         default=ATTEMPTS,
         help=f"tries per document before giving up (default: {ATTEMPTS})",
     )
     extract.add_argument(
         "--cost-cap",
-        type=Decimal,
+        type=money,
         default=COST_CAP,
         help=f"US dollars one document may cost (default: {COST_CAP})",
     )
     extract.add_argument(
         "--limit",
-        type=int,
+        type=positive,
         default=None,
         help=(
             "read only the first N pinned documents, for a cheap check that the "
@@ -440,9 +466,15 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     """
     pinned = manifest.load(arguments.manifest)
     if arguments.limit is not None:
-        if arguments.limit < 1:
-            raise ExtractionError(f"cannot read {arguments.limit} documents")
         pinned = pinned.first(arguments.limit)
+    # Before the first document is paid for, not after the last: an --out that
+    # cannot be written is a mistake worth a hundred documents of API spend.
+    try:
+        arguments.out.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise ExtractionError(
+            f"cannot write the run to {arguments.out}: {error}"
+        ) from error
     backend = gemini.extractor(arguments.model)
     extracted = Run(
         backend=backend.name,
@@ -459,7 +491,6 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
             )
         ),
     )
-    arguments.out.mkdir(parents=True, exist_ok=True)
     write_predictions(extracted, arguments.out / "predictions.json")
     write_manifest(extracted, arguments.out / "manifest.json")
     write_record(extracted, arguments.out / "run.json")
