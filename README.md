@@ -291,6 +291,51 @@ message or an issue. CI runs the same command on a committed synthetic corpus
 in DocILE's shape, `engine/tests/evals/synthetic`, which exercises the whole
 path on every push while the dataset stays on the machine that downloaded it.
 
+### The baseline run
+
+`docmatch eval` scores a predictions file. `docmatch extract` is what produces
+one: it renders every pinned document's pages, asks one backend to fill in a
+schema built from DocILE's own fieldtype names, and writes the predictions
+beside a record of what each document cost.
+
+```bash
+uv run docmatch extract --out data/runs/baseline
+```
+
+It needs a `GEMINI_API_KEY` in `.env`, beside `DOCILE_TOKEN`. The run is local
+and it costs money, which is the reason the two halves are separate commands: a
+number can be re-derived from a saved run as often as it is questioned without
+paying for the reading again.
+
+Two files land in the `--out` directory, both under the gitignored `data/`:
+`predictions.json`, which is the input to `docmatch eval`, and `run.json`, which
+carries per-document pages, attempts, tokens, cost, latency and any failure. So
+a benchmark row is reproduced by
+
+```bash
+uv run docmatch extract --out data/runs/baseline
+uv run docmatch eval --predictions data/runs/baseline/predictions.json
+```
+
+`--model` chooses the backend, `--long-edge` the pixels on a rendered page's
+longer side, `--attempts` and `--cost-cap` bound what one document may spend
+before it is given up on, and `--limit` reads only the first few pinned
+documents, which is how to check that a run works before paying for all of them.
+
+A document that never produced an answer is left out of the predictions file
+rather than written down as empty. `docmatch eval` scores a pinned document with
+no prediction as a prediction of nothing and lists its id, so a failure costs
+recall instead of quietly shrinking the denominator, and the two reports name
+the same documents from two directions.
+
+Absence is explicit on the way in as well. The schema asks for every value a
+header field carries and one value per line-item cell, and a field the document
+does not show is an empty list rather than a guess. A single value per header
+fieldtype would have capped recall at 94.4% before any model read anything: 292
+of the val split's 5,234 distinct header values are the second or later value of
+their fieldtype in the same document, and a quarter of all documents print more
+than one distinct `vendor_address`.
+
 ### The counts behind the rules
 
 Several rules in `engine/src/docmatch/metrics` were decided by measurement

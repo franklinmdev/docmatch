@@ -127,6 +127,12 @@ def client() -> genai.Client:
     return genai.Client(api_key=key)
 
 
+def extractor(model: str = MODEL) -> "GeminiExtractor":
+    """A backend reading with the key in the environment, and its client kept."""
+    keep = client()
+    return GeminiExtractor(interactions=keep.interactions, model=model, owner=keep)
+
+
 def _content(pages: Sequence[PageImage]) -> list[dict[str, Any]]:
     """The instruction, then every page announced and shown."""
     content: list[dict[str, Any]] = [{"type": "text", "text": INSTRUCTION}]
@@ -168,6 +174,15 @@ class GeminiExtractor:
     interactions: Interactions
     model: str = MODEL
     schema: dict[str, Any] = field(default_factory=Invoice.model_json_schema)
+    owner: object = None
+    """Whatever `interactions` came off, kept only so that it outlives this.
+
+    `genai.Client().interactions` does not keep its client alive, and a client
+    that is collected closes its connection pool, so an extractor built from a
+    temporary client fails every document with "Cannot send a request, as the
+    client has been closed". That is what the first end-to-end run did. Use
+    `extractor()` rather than filling this in by hand.
+    """
 
     @property
     def name(self) -> str:

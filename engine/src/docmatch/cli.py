@@ -442,17 +442,14 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
         if arguments.limit < 1:
             raise ExtractionError(f"cannot read {arguments.limit} documents")
         pinned = pinned.first(arguments.limit)
-    extractor = gemini.GeminiExtractor(
-        interactions=gemini.client().interactions,
-        model=arguments.model,
-    )
+    backend = gemini.extractor(arguments.model)
     extracted = Run(
-        backend=extractor.name,
+        backend=backend.name,
         manifest=pinned,
         long_edge=arguments.long_edge,
         documents=tuple(
             extract_subset(
-                extractor,
+                backend,
                 dataset,
                 pinned,
                 long_edge=arguments.long_edge,
