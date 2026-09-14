@@ -77,6 +77,26 @@ class Manifest(BaseModel):
             )
         return self
 
+    def first(self, size: int) -> "Manifest":
+        """The first `size` documents of this subset, as a subset of their own.
+
+        A prefix is a sample of the same draw, which is the third property
+        `select` was built for, so a run over the first ten documents is a run
+        over ten documents this seed chose and not over ten arbitrary ones. It
+        is for checking that a run works before paying for the whole subset; a
+        benchmark row is measured over the manifest itself.
+        """
+        if not 0 < size <= self.size:
+            raise ManifestError(
+                f"cannot take the first {size} of a subset of {self.size}"
+            )
+        return Manifest(
+            split=self.split,
+            seed=self.seed,
+            size=size,
+            document_ids=self.document_ids[:size],
+        )
+
     def reproduced_from(self, document_ids: Iterable[str]) -> tuple[str, ...]:
         """The subset this manifest's own seed and size draw from a split."""
         return select(document_ids, seed=self.seed, size=self.size)

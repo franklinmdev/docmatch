@@ -2,7 +2,7 @@
 
 **Document reconciliation engine.** docmatch extracts invoices and receipts with vision language models, validates them with deterministic gates, matches them against purchase orders and receiving records, routes exceptions to human review, and measures every change against a labeled benchmark in CI.
 
-> **Status:** phase 0, harness. Nothing is usable yet. The benchmark tables below fill in as phases complete. A phase is not done until its number is here.
+> **Status:** phase 0 is done: its number is in the Benchmarks section with the commit that produced it. Phase 1, extraction, is next. The remaining tables fill in as phases complete, and a phase is not done until its number is here.
 
 ## Why
 
@@ -132,7 +132,41 @@ Filled in as phases complete. Every row names the commit that produced it.
 
 | Backend | Field F1 | Line-item F1 | Gate pass rate | Cost / doc | p50 / p95 latency | Commit |
 |---|---|---|---|---|---|---|
-| | | | | | | |
+| `gemini-3.1-flash-lite`, pages at 1600 px | 0.515 | 0.101 | phase 1 | $0.00267 | 5.0 s / 13.2 s | [`d148896`](https://github.com/franklinmdev/docmatch/commit/d148896) |
+
+The two commands that produced the row, against DocILE in `data/docile`:
+
+```bash
+uv run --env-file .env docmatch extract --out data/runs/baseline
+uv run docmatch eval --predictions data/runs/baseline/predictions.json
+```
+
+All 100 pinned documents were read and none failed, so both numbers are over
+the whole subset. The run cost $0.27 and took 171,471 input and 149,723 output
+tokens. There is no gate pass rate yet because there is no gate: the
+deterministic validation gate is phase 1, and the column is here so that the
+row it belongs to already exists.
+
+**What the two numbers mean.** Field F1 is over normalized header values, one
+fieldtype at a time. Line-item F1 is over whole rows, and it is much harsher
+than it looks next to the per-cell accuracies in the same report:
+`line_item_amount_gross` is read correctly in 77.3% of labeled cells,
+`line_item_quantity` in 77.2% and `line_item_position` in 83.2%, but a row
+counts as correct only when every one of its cells matches and it carries no
+cell the label does not. A row with four right cells and one wrong one scores
+zero. That is deliberate, and `engine/src/docmatch/metrics/line_items.py`
+argues for it; the per-cell table is where partial credit lives.
+
+**Where this baseline loses.** Header recall is 0.470 against precision 0.570,
+so the model more often fails to find a value than invents one, and the
+weakness is concentrated: `currency_code_amount_due` is 0.105 because the model
+returns the symbol it sees rather than an ISO code, and the two address fields
+are 0.160 and 0.064 while carrying the most spurious values of any field, which
+is what asking for every distinct value of a repeated field costs before any
+prompt work. `date_issue` at 0.891 and `amount_total_tax` at 0.875 are what the
+same model does on a field with one unambiguous form. None of that is tuned:
+this is one prompt, one resolution and no retries on content, which is what a
+floor is supposed to be.
 
 ### Matching, injected discrepancies
 
@@ -291,6 +325,68 @@ message or an issue. CI runs the same command on a committed synthetic corpus
 in DocILE's shape, `engine/tests/evals/synthetic`, which exercises the whole
 path on every push while the dataset stays on the machine that downloaded it.
 
+### The baseline run
+
+`docmatch eval` scores a predictions file. `docmatch extract` is what produces
+one: it renders every pinned document's pages, asks one backend to fill in a
+schema built from DocILE's own fieldtype names, and writes the predictions
+beside a record of what each document cost.
+
+```bash
+uv run --env-file .env docmatch extract --out data/runs/baseline
+```
+
+It needs a `GEMINI_API_KEY` in `.env`, beside `DOCILE_TOKEN` (see
+`.env.example`). Nothing in the engine reads `.env` by itself, which is what
+`--env-file` is for; exporting the key into the shell works just as well. The
+run is local and it costs money, which is the reason the two halves are
+separate commands: a number can be re-derived from a saved run as often as it
+is questioned without paying for the reading again.
+
+Three files land in the `--out` directory, all under the gitignored `data/`:
+`predictions.json`, which is the input to `docmatch eval`; `manifest.json`, the
+subset this run actually covered; and `run.json`, which carries per-document
+pages, attempts, tokens, cost, latency and any failure. So a benchmark row is
+reproduced by
+
+```bash
+uv run --env-file .env docmatch extract --out data/runs/baseline
+uv run docmatch eval --predictions data/runs/baseline/predictions.json
+```
+
+`--model` chooses the backend, `--long-edge` the pixels on a rendered page's
+longer side, `--attempts` and `--cost-cap` bound what one document may spend
+before it is given up on, and `--limit` reads only the first few pinned
+documents, which is how to check that a run works before paying for all of them.
+
+A `--limit` run has to be scored against the subset it covered, which is what
+the `manifest.json` beside its predictions is for:
+
+```bash
+uv run --env-file .env docmatch extract --out data/runs/check --limit 5
+uv run docmatch eval \
+  --predictions data/runs/check/predictions.json \
+  --manifest data/runs/check/manifest.json
+```
+
+Without the second flag the five predictions are scored against all 100 pinned
+documents and the ninety-five never attempted are reported as recall the
+backend lost.
+
+A document that never produced an answer is left out of the predictions file
+rather than written down as empty. `docmatch eval` scores a pinned document with
+no prediction as a prediction of nothing and lists its id, so a failure costs
+recall instead of quietly shrinking the denominator, and the two reports name
+the same documents from two directions.
+
+Absence is explicit on the way in as well. The schema asks for every value a
+header field carries and one value per line-item cell, and a field the document
+does not show is an empty list rather than a guess. A single value per header
+fieldtype would have capped recall at 94.4% before any model read anything: 292
+of the val split's 5,234 distinct header values are the second or later value of
+their fieldtype in the same document, and a quarter of all documents print more
+than one distinct `vendor_address`.
+
 ### The counts behind the rules
 
 Several rules in `engine/src/docmatch/metrics` were decided by measurement
@@ -324,16 +420,22 @@ across commits.
 
 ## Extraction backends
 
-The `Extractor` interface is the seam. Backends are compared, not chosen up front. List prices as published by vendors at the time of writing; verify before relying on them.
+The `Extractor` interface is the seam. Backends are compared, not chosen up front. Prices below are the vendors' own published list prices, each re-read from the vendor's pricing page on the date in the last column.
 
-| Backend | Kind | List price | Role in the benchmark |
-|---|---|---|---|
-| Gemini Flash-tier with structured output | vision LLM | fractions of a cent per page | cheap default |
-| Claude Haiku 4.5 or Sonnet 5 with structured output | vision LLM | $1 and $2 input per million tokens respectively | second provider |
-| Azure Document Intelligence prebuilt-invoice | specialized document model | $10 per 1,000 pages, free tier available | commercial baseline |
-| Google Document AI Invoice Parser | specialized document model | $10 per 1,000 pages | commercial baseline, optional |
-| Cloud Vision document OCR, then an LLM over the text | OCR-first | $1.50 per 1,000 pages, free tier available | ablation: what layout loss costs |
-| Docling with granite-docling-258M, local | open-weight document model | free, CPU | open-source baseline, strong on PDF tables |
+| Backend | Kind | List price | Role in the benchmark | Price read |
+|---|---|---|---|---|
+| `gemini-3.1-flash-lite` with structured output | vision LLM | $0.25 input, $1.50 output per million tokens, free tier available | cheap default, the baseline row | 2026-09-14 |
+| `gemini-2.5-flash-lite` with structured output | vision LLM | $0.10 input, $0.40 output per million tokens, free tier available | cheaper, and unusable here: see below | 2026-09-14 |
+| `gpt-5-nano` or `gpt-4o-mini` with structured output | vision LLM | $0.05 and $0.15 input, $0.40 and $0.60 output per million tokens | second provider | 2026-09-14 |
+| Claude Haiku 4.5 or Sonnet 5 with structured output | vision LLM | $1 and $2 input, $5 and $10 output per million tokens | second provider | 2026-09-08 |
+| Azure Document Intelligence prebuilt-invoice | specialized document model | $10 per 1,000 pages, 500 pages per month free | commercial baseline | 2026-09-07 |
+| Google Document AI invoice parser | specialized document model | $0.10 per document of up to 10 pages, so $100 per 1,000 one-page invoices | commercial baseline, optional | 2026-09-14 |
+| Cloud Vision document OCR, then an LLM over the text | OCR-first | $1.50 per 1,000 pages, first 1,000 per month free | ablation: what layout loss costs | 2026-09-08 |
+| Docling with granite-docling-258M, local | open-weight document model | free, CPU | open-source baseline, strong on PDF tables | 2026-09-07 |
+
+`gemini-2.5-flash-lite` is the cheapest of these and is not the one the baseline row uses. On the current Interactions API it ignores `response_format` and answers in prose, or in bounding boxes; only the 3.x Flash-Lite models honour a schema there. It does obey one on the `generate_content` path the vendor documents as legacy. Both were measured on 2026-09-14 with the same two-field schema, and the difference over a hundred documents is cents, so the engine takes the model that works on the API new code is meant to use. The row stays in the table because the next reader will ask the same question.
+
+A list price is not a cost per document, and for the vision models it is not even close to one. A page becomes a number of tokens that the vendor decides: Gemini charges 258 tokens per 768 by 768 tile of the rendered page, so what this engine pays per document follows from the resolution it renders at, and two providers turn the same page into different numbers of tokens. The specialized models are billed per document or per page and have no such knob. That is why cost per document is a measured column of the benchmark rather than a figure quoted from a pricing page, and why the two kinds of backend cannot be ranked by list price alone.
 
 ## Stack
 

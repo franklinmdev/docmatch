@@ -85,3 +85,22 @@ def test_refuses_a_split_name_that_is_not_a_plain_name(
     """Split names come from the command line, so they never build a path."""
     with pytest.raises(ValueError):
         dataset.document_ids(split)
+
+
+def test_tells_a_missing_dataset_apart_from_a_missing_pdf(tmp_path: Path) -> None:
+    """A run reads PDFs and never opens an annotation, so the check is on those."""
+    absent = tmp_path / "never-downloaded"
+
+    with pytest.raises(DatasetNotFoundError) as raised:
+        DocileDataset(absent).pdf("syn0001")
+
+    assert str(absent) in str(raised.value)
+
+
+def test_names_the_pdf_it_could_not_find(tmp_path: Path) -> None:
+    (tmp_path / "pdfs").mkdir()
+
+    with pytest.raises(DocumentNotFoundError) as raised:
+        DocileDataset(tmp_path).pdf("syn0001")
+
+    assert "syn0001" in str(raised.value)

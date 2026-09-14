@@ -14,6 +14,9 @@ that subset, which is the command every number in the README comes from.
 `docmatch corpus` recomputes the counts the rules in `metrics` are justified
 by, which is how a reader checks the numbers the docstrings there assert.
 
+`docmatch extract` reads the subset with one backend and writes the predictions
+file the eval scores, which is the half of a benchmark row that costs money.
+
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
 """
@@ -22,6 +25,7 @@ import argparse
 import os
 import sys
 from collections.abc import Iterable, Sequence
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from docmatch.docile.annotation import Annotation, FieldExtraction
@@ -34,6 +38,18 @@ from docmatch.evals.run import (
     SubsetScore,
     read_predictions,
     score_subset,
+)
+from docmatch.extraction import gemini, pages
+from docmatch.extraction.extractor import ExtractionError
+from docmatch.extraction.run import (
+    ATTEMPTS,
+    COST_CAP,
+    DocumentRun,
+    Run,
+    extract_subset,
+    write_manifest,
+    write_predictions,
+    write_record,
 )
 from docmatch.metrics.fields import (
     FieldScore,
@@ -52,6 +68,39 @@ from docmatch.metrics.score import Score
 
 DATA_DIR_VARIABLE = "DOCMATCH_DATA_DIR"
 DEFAULT_DATA_DIR = Path("data/docile")
+
+
+def money(given: str) -> Decimal:
+    """A dollar amount from the command line, or an error argparse can print.
+
+    `Decimal` raises `InvalidOperation`, an `ArithmeticError`, which argparse
+    does not turn into a message, so `--cost-cap 0,05` would end in a traceback
+    rather than in "invalid money value". It also accepts `NaN`, `Infinity`
+    and negatives, none of which is a cap: a NaN raises at its first
+    comparison, after the first document has been paid for, an infinity turns
+    the cap off, and a cap of nothing or less refuses every retry, the free
+    ones included.
+    """
+    try:
+        amount = Decimal(given)
+    except InvalidOperation:
+        raise ValueError(given) from None
+    if not amount.is_finite() or amount <= 0:
+        raise ValueError(given)
+    return amount
+
+
+def positive(given: str) -> int:
+    """A count from the command line that has to be at least one.
+
+    `--attempts 0` would otherwise fail every document with "no attempt was
+    made" and `--long-edge 0` would fail every one of them in the renderer,
+    reporting a mistyped flag as a hundred broken documents.
+    """
+    number = int(given)
+    if number < 1:
+        raise ValueError(given)
+    return number
 
 
 def resolve_data_dir(given: Path | None) -> Path:
@@ -252,6 +301,58 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=corpus.SPLIT,
         help=f"the split to count over (default: {corpus.SPLIT})",
     )
+    extract = subcommands.add_parser(
+        "extract",
+        parents=[dataset],
+        help="read the fixed subset with one backend and write its predictions",
+    )
+    extract.add_argument(
+        "--out",
+        type=Path,
+        required=True,
+        help="a directory to write predictions.json, manifest.json and run.json into",
+    )
+    extract.add_argument(
+        "--model",
+        default=gemini.MODEL,
+        help=f"the Gemini model to read with (default: {gemini.MODEL})",
+    )
+    extract.add_argument(
+        "--manifest",
+        type=Path,
+        default=manifest.MANIFEST,
+        help=f"the subset to read (default: {manifest.MANIFEST.name})",
+    )
+    extract.add_argument(
+        "--long-edge",
+        type=positive,
+        default=pages.LONG_EDGE,
+        help=f"pixels on a page's longer side (default: {pages.LONG_EDGE})",
+    )
+    extract.add_argument(
+        "--attempts",
+        type=positive,
+        default=ATTEMPTS,
+        help=f"tries per document before giving up (default: {ATTEMPTS})",
+    )
+    extract.add_argument(
+        "--cost-cap",
+        type=money,
+        default=COST_CAP,
+        help=(
+            "US dollars one document may have spent before it is given up on "
+            f"(default: {COST_CAP})"
+        ),
+    )
+    extract.add_argument(
+        "--limit",
+        type=positive,
+        default=None,
+        help=(
+            "read only the first N pinned documents, for a cheap check that the "
+            "run works; a benchmark row needs the whole subset"
+        ),
+    )
     subset = subcommands.add_parser(
         "subset",
         parents=[dataset],
@@ -297,7 +398,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             subset.error(f"{' and '.join(drawing)} draws a subset, so it needs --write")
     try:
         output, exit_code = _run(arguments)
-    except (DocileError, PredictionError, ManifestError) as error:
+    except (DocileError, PredictionError, ManifestError, ExtractionError) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
     print(output, end="")
@@ -315,6 +416,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
         return _subset(arguments, dataset)
     if arguments.command == "corpus":
         return _corpus(arguments, dataset)
+    if arguments.command == "extract":
+        return _extract(arguments, dataset)
     if arguments.command == "eval":
         run = score_subset(
             dataset,
@@ -362,6 +465,99 @@ def _subset(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str,
         render_subset(arguments.manifest, pinned, note),
         0 if note[1] == "yes" else 1,
     )
+
+
+def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
+    """Read the subset with one backend, write the run, report what it cost.
+
+    A run that produced nothing at all exits non-zero. Anything less is
+    reported and left to the reader: some documents fail, and the score of the
+    ones that did not is still the thing worth looking at.
+
+    Documents are kept as they come. Whatever stops the run before the last
+    one, a Ctrl-C or a failure nothing below expected, the documents already
+    paid for are written with a manifest covering exactly them, so their score
+    is over what was read and their cost is on record. That is what
+    `extract_subset` yields for, and it would be lost if the run were gathered
+    up before the first write.
+    """
+    pinned = manifest.load(arguments.manifest)
+    if arguments.limit is not None:
+        pinned = pinned.first(arguments.limit)
+    # The key and the price before the directory, so a run that cannot start
+    # leaves nothing behind; the directory before the first document, because
+    # an --out that cannot be written is worth a hundred documents of spend.
+    backend = gemini.extractor(arguments.model)
+    _prepare(arguments.out)
+
+    def finished(covered: Manifest, documents: Sequence[DocumentRun]) -> Run:
+        return Run(
+            backend=backend.name,
+            manifest=covered,
+            long_edge=arguments.long_edge,
+            documents=tuple(documents),
+        )
+
+    documents: list[DocumentRun] = []
+    try:
+        for document in extract_subset(
+            backend,
+            dataset,
+            pinned,
+            long_edge=arguments.long_edge,
+            attempts=arguments.attempts,
+            cost_cap=arguments.cost_cap,
+        ):
+            documents.append(document)
+    except BaseException as stopped:
+        if documents:
+            _write(finished(pinned.first(len(documents)), documents), arguments.out)
+        if isinstance(stopped, KeyboardInterrupt):
+            kept = f"; what was read is in {arguments.out}" if documents else ""
+            raise ExtractionError(
+                f"interrupted after {len(documents)} of {pinned.size} documents{kept}"
+            ) from None
+        raise
+    extracted = finished(pinned, documents)
+    _write(extracted, arguments.out)
+    return (
+        render_extract(arguments.out, extracted),
+        0 if extracted.predicted else 1,
+    )
+
+
+RUN_FILES = ("predictions.json", "manifest.json", "run.json")
+
+
+def _prepare(out: Path) -> None:
+    """Make sure the run can be written, before the first document is paid for.
+
+    The directory is made now, and the three names checked for a directory in
+    the way of one of them: a write that fails after the run has ended costs
+    the whole run, and one that fails on the second file leaves predictions
+    beside no manifest, to be scored against the whole subset.
+    """
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise ExtractionError(f"cannot write the run to {out}: {error}") from error
+    for name in RUN_FILES:
+        if (out / name).is_dir():
+            raise ExtractionError(
+                f"cannot write the run to {out}: {name} is a directory there"
+            )
+    if not os.access(out, os.W_OK):
+        raise ExtractionError(f"cannot write the run to {out}: not writable")
+
+
+def _write(extracted: Run, out: Path) -> None:
+    """The three files of a run, or a message rather than a traceback."""
+    try:
+        write_predictions(extracted, out / RUN_FILES[0])
+        write_manifest(extracted, out / RUN_FILES[1])
+        write_record(extracted, out / RUN_FILES[2])
+    except OSError as error:
+        raise ExtractionError(f"cannot write the run to {out}: {error}") from error
 
 
 def _corpus(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
@@ -502,6 +698,65 @@ def _fieldtypes(coverage: Sequence[Coverage]) -> list[str]:
             f"{str(each.labels).rjust(labels)}  {read}{note}".rstrip()
         )
     return lines
+
+
+def render_extract(where: Path, extracted: Run) -> str:
+    """What a run cost and how much of it worked, as a block a human can paste.
+
+    Counts, money and seconds. No label text and no model text: rule 6 applies
+    to a run report exactly as it applies to an eval report, and what a reader
+    needs from this block is whether the run is sound enough for its score to
+    mean anything.
+    """
+    tokens = extracted.tokens
+    lines = [
+        "Extraction run",
+        *_rows(
+            ("backend", extracted.backend),
+            ("split", extracted.manifest.split),
+            ("size", str(extracted.manifest.size)),
+            ("long edge", f"{extracted.long_edge} px"),
+            ("predicted", str(len(extracted.predicted))),
+            ("failed", str(len(extracted.failed))),
+            ("written to", str(where)),
+        ),
+        "",
+        "Cost",
+        *_rows(
+            ("total", f"${extracted.cost:.4f}"),
+            ("per document", f"${extracted.cost_per_document:.6f}"),
+            ("input tokens", f"{tokens.input_tokens:,}"),
+            ("output tokens", f"{tokens.output_tokens:,}"),
+        ),
+        "",
+        "Latency, over the documents that produced a prediction",
+        *_rows(
+            ("p50", f"{extracted.latency(50):.2f} s"),
+            ("p95", f"{extracted.latency(95):.2f} s"),
+        ),
+        *_failures(extracted.failed),
+    ]
+    return "\n".join([*lines, ""])
+
+
+def _failures(failed: Sequence[DocumentRun]) -> list[str]:
+    """Every document that produced nothing, and what stopped it.
+
+    Listed rather than counted, because a run that failed a fifth of the subset
+    is a broken run and only the reasons say which kind of broken. The same
+    documents come back out of `docmatch eval` as its "not predicted" list.
+    """
+    if not failed:
+        return []
+    width = _width(each.document_id for each in failed)
+    return [
+        "",
+        f"Failed ({len(failed)})",
+        *(
+            f"  {each.document_id.ljust(width)}  after {each.attempts}, {each.failure}"
+            for each in failed
+        ),
+    ]
 
 
 def render_eval(path: Path, run: SubsetScore) -> str:
