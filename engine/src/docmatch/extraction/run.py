@@ -45,6 +45,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from docmatch.docile.dataset import DocileDataset
+from docmatch.evals import manifest
 from docmatch.evals.manifest import Manifest
 from docmatch.extraction.extractor import ExtractionError, Extractor, Usage
 from docmatch.extraction.pages import PageError, render
@@ -269,6 +270,17 @@ def write_predictions(run: Run, path: Path) -> None:
         for document_id, prediction in run.predictions().items()
     }
     path.write_text(json.dumps(body, indent=2, ensure_ascii=False) + "\n", "utf-8")
+
+
+def write_manifest(run: Run, path: Path) -> None:
+    """The subset this run actually covered, beside its predictions.
+
+    The same file `docmatch eval --manifest` takes. It matters for a `--limit`
+    run, whose predictions cover a prefix of the pinned subset and would
+    otherwise be scored against all 100 documents, reporting the ones that were
+    never attempted as recall the backend lost.
+    """
+    manifest.write(run.manifest, path)
 
 
 def write_record(run: Run, path: Path) -> None:

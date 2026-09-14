@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from docmatch.docile.dataset import DocileDataset
-from docmatch.evals.manifest import Manifest
+from docmatch.evals.manifest import Manifest, load
 from docmatch.evals.run import read_predictions
 from docmatch.extraction.conftest import write_pdf
 from docmatch.extraction.extractor import Extraction, ExtractionError, Usage
@@ -21,6 +21,7 @@ from docmatch.extraction.run import (
     Run,
     extract_subset,
     percentile_of,
+    write_manifest,
     write_predictions,
     write_record,
 )
@@ -271,3 +272,19 @@ def test_a_document_run_knows_whether_it_predicted_anything() -> None:
     )
 
     assert not nothing.predicted
+
+
+def test_writes_the_subset_the_run_covered(
+    dataset: DocileDataset, pinned: Manifest, tmp_path: Path
+) -> None:
+    """A `--limit` run covers a prefix, and its score has to be over that prefix.
+
+    Scored against the whole pinned subset instead, the documents that were
+    never attempted would count as recall the backend lost.
+    """
+    run = done(FakeExtractor(answers=[READING]), dataset, pinned)
+    path = tmp_path / "manifest.json"
+
+    write_manifest(run, path)
+
+    assert load(path).document_ids == ("syn0001", "syn0002")

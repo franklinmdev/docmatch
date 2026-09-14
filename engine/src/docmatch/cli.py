@@ -47,6 +47,7 @@ from docmatch.extraction.run import (
     DocumentRun,
     Run,
     extract_subset,
+    write_manifest,
     write_predictions,
     write_record,
 )
@@ -460,6 +461,7 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     )
     arguments.out.mkdir(parents=True, exist_ok=True)
     write_predictions(extracted, arguments.out / "predictions.json")
+    write_manifest(extracted, arguments.out / "manifest.json")
     write_record(extracted, arguments.out / "run.json")
     return (
         render_extract(arguments.out, extracted),
