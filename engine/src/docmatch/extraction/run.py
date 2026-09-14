@@ -23,10 +23,16 @@ Retries, and the cap that bounds them
 An attempt that raises is retried, with a wait that doubles, up to `attempts`.
 Two different things are being defended against: a rate limit or a dropped
 connection, which the next attempt fixes, and a document this backend cannot
-read, which no number of attempts fixes. The cost cap is what separates them in
-money rather than in kind. Every attempt that reached the model is paid for
-whether or not its answer was usable, so the cap counts what has been spent on
-this document so far and refuses the next attempt when it would go over.
+read, which no number of attempts fixes. A backend says which kind it saw when
+it can, and a failure it marks as not worth retrying ends the document there,
+without the backoff. For the failures it cannot tell apart, an answer that did
+not fit the schema being the usual one, the cost cap separates them in money
+rather than in kind. Every attempt that reached the model is paid for whether
+or not its answer was usable, so the cap counts what has been spent on this
+document so far and refuses the next attempt once that has reached it. What an
+attempt will cost is not known until it has been billed, so a document can end
+over the cap by at most one attempt; the cap bounds a runaway, it does not
+promise a ceiling to the cent.
 
 One document at a time
 ----------------------
@@ -44,10 +50,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
-from docmatch.docile.dataset import DocileDataset, DocileError
+from docmatch.docile.dataset import DatasetNotFoundError, DocileDataset, DocileError
 from docmatch.evals import manifest
 from docmatch.evals.manifest import Manifest
-from docmatch.extraction.extractor import ExtractionError, Extractor, Usage
+from docmatch.extraction.extractor import NOTHING, ExtractionError, Extractor, Usage
 from docmatch.extraction.pages import PageError, render
 from docmatch.metrics.fields import Prediction
 
@@ -55,7 +61,7 @@ ATTEMPTS = 3
 """How many times one document may be sent before it is given up on."""
 
 COST_CAP = Decimal("0.05")
-"""US dollars one document may cost across all its attempts.
+"""US dollars one document may have spent before it is given up on.
 
 Two orders of magnitude above what a cheap model costs for one invoice, which
 is where a cap belongs: it is there to stop a runaway, not to trim a bill.
@@ -73,6 +79,8 @@ class DocumentRun:
     pages: int
     attempts: int
     usage: Usage
+    """The tokens of every attempt that was billed, the same way `cost` adds
+    them up, so the rates in the record reproduce the money."""
     cost: Decimal
     latency: float
     """Seconds of the attempt that produced the prediction, or of all of them
@@ -200,6 +208,10 @@ def _document(
     """One document, retried until it is read, given up on, or too expensive."""
     try:
         pages = render(dataset.pdf(document_id), long_edge)
+    except DatasetNotFoundError:
+        # No dataset at all is the run's failure: every document would fail the
+        # same way, and a hundred "no PDF" lines would hide one wrong path.
+        raise
     except (DocileError, PageError) as error:
         # A document whose PDF is missing is this document's failure and not the
         # run's. `dataset.pdf` raises `DocumentNotFoundError`, which is a
@@ -210,6 +222,7 @@ def _document(
         )
 
     spent = Decimal(0)
+    used = NOTHING
     elapsed = 0.0
     made = 0
     last = "no attempt was made"
@@ -226,14 +239,18 @@ def _document(
         except ExtractionError as error:
             elapsed += time.perf_counter() - started
             spent += error.cost
+            used = used + error.usage
             last = str(error)
+            if not error.retryable:
+                break
             continue
         spent += read.cost
+        used = used + read.usage
         return DocumentRun(
             document_id=document_id,
             pages=len(pages),
             attempts=attempt,
-            usage=read.usage,
+            usage=used,
             cost=spent,
             latency=read.latency,
             prediction=read.prediction,
@@ -246,6 +263,7 @@ def _document(
         latency=elapsed,
         failure=last,
         cost=spent,
+        usage=used,
     )
 
 
@@ -257,12 +275,13 @@ def _failed(
     latency: float,
     failure: str,
     cost: Decimal = Decimal(0),
+    usage: Usage = NOTHING,
 ) -> DocumentRun:
     return DocumentRun(
         document_id=document_id,
         pages=pages,
         attempts=attempts,
-        usage=Usage(input_tokens=0, output_tokens=0),
+        usage=usage,
         cost=cost,
         latency=latency,
         prediction=None,

@@ -94,3 +94,21 @@ def test_adds_up_what_the_pages_weigh(tmp_path: Path) -> None:
     rendered = render(write_pdf(tmp_path / "two.pdf", pages=2))
 
     assert total_size(rendered) == sum(page.size for page in rendered)
+
+
+def test_names_the_page_it_could_not_render(tmp_path: Path) -> None:
+    """A file that opens can still hold a page that will not load.
+
+    pdfium raises its own error for that, and a run has to see one document's
+    failure rather than a traceback that loses every document before it.
+    """
+    broken = write_pdf(tmp_path / "broken.pdf", pages=2)
+    # The second page's reference now points at an object the file does not
+    # hold. Same length, so the cross-reference table stays right.
+    broken.write_bytes(broken.read_bytes().replace(b"4 0 R", b"9 0 R", 1))
+
+    with pytest.raises(PageError) as raised:
+        render(broken)
+
+    assert "page 2 of" in str(raised.value)
+    assert "broken.pdf" in str(raised.value)

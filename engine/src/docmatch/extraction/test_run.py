@@ -1,14 +1,14 @@
 """Tests for running a backend over the fixed subset."""
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from docmatch.docile.dataset import DocileDataset
+from docmatch.docile.dataset import DatasetNotFoundError, DocileDataset
 from docmatch.evals.manifest import Manifest, load
 from docmatch.evals.run import read_predictions
 from docmatch.extraction.conftest import write_pdf
@@ -46,7 +46,7 @@ class FakeExtractor:
     def extract(self, pages: Sequence[PageImage]) -> Extraction:
         self.attempts.append(len(pages))
         given = self.answers[min(len(self.attempts), len(self.answers)) - 1]
-        if isinstance(given, Exception):
+        if isinstance(given, BaseException):  # a Ctrl-C is one of the answers
             raise given
         assert isinstance(given, Prediction)
         return Extraction(
@@ -79,6 +79,7 @@ def done(
     *,
     attempts: int = ATTEMPTS,
     cost_cap: Decimal = COST_CAP,
+    wait: Callable[[float], None] = lambda seconds: None,
 ) -> Run:
     """A finished run, with the waiting between attempts taken out."""
     return Run(
@@ -93,7 +94,7 @@ def done(
                 long_edge=1600,
                 attempts=attempts,
                 cost_cap=cost_cap,
-                wait=lambda seconds: None,
+                wait=wait,
             )
         ),
     )
@@ -345,3 +346,55 @@ def test_writes_the_subset_the_run_covered(
     write_manifest(run, path)
 
     assert load(path).document_ids == ("syn0001", "syn0002")
+
+
+def test_adds_up_the_tokens_of_the_attempts_that_failed(
+    dataset: DocileDataset, pinned: Manifest
+) -> None:
+    """The tokens of a billed failure go where its cost goes.
+
+    Otherwise a retried document records the cost of every attempt with the
+    tokens of only the last, and the rates in the record stop reproducing
+    the money.
+    """
+    extractor = FakeExtractor(
+        answers=[
+            ExtractionError(
+                "did not fit the schema",
+                Decimal("0.002"),
+                usage=Usage(input_tokens=100, output_tokens=50),
+            ),
+            READING,
+        ]
+    )
+
+    run = done(extractor, dataset, pinned)
+
+    assert run.documents[0].usage == Usage(input_tokens=200, output_tokens=100)
+    assert run.tokens == Usage(input_tokens=300, output_tokens=150)
+
+
+def test_stops_at_a_failure_the_backend_says_is_not_worth_retrying(
+    dataset: DocileDataset, pinned: Manifest
+) -> None:
+    """A refused key is refused again; the backoff would teach nobody anything."""
+    waits: list[float] = []
+    extractor = FakeExtractor(
+        answers=[ExtractionError("the key was refused", retryable=False)]
+    )
+
+    run = done(extractor, dataset, pinned, attempts=3, wait=waits.append)
+
+    assert [each.attempts for each in run.failed] == [1, 1]
+    assert waits == []
+    assert "refused" in (run.failed[0].failure or "")
+
+
+def test_a_missing_dataset_ends_the_run_rather_than_every_document(
+    tmp_path: Path, pinned: Manifest
+) -> None:
+    """One wrong --data-dir is one error, not a hundred documents with no PDF."""
+    extractor = FakeExtractor(answers=[READING])
+
+    with pytest.raises(DatasetNotFoundError):
+        done(extractor, DocileDataset(tmp_path / "never-downloaded"), pinned)

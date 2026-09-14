@@ -79,13 +79,23 @@ def render(pdf: Path, long_edge: int = LONG_EDGE) -> tuple[PageImage, ...]:
         document = pdfium.PdfDocument(pdf)
     except Exception as error:  # pdfium raises its own types for a bad file
         raise PageError(f"cannot open {pdf}: {error}") from error
+    pages = []
     try:
-        return tuple(
-            _page(document[number], number + 1, long_edge)
-            for number in range(len(document))
-        )
+        for number in range(len(document)):
+            try:
+                pages.append(_page(document[number], number + 1, long_edge))
+            except PageError:
+                raise
+            except Exception as error:
+                # A file that opens can still hold a page that will not load
+                # or render; pdfium and Pillow raise their own types for that,
+                # and a run has to see one document's failure, not a traceback.
+                raise PageError(
+                    f"cannot render page {number + 1} of {pdf}: {error}"
+                ) from error
     finally:
         document.close()
+    return tuple(pages)
 
 
 def _page(page: "pdfium.PdfPage", number: int, long_edge: int) -> PageImage:

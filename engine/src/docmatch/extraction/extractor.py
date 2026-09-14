@@ -33,21 +33,6 @@ from docmatch.metrics.fields import Prediction
 MILLION = Decimal(1_000_000)
 
 
-class ExtractionError(Exception):
-    """A backend could not turn these pages into a reading.
-
-    `cost` is what the attempt was billed anyway. An answer that came back and
-    could not be used, because it did not fit the schema or the interaction did
-    not complete, was paid for exactly like one that could, and a run that did
-    not add it up would under-report the column the benchmark exists to compare.
-    A call that never reached the model costs nothing and leaves it at zero.
-    """
-
-    def __init__(self, message: str, cost: Decimal = Decimal(0)) -> None:
-        super().__init__(message)
-        self.cost = cost
-
-
 @dataclass(frozen=True)
 class Usage:
     """The tokens one call was billed for."""
@@ -58,6 +43,46 @@ class Usage:
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
+
+    def __add__(self, other: "Usage") -> "Usage":
+        return Usage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+        )
+
+
+NOTHING = Usage(input_tokens=0, output_tokens=0)
+
+
+class ExtractionError(Exception):
+    """A backend could not turn these pages into a reading.
+
+    `cost` and `usage` are what the attempt was billed anyway. An answer that
+    came back and could not be used, because it did not fit the schema or the
+    interaction did not complete, was paid for exactly like one that could, and
+    a run that did not add it up would under-report the column the benchmark
+    exists to compare. A call that never reached the model costs nothing and
+    leaves both at zero.
+
+    `retryable` says whether sending the same pages again could end differently.
+    A rate limit, a dropped connection or an answer that did not fit can; a
+    document with no pages, a request the provider refuses as malformed or a key
+    it refuses at all cannot, and a run that retried those would wait through
+    its backoff to learn nothing.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        cost: Decimal = Decimal(0),
+        *,
+        usage: Usage = NOTHING,
+        retryable: bool = True,
+    ) -> None:
+        super().__init__(message)
+        self.cost = cost
+        self.usage = usage
+        self.retryable = retryable
 
 
 @dataclass(frozen=True)

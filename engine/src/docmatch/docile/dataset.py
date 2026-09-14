@@ -72,7 +72,7 @@ class DocileDataset:
         The path rather than the bytes: rendering opens it with its own reader,
         and a 1.14 GB dataset is not something to pass around in memory.
         """
-        path = self.root / "pdfs" / f"{_name(document_id)}.pdf"
+        path = self._pdfs() / f"{_name(document_id)}.pdf"
         if not path.is_file():
             raise DocumentNotFoundError(
                 f"no PDF for document {document_id!r} in {self.root}"
@@ -102,13 +102,26 @@ class DocileDataset:
 
     def _annotations(self) -> Path:
         """The annotations directory, which is what a downloaded dataset has."""
-        annotations = self.root / "annotations"
-        if not annotations.is_dir():
+        return self._directory("annotations")
+
+    def _pdfs(self) -> Path:
+        """The PDFs directory, the other half of a downloaded dataset.
+
+        Checked on its own rather than through `_annotations`, because the
+        two are downloaded separately and a run that reads PDFs never opens
+        an annotation: a missing dataset has to be one error before the first
+        document, not a hundred "no PDF" failures after.
+        """
+        return self._directory("pdfs")
+
+    def _directory(self, name: str) -> Path:
+        directory = self.root / name
+        if not directory.is_dir():
             raise DatasetNotFoundError(
-                f"no DocILE dataset at {self.root}: expected {annotations} to exist. "
+                f"no DocILE dataset at {self.root}: expected {directory} to exist. "
                 "See the Data section of README.md for how to download it."
             )
-        return annotations
+        return directory
 
 
 def _name(name: str) -> str:
