@@ -132,12 +132,12 @@ Filled in as phases complete. Every row names the commit that produced it.
 
 | Backend | Field F1 | Line-item F1 | Gate pass rate | Cost / doc | p50 / p95 latency | Commit |
 |---|---|---|---|---|---|---|
-| `gemini-3.1-flash-lite`, pages at 1600 px | 0.515 | 0.101 | phase 1 | $0.00268 | 5.0 s / 13.2 s | [`d148896`](https://github.com/franklinmdev/docmatch/commit/d148896) |
+| `gemini-3.1-flash-lite`, pages at 1600 px | 0.515 | 0.101 | phase 1 | $0.00267 | 5.0 s / 13.2 s | [`d148896`](https://github.com/franklinmdev/docmatch/commit/d148896) |
 
 The two commands that produced the row, against DocILE in `data/docile`:
 
 ```bash
-uv run docmatch extract --out data/runs/baseline
+uv run --env-file .env docmatch extract --out data/runs/baseline
 uv run docmatch eval --predictions data/runs/baseline/predictions.json
 ```
 
