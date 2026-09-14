@@ -2,7 +2,7 @@
 
 **Document reconciliation engine.** docmatch extracts invoices and receipts with vision language models, validates them with deterministic gates, matches them against purchase orders and receiving records, routes exceptions to human review, and measures every change against a labeled benchmark in CI.
 
-> **Status:** phase 0, harness. Nothing is usable yet. The benchmark tables below fill in as phases complete. A phase is not done until its number is here.
+> **Status:** phase 0 is done: its number is in the Benchmarks section with the commit that produced it. Phase 1, extraction, is next. The remaining tables fill in as phases complete, and a phase is not done until its number is here.
 
 ## Why
 
@@ -132,7 +132,41 @@ Filled in as phases complete. Every row names the commit that produced it.
 
 | Backend | Field F1 | Line-item F1 | Gate pass rate | Cost / doc | p50 / p95 latency | Commit |
 |---|---|---|---|---|---|---|
-| | | | | | | |
+| `gemini-3.1-flash-lite`, pages at 1600 px | 0.515 | 0.101 | phase 1 | $0.00268 | 5.0 s / 13.2 s | [`d148896`](https://github.com/franklinmdev/docmatch/commit/d148896) |
+
+The two commands that produced the row, against DocILE in `data/docile`:
+
+```bash
+uv run docmatch extract --out data/runs/baseline
+uv run docmatch eval --predictions data/runs/baseline/predictions.json
+```
+
+All 100 pinned documents were read and none failed, so both numbers are over
+the whole subset. The run cost $0.27 and took 171,471 input and 149,723 output
+tokens. There is no gate pass rate yet because there is no gate: the
+deterministic validation gate is phase 1, and the column is here so that the
+row it belongs to already exists.
+
+**What the two numbers mean.** Field F1 is over normalized header values, one
+fieldtype at a time. Line-item F1 is over whole rows, and it is much harsher
+than it looks next to the per-cell accuracies in the same report:
+`line_item_amount_gross` is read correctly in 77.3% of labeled cells,
+`line_item_quantity` in 77.2% and `line_item_position` in 83.2%, but a row
+counts as correct only when every one of its cells matches and it carries no
+cell the label does not. A row with four right cells and one wrong one scores
+zero. That is deliberate, and `engine/src/docmatch/metrics/line_items.py`
+argues for it; the per-cell table is where partial credit lives.
+
+**Where this baseline loses.** Header recall is 0.470 against precision 0.570,
+so the model more often fails to find a value than invents one, and the
+weakness is concentrated: `currency_code_amount_due` is 0.105 because the model
+returns the symbol it sees rather than an ISO code, and the two address fields
+are 0.160 and 0.064 while carrying the most spurious values of any field, which
+is what asking for every distinct value of a repeated field costs before any
+prompt work. `date_issue` at 0.891 and `amount_total_tax` at 0.875 are what the
+same model does on a field with one unambiguous form. None of that is tuned:
+this is one prompt, one resolution and no retries on content, which is what a
+floor is supposed to be.
 
 ### Matching, injected discrepancies
 
