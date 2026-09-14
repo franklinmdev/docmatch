@@ -5,12 +5,16 @@ directory, so the suite runs in CI with no dataset present.
 """
 
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from docmatch.cli import main
+from docmatch.cli import main, render_extract
 from docmatch.evals.manifest import Manifest, load, select, write
+from docmatch.extraction.extractor import Usage
+from docmatch.extraction.run import DocumentRun, Run
+from docmatch.metrics.fields import Prediction
 
 EXPECTED_SHOW_OUTPUT = "\n".join(
     [
@@ -780,3 +784,94 @@ def test_subset_refuses_to_draw_without_writing(
         main(["subset", flag, "5"])
 
     assert "--write" in capsys.readouterr().err
+
+
+def a_document(
+    document_id: str, *, latency: float = 2.0, failure: str | None = None
+) -> DocumentRun:
+    read = failure is None
+    return DocumentRun(
+        document_id=document_id,
+        pages=1,
+        attempts=1 if read else 3,
+        usage=Usage(
+            input_tokens=1300 if read else 0, output_tokens=1100 if read else 0
+        ),
+        cost=Decimal("0.002") if read else Decimal(0),
+        latency=latency,
+        prediction=Prediction(fields={"vendor_name": ["Northwind"]}) if read else None,
+        failure=failure,
+    )
+
+
+def a_run(*documents: DocumentRun) -> Run:
+    return Run(
+        backend="gemini-3.1-flash-lite",
+        manifest=Manifest(
+            split="val",
+            seed=1,
+            size=len(documents),
+            document_ids=tuple(each.document_id for each in documents),
+        ),
+        long_edge=1600,
+        documents=documents,
+    )
+
+
+def test_extract_reports_what_the_run_cost(tmp_path: Path) -> None:
+    run = a_run(a_document("syn0001", latency=2.0), a_document("syn0002", latency=5.0))
+
+    report = render_extract(tmp_path, run)
+
+    assert "backend     gemini-3.1-flash-lite" in report
+    assert "predicted   2" in report
+    assert "failed      0" in report
+    assert "total          $0.0040" in report
+    assert "per document   $0.002000" in report
+    assert "input tokens   2,600" in report
+    assert "p50  2.00 s" in report
+    assert "p95  5.00 s" in report
+
+
+def test_extract_lists_the_documents_that_produced_nothing(tmp_path: Path) -> None:
+    """A run that failed a fifth of the subset is broken, not low-scoring.
+
+    Only the reasons say which kind of broken, and the same ids come back out
+    of `docmatch eval` as its "not predicted" list.
+    """
+    run = a_run(
+        a_document("syn0001"),
+        a_document("syn0002", failure="the backend returned status 'failed'"),
+    )
+
+    report = render_extract(tmp_path, run)
+
+    assert "failed      1" in report
+    assert "Failed (1)" in report
+    assert "syn0002  after 3, the backend returned status 'failed'" in report
+
+
+def test_extract_charges_the_run_over_documents_that_failed_too(
+    tmp_path: Path,
+) -> None:
+    run = a_run(a_document("syn0001"), a_document("syn0002", failure="gave up"))
+
+    report = render_extract(tmp_path, run)
+
+    assert "total          $0.0020" in report
+    assert "per document   $0.001000" in report
+
+
+def test_extract_says_which_key_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    exit_code = main(
+        ["extract", "--out", str(tmp_path / "run"), "--data-dir", str(tmp_path)]
+    )
+
+    assert exit_code == 1
+    assert "GEMINI_API_KEY" in capsys.readouterr().err

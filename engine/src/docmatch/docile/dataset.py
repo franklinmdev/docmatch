@@ -66,6 +66,19 @@ class DocileDataset:
             )
         return Annotation.model_validate_json(path.read_bytes())
 
+    def pdf(self, document_id: str) -> Path:
+        """The document's PDF, which is what an extraction backend reads.
+
+        The path rather than the bytes: rendering opens it with its own reader,
+        and a 1.14 GB dataset is not something to pass around in memory.
+        """
+        path = self.root / "pdfs" / f"{_name(document_id)}.pdf"
+        if not path.is_file():
+            raise DocumentNotFoundError(
+                f"no PDF for document {document_id!r} in {self.root}"
+            )
+        return path
+
     def document_ids(self, split: str) -> tuple[str, ...]:
         """Every document id in one split, in the order the split file lists them.
 

@@ -20,20 +20,35 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 # mypy 2.3.1, docs read 2026-09-11. Nothing here is suppressed: the engine
 # passes as written, and `engine/src` holds no `type: ignore` and no `Any`.
 #
-# `strict` plus `warn_unreachable` is where this stops. The three
-# `disallow_any_*` flags above strict also pass today, and are still left off on
-# purpose: they cost nothing until phase 1 adds provider SDKs, and then they bill
-# every untyped boundary at once, which is an argument to have then, not a
-# setting to inherit now. `disallow_any_expr` is the one flag that does not pass,
-# and its 21 findings are all third-party: `@pytest.fixture`, `re.Match`
-# subscripts, `argparse.Namespace` attributes. None of them is this engine's
-# code, so the flag measures typeshed, not us.
+# `strict` plus `warn_unreachable` is where this stops, and `engine/src` still
+# holds no `type: ignore`. The bill the note below predicted has now arrived:
+# the Gemini backend writes a request as `dict[str, Any]`, because the shape the
+# SDK takes is a JSON body and typing each part of it would be transcribing the
+# vendor's schema into this repository to no end. The `Any` stops at that
+# boundary: what comes back is narrowed to one class before anything is read off
+# it, and the answer itself is parsed by a Pydantic model. So the three
+# `disallow_any_*` flags above strict would now fail on real code rather than on
+# typeshed, and turning them on would buy a `cast` at the same boundary.
+# `disallow_any_expr` was already failing before this, on 21 third-party
+# findings: `@pytest.fixture`, `re.Match` subscripts, `argparse.Namespace`
+# attributes.
 [tool.mypy]
 python_version = "3.12"
 strict = true
 warn_unreachable = true
 files = ["engine/src"]
 plugins = ["pydantic.mypy"]
+
+# pypdfium2 5.13.0 ships no py.typed, so mypy cannot see into it. This is the
+# only untyped import in the engine, and it is confined to `extraction/pages.py`,
+# which touches four of its names: `PdfDocument`, indexing a document to a page,
+# `get_size` and `render`. The alternative was a hand-written stub for a library
+# whose surface this engine barely uses, which would be four lines of fiction to
+# maintain against every upgrade. `google-genai` and `pillow`, the other two
+# packages this phase adds, both ship `py.typed` and are checked normally.
+[[tool.mypy.overrides]]
+module = ["pypdfium2.*"]
+ignore_missing_imports = true
 
 # The plugin is not optional here. Without it mypy builds a model's `__init__`
 # from the field aliases and does not know `populate_by_name`, so it rejects
@@ -45,6 +60,7 @@ plugins = ["pydantic.mypy"]
 # constrains the synthesized `__init__` only, so `DocumentMetadata` still ignores
 # unknown keys when it validates a real annotation file, as its docstring says.
 # https://docs.pydantic.dev/latest/integrations/mypy/, pydantic 2.13.5.
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true
