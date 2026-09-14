@@ -324,16 +324,19 @@ across commits.
 
 ## Extraction backends
 
-The `Extractor` interface is the seam. Backends are compared, not chosen up front. List prices as published by vendors at the time of writing; verify before relying on them.
+The `Extractor` interface is the seam. Backends are compared, not chosen up front. Prices below are the vendors' own published list prices, each re-read from the vendor's pricing page on the date in the last column.
 
-| Backend | Kind | List price | Role in the benchmark |
-|---|---|---|---|
-| Gemini Flash-tier with structured output | vision LLM | fractions of a cent per page | cheap default |
-| Claude Haiku 4.5 or Sonnet 5 with structured output | vision LLM | $1 and $2 input per million tokens respectively | second provider |
-| Azure Document Intelligence prebuilt-invoice | specialized document model | $10 per 1,000 pages, free tier available | commercial baseline |
-| Google Document AI Invoice Parser | specialized document model | $10 per 1,000 pages | commercial baseline, optional |
-| Cloud Vision document OCR, then an LLM over the text | OCR-first | $1.50 per 1,000 pages, free tier available | ablation: what layout loss costs |
-| Docling with granite-docling-258M, local | open-weight document model | free, CPU | open-source baseline, strong on PDF tables |
+| Backend | Kind | List price | Role in the benchmark | Price read |
+|---|---|---|---|---|
+| `gemini-2.5-flash-lite` with structured output | vision LLM | $0.10 input, $0.40 output per million tokens, free tier available | cheap default | 2026-09-14 |
+| `gpt-5-nano` or `gpt-4o-mini` with structured output | vision LLM | $0.05 and $0.15 input, $0.40 and $0.60 output per million tokens | second provider | 2026-09-14 |
+| Claude Haiku 4.5 or Sonnet 5 with structured output | vision LLM | $1 and $2 input, $5 and $10 output per million tokens | second provider | 2026-09-08 |
+| Azure Document Intelligence prebuilt-invoice | specialized document model | $10 per 1,000 pages, 500 pages per month free | commercial baseline | 2026-09-07 |
+| Google Document AI invoice parser | specialized document model | $0.10 per document of up to 10 pages, so $100 per 1,000 one-page invoices | commercial baseline, optional | 2026-09-14 |
+| Cloud Vision document OCR, then an LLM over the text | OCR-first | $1.50 per 1,000 pages, first 1,000 per month free | ablation: what layout loss costs | 2026-09-08 |
+| Docling with granite-docling-258M, local | open-weight document model | free, CPU | open-source baseline, strong on PDF tables | 2026-09-07 |
+
+A list price is not a cost per document, and for the vision models it is not even close to one. A page becomes a number of tokens that the vendor decides: Gemini charges 258 tokens per 768 by 768 tile of the rendered page, so what this engine pays per document follows from the resolution it renders at, and two providers turn the same page into different numbers of tokens. The specialized models are billed per document or per page and have no such knob. That is why cost per document is a measured column of the benchmark rather than a figure quoted from a pricing page, and why the two kinds of backend cannot be ranked by list price alone.
 
 ## Stack
 
