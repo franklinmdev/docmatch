@@ -202,7 +202,7 @@ _NUMBER = re.compile(
 
 def normalize_number(text: str) -> str:
     """An amount or rate as a plain decimal string, or the text rule if unreadable."""
-    value = _read_number(text)
+    value = read_number(text)
     return f"{value.normalize():f}" if value is not None else normalize_text(text)
 
 
@@ -213,7 +213,7 @@ def reads_number(text: str) -> bool:
     fieldtype as a number would cost: the identifiers below are text because
     the answer is high, not because it is low.
     """
-    return _read_number(text) is not None
+    return read_number(text) is not None
 
 
 def prepared_number(text: str) -> str:
@@ -225,8 +225,12 @@ def prepared_number(text: str) -> str:
     return "".join(unicodedata.normalize("NFKC", text).split())
 
 
-def _read_number(text: str) -> Decimal | None:
-    """The amount or rate a value spells, or nothing if it does not spell one."""
+def read_number(text: str) -> Decimal | None:
+    """The amount or rate a value spells, or nothing if it does not spell one.
+
+    Public because the gate compares amounts as numbers, and it has to read
+    them exactly the way the scorer does.
+    """
     match = _NUMBER.match(prepared_number(text))
     if match is None:
         return None
@@ -289,13 +293,21 @@ _YEAR_PIVOT = 69
 
 def normalize_date(text: str) -> str:
     """A date as `YYYY-MM-DD`, or the text rule if it is not one calendar day."""
-    day = _read_date(prepared_date(text))
+    day = read_date(text)
     return day.isoformat() if day is not None else normalize_text(text)
 
 
 def reads_date(text: str) -> bool:
     """Whether the date rule reads this value as one calendar day."""
-    return _read_date(prepared_date(text)) is not None
+    return read_date(text) is not None
+
+
+def read_date(text: str) -> date | None:
+    """The calendar day a value spells, or nothing if it does not spell one.
+
+    Public for the reason `read_number` is: the gate orders dates as days.
+    """
+    return _read_date(prepared_date(text))
 
 
 def prepared_date(text: str) -> str:
