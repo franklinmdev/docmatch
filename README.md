@@ -160,13 +160,20 @@ argues for it; the per-cell table is where partial credit lives.
 **Where this baseline loses.** Header recall is 0.470 against precision 0.570,
 so the model more often fails to find a value than invents one, and the
 weakness is concentrated: `currency_code_amount_due` is 0.105 because the model
-returns the symbol it sees rather than an ISO code, and the two address fields
+left it empty on 67 of the 71 documents that label it, a recall miss and not a
+format one, since the scorer already reads `$` as USD; and the two address fields
 are 0.160 and 0.064 while carrying the most spurious values of any field, which
 is what asking for every distinct value of a repeated field costs before any
 prompt work. `date_issue` at 0.891 and `amount_total_tax` at 0.875 are what the
 same model does on a field with one unambiguous form. None of that is tuned:
 this is one prompt, one resolution and no retries on content, which is what a
 floor is supposed to be.
+
+The row was scored before code derived the currency from the amounts the model
+did read. `docmatch eval` now adds that derived value, so the command above
+reports field F1 0.550 on the same saved predictions, with the currency field
+at 0.812. That is a measurement of the rule, not a new row: the row changes
+when the subset is rerun.
 
 ### Matching, injected discrepancies
 
@@ -310,7 +317,8 @@ uv run docmatch eval --predictions predictions.json
 
 From a checkout with DocILE in `data/docile`, that is the command the numbers
 in the Benchmarks section come from. It prints field F1 and line-item F1 over
-the whole subset, a per-fieldtype breakdown of each, and the ids behind two
+the whole subset, a per-fieldtype breakdown of each, every field code derives
+a value for shown as read and with its derived values, and the ids behind two
 counts that are not scores: pinned documents the run did not predict, and
 predicted documents the subset does not pin.
 
