@@ -309,10 +309,6 @@ class GeminiExtractor:
             pages = render(document.path, self.long_edge)
         except PageError as error:
             raise ExtractionError(str(error), retryable=False) from error
-        if not pages:
-            raise ExtractionError(
-                "a document with no pages cannot be read", retryable=False
-            )
         content = _content(pages)
         response_format = {
             "type": "text",

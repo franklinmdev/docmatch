@@ -1076,6 +1076,7 @@ def test_extract_refuses_a_count_below_one(
 
 def test_extract_checks_it_can_write_before_it_spends(
     tmp_path: Path,
+    pinned_copies: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1085,7 +1086,7 @@ def test_extract_checks_it_can_write_before_it_spends(
     blocked = tmp_path / "file"
     blocked.write_text("not a directory", encoding="utf-8")
 
-    exit_code = main(extracting(tmp_path, blocked / "run"))
+    exit_code = main(extracting(pinned_copies, blocked / "run"))
 
     assert exit_code == 1
     assert "cannot write the run to" in capsys.readouterr().err
@@ -1103,24 +1104,31 @@ def test_extract_refuses_a_cost_cap_that_is_not_a_positive_amount(
     assert "invalid money value" in capsys.readouterr().err
 
 
-def extracting(tmp_path: Path, out: Path, *flags: str) -> list[str]:
-    """An extract over two pinned documents with their public copies in place.
+@pytest.fixture
+def pinned_copies(tmp_path: Path) -> Path:
+    """Two pinned documents with their public copies in place, under `tmp_path`.
 
-    The dataset under `tmp_path / "docile"`, the copies under `tmp_path /
-    "ucsf"` and the manifest pinning their digests at `tmp_path /
-    "manifest.json"`, all made on the first call for a `tmp_path`.
+    The dataset in `docile`, the copies in `ucsf`, and the manifest pinning
+    their digests at `manifest.json`, which is what this returns.
     """
     pinned = tmp_path / "manifest.json"
-    if not pinned.exists():
-        write(a_subset(tmp_path).pinned, pinned)
+    write(a_subset(tmp_path).pinned, pinned)
+    return pinned
+
+
+def extracting(
+    pinned: Path, out: Path, *flags: str, data_dir: Path | None = None
+) -> list[str]:
+    """The arguments of an extract over what `pinned_copies` made beside `pinned`."""
+    root = pinned.parent
     return [
         "extract",
         "--out",
         str(out),
         "--data-dir",
-        str(tmp_path / "docile"),
+        str(data_dir or root / "docile"),
         "--copies",
-        str(tmp_path / "ucsf"),
+        str(root / "ucsf"),
         "--manifest",
         str(pinned),
         *flags,
@@ -1129,6 +1137,7 @@ def extracting(tmp_path: Path, out: Path, *flags: str) -> list[str]:
 
 def test_extract_keeps_the_documents_read_before_it_was_interrupted(
     tmp_path: Path,
+    pinned_copies: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1141,7 +1150,7 @@ def test_extract_keeps_the_documents_read_before_it_was_interrupted(
     monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
 
-    exit_code = main(extracting(tmp_path, out))
+    exit_code = main(extracting(pinned_copies, out))
 
     captured = capsys.readouterr()
     assert exit_code == 1
@@ -1152,7 +1161,7 @@ def test_extract_keeps_the_documents_read_before_it_was_interrupted(
 
 
 def test_extract_keeps_the_documents_read_before_an_unexpected_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, pinned_copies: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failure nothing below expected still ends loudly, with the run on disk."""
     fake = FakeExtractor(answers=[READING, RuntimeError("nothing expected this")])
@@ -1160,7 +1169,7 @@ def test_extract_keeps_the_documents_read_before_an_unexpected_failure(
     out = tmp_path / "run"
 
     with pytest.raises(RuntimeError):
-        main(extracting(tmp_path, out))
+        main(extracting(pinned_copies, out))
 
     assert list(read_predictions(out / "predictions.json")) == ["syn0001"]
     assert load(out / "manifest.json").size == 1
@@ -1168,6 +1177,7 @@ def test_extract_keeps_the_documents_read_before_an_unexpected_failure(
 
 def test_extract_refuses_an_out_with_a_file_name_taken_by_a_directory(
     tmp_path: Path,
+    pinned_copies: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1177,7 +1187,7 @@ def test_extract_refuses_an_out_with_a_file_name_taken_by_a_directory(
     out = tmp_path / "run"
     (out / "predictions.json").mkdir(parents=True)
 
-    exit_code = main(extracting(tmp_path, out))
+    exit_code = main(extracting(pinned_copies, out))
 
     assert exit_code == 1
     assert "predictions.json is a directory there" in capsys.readouterr().err
@@ -1186,6 +1196,7 @@ def test_extract_refuses_an_out_with_a_file_name_taken_by_a_directory(
 
 def test_extract_reports_a_missing_dataset_once(
     tmp_path: Path,
+    pinned_copies: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1194,9 +1205,7 @@ def test_extract_reports_a_missing_dataset_once(
     monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
 
-    exit_code = main(
-        extracting(tmp_path, out) + ["--data-dir", str(tmp_path / "docilee")]
-    )
+    exit_code = main(extracting(pinned_copies, out, data_dir=tmp_path / "docilee"))
 
     captured = capsys.readouterr()
     assert exit_code == 1
@@ -1232,6 +1241,7 @@ def test_extract_refuses_a_model_with_no_price_before_making_the_run_directory(
 
 def test_extract_refuses_to_start_on_a_missing_public_copy(
     tmp_path: Path,
+    pinned_copies: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1239,7 +1249,7 @@ def test_extract_refuses_to_start_on_a_missing_public_copy(
     fake = FakeExtractor(answers=[READING])
     monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
-    arguments = extracting(tmp_path, out)
+    arguments = extracting(pinned_copies, out)
     public.path(tmp_path / "ucsf", "syn0002").unlink()
 
     exit_code = main(arguments)
@@ -1253,13 +1263,14 @@ def test_extract_refuses_to_start_on_a_missing_public_copy(
 
 def test_extract_refuses_to_start_on_a_changed_public_copy(
     tmp_path: Path,
+    pinned_copies: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     fake = FakeExtractor(answers=[READING])
     monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
-    arguments = extracting(tmp_path, out)
+    arguments = extracting(pinned_copies, out)
     write_pdf(public.path(tmp_path / "ucsf", "syn0001"), pages=4)
 
     exit_code = main(arguments)
@@ -1274,6 +1285,7 @@ def test_extract_refuses_to_start_on_a_changed_public_copy(
 
 def test_extract_reads_a_limited_prefix_end_to_end(
     tmp_path: Path,
+    pinned_copies: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -1287,7 +1299,7 @@ def test_extract_reads_a_limited_prefix_end_to_end(
 
     monkeypatch.setattr(gemini, "extractor", backend)
     out = tmp_path / "run"
-    arguments = extracting(tmp_path, out, "--limit", "1", "--long-edge", "1200")
+    arguments = extracting(pinned_copies, out, "--limit", "1", "--long-edge", "1200")
     # Beyond the limit, so a run that verified the whole subset would refuse.
     public.path(tmp_path / "ucsf", "syn0002").unlink()
 

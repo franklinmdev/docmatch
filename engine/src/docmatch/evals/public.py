@@ -157,23 +157,34 @@ def verify(manifest: Manifest, directory: Path) -> None:
     the run once, naming the first such document, rather than failing it among
     documents already paid for or scoring a benchmark over a different file.
     """
-    if not manifest.digests:
-        raise PublicCopyError(
-            "the manifest pins no digests, so there is no public copy to verify"
-        )
+    _require_digests(manifest)
     for document_id in manifest.document_ids:
         local = path(directory, document_id)
-        if not local.is_file():
+        found = _kept_digest(directory, document_id)
+        if found is None:
             raise PublicCopyError(
                 f"no public copy of {document_id} at {local}: `docmatch download` "
                 "fetches the pinned copies"
             )
-        found = digest(local.read_bytes())
         if found != manifest.digests[document_id]:
             raise DigestError(
                 f"the public copy of {document_id} at {local} has sha256 {found}, "
                 f"but the manifest pins {manifest.digests[document_id]}"
             )
+
+
+def _require_digests(manifest: Manifest) -> None:
+    """Refuse a manifest that pins no digests, since there is nothing to check."""
+    if not manifest.digests:
+        raise PublicCopyError(
+            "the manifest pins no digests, so there is no public copy to verify"
+        )
+
+
+def _kept_digest(directory: Path, document_id: str) -> str | None:
+    """The digest of the copy kept in `directory`, or None when none is kept."""
+    local = path(directory, document_id)
+    return digest(local.read_bytes()) if local.is_file() else None
 
 
 @dataclass(frozen=True)
@@ -194,17 +205,13 @@ def download(
     ends the download: the benchmark would otherwise quietly read a different
     file.
     """
-    if not manifest.digests:
-        raise PublicCopyError(
-            "the manifest pins no digests, so there is no copy to verify"
-        )
+    _require_digests(manifest)
     directory.mkdir(parents=True, exist_ok=True)
     fetched: list[str] = []
     kept: list[str] = []
     for document_id in manifest.document_ids:
         pinned = manifest.digests[document_id]
-        local = path(directory, document_id)
-        if local.is_file() and digest(local.read_bytes()) == pinned:
+        if _kept_digest(directory, document_id) == pinned:
             kept.append(document_id)
             continue
         ucsf_id = dataset.annotation(document_id).metadata.original_filename
@@ -215,6 +222,6 @@ def download(
                 f"the archive's copy of {document_id} ({url(ucsf_id)}) has sha256 "
                 f"{served}, but the manifest pins {pinned}"
             )
-        local.write_bytes(copy)
+        path(directory, document_id).write_bytes(copy)
         fetched.append(document_id)
     return Downloaded(fetched=tuple(fetched), kept=tuple(kept))
