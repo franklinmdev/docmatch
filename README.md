@@ -59,7 +59,7 @@ Measurement before modeling.
 - Pydantic schemas where absence is explicit rather than guessed. A confidence rides beside each value only where a backend returns one natively; no model is asked to grade itself.
 - An `Extractor` interface with several backends: a cheap vision model, a second provider, a commercial prebuilt invoice model, an OCR-then-LLM path, and a local open-weight document model. See Extraction backends.
 - Image preprocessing: orientation from metadata, downscale to a fixed long edge, no grayscale.
-- Deterministic validation gate: line totals reconcile to subtotal, tax arithmetic is consistent, totals agree, dates are sane, identifiers pass checksums where they exist. Confidence never gates acceptance on its own.
+- Deterministic validation gate: totals agree and dates are sane. Only rules the labels themselves pass belong in it; line-total reconciliation, tax arithmetic, and identifier checksums fail too often on the labels or apply to almost no documents. Confidence never gates acceptance on its own.
 - Bounded retries with per-document cost accounting.
 
 **The number:** a backend comparison table with field F1, line-item F1, gate pass rate, cost per document, and p50/p95 latency. A calibration table showing accuracy by confidence bucket. A gate ablation showing what the gate catches that confidence does not.
