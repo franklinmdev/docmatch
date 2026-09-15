@@ -19,6 +19,7 @@
       "vendor_name": "CEDAR FREIGHT LTD",
       "document_id": "INV-1OO2",
       "date_issue": "March 5, 2026",
+      "date_due": "EOM",
       "amount_total_gross": null,
       "vendor_email": "billing@cedar.example"
     }
@@ -27,7 +28,8 @@
     "fields": {
       "vendor_name": "Lakeside Tools",
       "document_id": "INV-1003",
-      "amount_total_gross": "$412.50"
+      "amount_total_gross": "$412.50",
+      "amount_due": "$400.00"
     },
     "line_items": [
       {
@@ -51,6 +53,7 @@
       "vendor_name": "Harbour Signs",
       "document_id": "INV-1004",
       "date_issue": "July 3, 2026",
+      "date_due": "June 2, 2026",
       "amount_total_gross": "$95.00"
     },
     "line_items": [
@@ -66,7 +69,10 @@
       "vendor_name": "Beacon Electrics",
       "document_id": "INV-1005",
       "tax_detail_rate": ["8.25%", "5%"],
-      "amount_total_gross": "1320.00"
+      "date_issue": "May 11, 2026",
+      "date_due": "June 1, 2026",
+      "amount_total_gross": "1320.00",
+      "amount_due": "1320.00"
     },
     "line_items": [
       {

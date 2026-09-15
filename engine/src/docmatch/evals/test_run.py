@@ -17,6 +17,7 @@ from docmatch.evals.run import (
     read_predictions,
     score_subset,
 )
+from docmatch.gate import RULES
 from docmatch.metrics.fields import Prediction, PredictionError
 
 
@@ -41,10 +42,10 @@ def test_scores_every_document_the_manifest_pins(run: SubsetScore) -> None:
 
 def test_micro_averages_the_field_score_across_the_subset(run: SubsetScore) -> None:
     """Counts are summed, not ratios averaged, so every value weighs the same."""
-    assert (run.fields.true_positives, run.fields.false_negatives) == (15, 6)
-    assert run.fields.false_positives == 3
-    assert run.fields.precision == pytest.approx(15 / 18)
-    assert run.fields.recall == pytest.approx(15 / 21)
+    assert (run.fields.true_positives, run.fields.false_negatives) == (19, 8)
+    assert run.fields.false_positives == 5
+    assert run.fields.precision == pytest.approx(19 / 24)
+    assert run.fields.recall == pytest.approx(19 / 27)
 
 
 def test_micro_averages_the_line_item_score_across_the_subset(
@@ -145,6 +146,77 @@ def test_the_field_score_counts_derived_values(run: SubsetScore) -> None:
 
     assert by_fieldtype["currency_code_amount_due"].matched == 1
     assert by_fieldtype["currency_code_amount_due"].spurious == 1
+
+
+def test_runs_the_gate_on_every_pinned_document(run: SubsetScore) -> None:
+    """eval0004 is due before it was issued and eval0003's totals are a payment
+    apart; eval0005 holds both rules; eval0002's due date is unreadable and
+    eval0006 was never read."""
+    verdicts = {each.document_id: each.gate.verdict for each in run.documents}
+
+    assert verdicts == {
+        "eval0004": "failed",
+        "eval0002": "not checked",
+        "eval0006": "not checked",
+        "eval0003": "failed",
+        "eval0005": "passed",
+    }
+
+
+def test_counts_gate_verdicts_across_the_subset(run: SubsetScore) -> None:
+    gate = run.gate
+
+    assert (gate.passed, gate.failed, gate.not_checked) == (1, 2, 2)
+
+
+def test_gate_pass_rate_is_passed_over_checked(run: SubsetScore) -> None:
+    """Coverage stays out of the rate: not checked counts on neither side."""
+    assert run.gate.checked == 3
+    assert run.gate.pass_rate == pytest.approx(1 / 3)
+
+
+def test_counts_unreadable_values_per_rule(run: SubsetScore) -> None:
+    assert run.gate.unreadable == {"dates sane": 1, "totals agree": 0}
+    assert tuple(run.gate.unreadable) == RULES
+
+
+def test_the_ablation_counts_catches_misses_and_false_alarms(run: SubsetScore) -> None:
+    """eval0004's due date is misread and the gate failed it: a catch. eval0005's
+    due date is misread and still after its issue date: a miss. eval0003 read
+    both totals right and the gate failed it anyway: a false alarm."""
+    ablation = run.ablation
+
+    assert (ablation.catches, ablation.misses, ablation.false_alarms) == (1, 1, 1)
+
+
+def test_a_reading_is_wrong_only_on_values_a_checked_rule_used(
+    synthetic_subset: Path,
+) -> None:
+    """eval0004's document id is misread too, and the gate cannot see that."""
+    run = score_subset(
+        DocileDataset(synthetic_subset),
+        load(synthetic_subset / "subset.json"),
+        {
+            "eval0004": Prediction(
+                fields={
+                    "document_id": "INV-9999",
+                    "date_issue": "July 3, 2026",
+                    "date_due": "August 2, 2026",
+                }
+            )
+        },
+    )
+
+    assert run.gate.passed == 1
+    assert (run.ablation.catches, run.ablation.misses) == (0, 0)
+
+
+def test_a_failed_reading_is_scored_as_is(run: SubsetScore) -> None:
+    """The gate never drops a reading, so eval0003 keeps its four matched values."""
+    failed = next(each for each in run.documents if each.document_id == "eval0003")
+
+    assert failed.gate.verdict == "failed"
+    assert failed.fields.true_positives == 4
 
 
 def test_reports_a_pinned_document_the_dataset_does_not_hold(

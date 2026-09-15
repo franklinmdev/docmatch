@@ -18,6 +18,22 @@ nothing for a document loses the recall instead of losing the document. The ids
 are reported either way: a run that left out a third of the subset is a broken
 run, not a low score, and only the list says which.
 
+The gate and its ablation
+-------------------------
+
+Every pinned document's reading, derived values included, goes through
+`gate`, and a reading the gate fails is scored like any other. The report
+counts verdicts, and gate pass rate is passed over checked: a reading no rule
+could check counts on neither side, so coverage does not hide inside the rate.
+
+The ablation asks what the gate is worth, over checked readings only. A
+reading is wrong when any value a checked rule used is not matched against its
+label by the field scorer, so the gate is judged on errors it could see and not
+on a misread vendor name no date or total could reveal. A catch is a wrong
+reading the gate failed, a miss a wrong reading it passed, and a false alarm a
+right reading it failed. No backend here returns a confidence yet, so the
+confidence side of the ablation has no signal.
+
 Counts, not values
 ------------------
 
@@ -38,6 +54,7 @@ from pydantic import TypeAdapter, ValidationError
 from docmatch.docile.dataset import DocileDataset
 from docmatch.evals.manifest import Manifest
 from docmatch.extraction.derived import DERIVED_FIELDTYPES, derive, with_derived
+from docmatch.gate import RULES, GateResult, RuleName, gate
 from docmatch.metrics.fields import (
     FieldScore,
     Prediction,
@@ -52,7 +69,8 @@ from docmatch.metrics.line_items import (
     labeled_line_items,
     score_line_items,
 )
-from docmatch.metrics.score import MicroAverage, Score, micro_average
+from docmatch.metrics.normalization import normalize
+from docmatch.metrics.score import MicroAverage, Score, micro_average, ratio
 
 PREDICTIONS = TypeAdapter(dict[str, Prediction])
 """A run's predictions: one document id to one document's prediction.
@@ -88,6 +106,10 @@ class DocumentScore:
     fields_as_read: FieldScore
     """The reading alone, so a report can say what code added to it."""
     line_items: LineItemScore
+    gate: GateResult
+    """The gate on the reading plus its derived values."""
+    wrong: bool
+    """Whether a value a checked rule used is unmatched against its label."""
 
 
 @dataclass(frozen=True)
@@ -119,6 +141,38 @@ class DerivedTotals:
     fieldtype: str
     as_read: FieldTypeTotals
     with_derived: FieldTypeTotals
+
+
+@dataclass(frozen=True)
+class GateTotals:
+    """How the gate went across the subset, in counts."""
+
+    passed: int
+    failed: int
+    not_checked: int
+    unreadable: dict[RuleName, int]
+    """Readings on which a rule could not read a value, per rule."""
+
+    @property
+    def checked(self) -> int:
+        return self.passed + self.failed
+
+    @property
+    def pass_rate(self) -> float:
+        """Passed over checked. Vacuously 1.0 when nothing was checked."""
+        return ratio(self.passed, self.checked)
+
+
+@dataclass(frozen=True)
+class Ablation:
+    """What the gate caught among checked readings, judged on the values it used."""
+
+    catches: int
+    """Wrong, and the gate failed it."""
+    misses: int
+    """Wrong, and the gate passed it."""
+    false_alarms: int
+    """Right, and the gate failed it."""
 
 
 @dataclass(frozen=True)
@@ -173,6 +227,34 @@ class SubsetScore:
                 with_derived=with_derived.get(fieldtype, _no_totals(fieldtype)),
             )
             for fieldtype in DERIVED_FIELDTYPES
+        )
+
+    @property
+    def gate(self) -> GateTotals:
+        """Gate verdicts over every pinned document, and unreadable values."""
+        verdicts = Counter(document.gate.verdict for document in self.documents)
+        unreadable: dict[RuleName, int] = {rule: 0 for rule in RULES}
+        for document in self.documents:
+            for check in document.gate.checks:
+                if check.outcome == "unreadable":
+                    unreadable[check.rule] += 1
+        return GateTotals(
+            passed=verdicts["passed"],
+            failed=verdicts["failed"],
+            not_checked=verdicts["not checked"],
+            unreadable=unreadable,
+        )
+
+    @property
+    def ablation(self) -> Ablation:
+        """Catches, misses, and false alarms over checked readings."""
+        outcomes = Counter(
+            (document.gate.verdict, document.wrong) for document in self.documents
+        )
+        return Ablation(
+            catches=outcomes["failed", True],
+            misses=outcomes["passed", True],
+            false_alarms=outcomes["failed", False],
         )
 
     @property
@@ -254,12 +336,24 @@ def _score_document(
     predicted = prediction is not None
     prediction = NOTHING if prediction is None else prediction
     labeled = labeled_fields(annotation)
+    reading = with_derived(prediction.header, derive(prediction))
+    fields = score_fields(labeled, reading)
+    gated = gate(reading)
     return DocumentScore(
         document_id=document_id,
         predicted=predicted,
-        fields=score_fields(
-            labeled, with_derived(prediction.header, derive(prediction))
-        ),
+        fields=fields,
         fields_as_read=score_fields(labeled, prediction.header),
         line_items=score_line_items(labeled_line_items(annotation), prediction.rows),
+        gate=gated,
+        wrong=_wrong(gated, fields),
+    )
+
+
+def _wrong(gated: GateResult, fields: FieldScore) -> bool:
+    """Whether the field scorer left any value the gate used unmatched."""
+    matched = {each.fieldtype: set(each.matched) for each in fields.per_fieldtype}
+    return any(
+        normalize(fieldtype, text) not in matched.get(fieldtype, set())
+        for fieldtype, text in gated.used
     )
