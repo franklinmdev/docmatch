@@ -56,7 +56,7 @@ Measurement before modeling.
 
 ### Phase 1. Extraction
 
-- Pydantic schemas where every field carries a value and a confidence, and absence is explicit rather than guessed.
+- Pydantic schemas where absence is explicit rather than guessed. A confidence rides beside each value only where a backend returns one natively; no model is asked to grade itself.
 - An `Extractor` interface with several backends: a cheap vision model, a second provider, a commercial prebuilt invoice model, an OCR-then-LLM path, and a local open-weight document model. See Extraction backends.
 - Image preprocessing: orientation from metadata, downscale to a fixed long edge, no grayscale.
 - Deterministic validation gate: line totals reconcile to subtotal, tax arithmetic is consistent, totals agree, dates are sane, identifiers pass checksums where they exist. Confidence never gates acceptance on its own.
