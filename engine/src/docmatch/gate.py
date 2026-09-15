@@ -60,7 +60,6 @@ Outcome = Literal["passed", "failed", "absent", "paid", "unreadable"]
 """What one rule decided. The last three are the reasons it could not check."""
 
 Verdict = Literal["passed", "failed", "not checked"]
-VERDICTS: tuple[Verdict, ...] = ("passed", "failed", "not checked")
 
 TOLERANCE = Decimal("0.01")
 
@@ -76,10 +75,6 @@ class RuleCheck:
     outcome: Outcome
     used: tuple[UsedValue, ...]
     """Every value the rule compared, empty when it could not check."""
-
-    @property
-    def checked(self) -> bool:
-        return self.outcome in ("passed", "failed")
 
 
 @dataclass(frozen=True)

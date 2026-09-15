@@ -132,7 +132,7 @@ Filled in as phases complete. Every row names the commit that produced it.
 
 | Backend | Field F1 | Line-item F1 | Gate pass rate | Cost / doc | p50 / p95 latency | Commit |
 |---|---|---|---|---|---|---|
-| `gemini-3.1-flash-lite`, pages at 1600 px | 0.615 | 0.374 | 0.915 of 47 | $0.00203 | 5.2 s / 9.3 s | [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
+| `gemini-3.1-flash-lite`, pages at 1600 px | 0.615 | 0.374 | 0.915 of 47, eval at [`a125b0b`](https://github.com/franklinmdev/docmatch/commit/a125b0b) | $0.00203 | 5.2 s / 9.3 s | [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
 
 The two commands that produced the row, with DocILE's labels in `data/docile`
 and the pinned public copies in `data/ucsf`:
@@ -193,10 +193,8 @@ dates sane (`date_issue` on or before `date_due`) and totals agree
 carries `amount_paid`). A reading passes when at least one rule was checked and
 none failed, and a failed reading is kept and scored as is. Gate pass rate is
 passed over checked, so the 53 readings no rule could check count on neither
-side. Coverage is the gate's first limit on this row: 81 readings lack one of
-the two dates, and totals agree was not checked on 53 readings missing a total
-and on 14 carrying `amount_paid`. Dates sane never failed, and 2 readings
-carried a date the normalizer cannot read.
+side, and coverage is the gate's first limit on this row. On 2 readings dates
+sane was not checked because a date it needed could not be read.
 
 ### Gate ablation, checked readings
 
@@ -213,9 +211,9 @@ returns one natively.
 Measured with the same eval command over the saved run above. Of the 4
 readings the gate failed, half were right: the labels themselves break totals
 agree on 6.5% of the UCSF documents it can check, and a correct reading of
-such a document fails it too. Three of the 47 checked readings are wrong at all, so
-this row says little yet about what the gate is worth; the other two backends
-decide that.
+such a document fails it too. Only 3 of the 47 checked readings are wrong,
+so this row says little yet about what the gate is worth; the other two
+backends decide that.
 
 ### Matching, injected discrepancies
 
