@@ -27,3 +27,11 @@ _Avoid_: certainty, probability, self-reported confidence
 **Calibration**:
 How well confidence predicts correctness: of the values a backend read at a given confidence, the share that are right. It speaks to precision only, since a value a backend missed carries no confidence.
 _Avoid_: accuracy (on its own), reliability
+
+**Gate**:
+The deterministic rules a reading must not break: its totals agree and its dates are in order. A reading passes when at least one rule could be checked and none failed, fails when any rule failed, and is not checked when no rule could be. A reading that fails is kept and scored as is.
+_Avoid_: validation (on its own), filter, guardrail
+
+**Gate ablation**:
+The comparison of what the gate and confidence each catch among readings whose gated values are wrong, so the gate is judged only on errors it could see.
+_Avoid_: gate eval, gate accuracy
