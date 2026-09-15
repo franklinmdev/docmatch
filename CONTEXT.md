@@ -21,7 +21,7 @@ _Avoid_: filtering, validation
 ### Extraction
 
 **Derived value**:
-A value code fills into a reading from other values the same reading already carries, without looking at the page again or asking a model. A derived value carries no confidence.
+A value code adds alongside a reading, taken from values that reading already carries, without looking at the page again or asking a model. It is kept apart from what the backend read, and it carries no confidence.
 _Avoid_: inferred value, post-processed value
 
 **Confidence**:
