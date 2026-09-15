@@ -235,11 +235,24 @@ class Answer(Protocol):
     Named here rather than imported, because the SDK keeps its response class
     in a private module and has two public things called `Interaction`, a
     resource class and a request union, and which one a typechecker sees
-    depends on import order. Four attributes are all that is read, so four
+    depends on import order. Five attributes are all that is read, so five
     attributes are what an answer has to carry, whichever class it is; an SDK
     release that renames one fails the narrowing below with a message that
     says so, rather than failing every `docmatch` command at import.
     """
+
+    @property
+    def model(self) -> str | None:
+        """The served model.
+
+        `Interaction.model`, "The name of the Model used for generating the
+        interaction", on https://ai.google.dev/api/interactions-api, read
+        2026-09-15 against google-genai 2.23.0. The `modelVersion` field that
+        names the served version is on the legacy `generate_content` response,
+        not on this API. The reference's examples show the requested name
+        coming back, so whether this ever differs from the requested model is
+        unverified; it is recorded as the vendor reports it either way.
+        """
 
     @property
     def status(self) -> str: ...
@@ -285,10 +298,6 @@ class GeminiExtractor:
     client has been closed". That is what the first end-to-end run did. Use
     `extractor()` rather than filling this in by hand.
     """
-
-    @property
-    def name(self) -> str:
-        return self.model
 
     @property
     def price(self) -> Price:
@@ -357,6 +366,7 @@ class GeminiExtractor:
             usage=usage,
             cost=cost,
             latency=latency,
+            served_model=answer.model,
         )
 
 

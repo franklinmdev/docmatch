@@ -38,11 +38,17 @@ def document(tmp_path: Path) -> Document:
 
 
 def answer(
-    text: str, *, status: str = "completed", tokens: int = 10, thoughts: int = 0
+    text: str,
+    *,
+    status: str = "completed",
+    tokens: int = 10,
+    thoughts: int = 0,
+    model: str | None = "gemini-3.1-flash-lite",
 ) -> Interaction:
     """An interaction carrying one text output, as the API returns one."""
     return Interaction.model_validate(
         {
+            "model": model,
             "status": status,
             "steps": [
                 {"type": "model_output", "content": [{"type": "text", "text": text}]}
@@ -102,6 +108,27 @@ def test_reads_a_document_into_a_prediction(document: Document) -> None:
     assert extracted.usage.input_tokens == 10
     assert extracted.usage.output_tokens == 4
     assert extracted.latency >= 0
+
+
+def test_records_the_model_the_vendor_says_read_the_document(
+    document: Document,
+) -> None:
+    """The served model comes off the answer, not off what was asked for."""
+    reading, _ = extractor(answer("{}", model="gemini-3.1-flash-lite-002"))
+
+    extracted = reading.extract(document)
+
+    assert reading.model == "gemini-3.1-flash-lite"
+    assert extracted.served_model == "gemini-3.1-flash-lite-002"
+
+
+def test_an_answer_that_names_no_model_has_no_served_model(
+    document: Document,
+) -> None:
+    """Unreported, never assumed to be the requested model."""
+    reading, _ = extractor(answer("{}", model=None))
+
+    assert reading.extract(document).served_model is None
 
 
 def test_prices_the_call_at_the_rate_written_down_for_the_model(

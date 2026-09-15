@@ -984,7 +984,11 @@ def test_subset_refuses_to_draw_without_writing(
 
 
 def a_document(
-    document_id: str, *, latency: float = 2.0, failure: str | None = None
+    document_id: str,
+    *,
+    latency: float = 2.0,
+    failure: str | None = None,
+    served_model: str = "gemini-3.1-flash-lite",
 ) -> DocumentRun:
     read = failure is None
     return DocumentRun(
@@ -998,12 +1002,14 @@ def a_document(
         latency=latency,
         prediction=Prediction(fields={"vendor_name": ["Northwind"]}) if read else None,
         failure=failure,
+        served_model=served_model if read else None,
     )
 
 
 def a_run(*documents: DocumentRun) -> Run:
     return Run(
-        backend="gemini-3.1-flash-lite",
+        backend="gemini",
+        requested_model="gemini-3.1-flash-lite",
         manifest=Manifest(
             split="val",
             seed=1,
@@ -1021,7 +1027,9 @@ def test_extract_reports_what_the_run_cost(tmp_path: Path) -> None:
 
     report = render_extract(tmp_path, run)
 
-    assert "backend     gemini-3.1-flash-lite" in report
+    assert "backend     gemini" in report
+    assert "requested   gemini-3.1-flash-lite" in report
+    assert "served      gemini-3.1-flash-lite" in report
     assert "predicted   2" in report
     assert "failed      0" in report
     assert "total          $0.0040" in report
@@ -1029,6 +1037,61 @@ def test_extract_reports_what_the_run_cost(tmp_path: Path) -> None:
     assert "input tokens   2,600" in report
     assert "p50  2.00 s" in report
     assert "p95  5.00 s" in report
+
+
+def test_extract_names_every_model_the_vendor_said_it_served(tmp_path: Path) -> None:
+    """A name pointed at a new version mid-run shows up here, not only in run.json."""
+    run = a_run(
+        a_document("syn0001"),
+        a_document("syn0002", served_model="gemini-3.1-flash-lite-002"),
+        a_document("syn0003", failure="gave up"),
+    )
+
+    report = render_extract(tmp_path, run)
+
+    assert "served      gemini-3.1-flash-lite, gemini-3.1-flash-lite-002" in report
+
+
+def test_extract_says_when_no_served_model_was_reported(tmp_path: Path) -> None:
+    run = a_run(a_document("syn0001", failure="gave up"))
+
+    assert "served      none reported" in render_extract(tmp_path, run)
+
+
+@pytest.mark.parametrize("backend", ["azure", "openai"])
+def test_extract_refuses_a_backend_not_wired_yet_before_making_the_run_directory(
+    backend: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "not-a-real-key")
+    out = tmp_path / "run"
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(out),
+            "--data-dir",
+            str(tmp_path),
+            "--backend",
+            backend,
+        ]
+    )
+
+    assert exit_code == 1
+    assert f"the {backend} backend is not wired yet" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_extract_refuses_a_backend_it_does_not_know(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit):
+        main(["extract", "--out", str(tmp_path), "--backend", "mistral"])
+
+    assert "invalid choice" in capsys.readouterr().err
 
 
 def test_extract_lists_the_documents_that_produced_nothing(tmp_path: Path) -> None:
@@ -1333,5 +1396,8 @@ def test_extract_reads_a_limited_prefix_end_to_end(
     assert list(read_predictions(out / "predictions.json")) == ["syn0001"]
     assert load(out / "manifest.json").document_ids == ("syn0001",)
     record = json.loads((out / "run.json").read_text())
+    assert record["backend"] == "gemini"
+    assert record["requested_model"] == "fake-001"
     assert record["long_edge"] == 1200
     assert [each["pages"] for each in record["documents"]] == [1]
+    assert [each["served_model"] for each in record["documents"]] == ["fake-002"]

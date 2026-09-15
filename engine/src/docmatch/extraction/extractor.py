@@ -133,14 +133,20 @@ class Extraction:
     """US dollars, unrounded."""
     latency: float
     """Seconds spent waiting for the backend, one attempt only."""
+    served_model: str | None
+    """The model the vendor reports reading with, or None when it reports none.
+
+    Taken off the answer and never filled in from the requested model: a vendor
+    that points a name at a new version is what this is here to show.
+    """
 
 
 class Extractor(Protocol):
     """A document in, one reading out. The seam phase 1 hangs every backend on."""
 
     @property
-    def name(self) -> str:
-        """How this backend is named in a benchmark row."""
+    def model(self) -> str:
+        """The requested model, the one every document of a run is asked for."""
 
     def extract(self, document: Document) -> Extraction:
         """Read one document. Raises `ExtractionError` when it cannot."""
