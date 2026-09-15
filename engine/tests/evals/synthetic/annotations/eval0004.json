@@ -3,7 +3,8 @@
     {"bbox": [0.08, 0.10, 0.42, 0.13], "fieldtype": "vendor_name", "page": 0, "text": "Harbour Signs"},
     {"bbox": [0.70, 0.10, 0.92, 0.13], "fieldtype": "document_id", "page": 0, "text": "INV-1004"},
     {"bbox": [0.70, 0.14, 0.92, 0.17], "fieldtype": "date_issue", "page": 0, "text": "07/03/26"},
-    {"bbox": [0.70, 0.80, 0.92, 0.83], "fieldtype": "amount_total_gross", "page": 0, "text": "95.00"}
+    {"bbox": [0.70, 0.80, 0.92, 0.83], "fieldtype": "amount_total_gross", "page": 0, "text": "95.00"},
+    {"bbox": [0.60, 0.80, 0.69, 0.83], "fieldtype": "currency_code_amount_due", "page": 0, "text": "USD"}
   ],
   "line_item_extractions": [
     {"bbox": [0.10, 0.50, 0.16, 0.53], "fieldtype": "line_item_quantity", "line_item_id": 1, "page": 0, "text": "1"},

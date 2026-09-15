@@ -34,6 +34,7 @@ from docmatch.evals import corpus, manifest
 from docmatch.evals.corpus import Census, Coverage, RuleCoverage, Survey
 from docmatch.evals.manifest import Manifest, ManifestError
 from docmatch.evals.run import (
+    DerivedTotals,
     FieldTypeTotals,
     SubsetScore,
     read_predictions,
@@ -783,6 +784,9 @@ def render_eval(path: Path, run: SubsetScore) -> str:
         f"Fields ({len(run.per_fieldtype)})",
         *_totals(run.per_fieldtype),
         "",
+        f"Derived values ({len(run.derived)})",
+        *_derived(run.derived),
+        "",
         *_ratios("Line-item score", run.line_items),
         "",
         f"Cell accuracy ({len(run.per_cell_fieldtype)})",
@@ -813,13 +817,37 @@ def _totals(totals: Sequence[FieldTypeTotals]) -> list[str]:
     follow from the counts beside it.
     """
     width = _width(each.fieldtype for each in totals)
+    return [f"  {each.fieldtype.ljust(width)}  {_counts(each)}" for each in totals]
+
+
+def _counts(totals: FieldTypeTotals) -> str:
+    """One fieldtype's F1 and the counts it comes from."""
+    spurious = f", {totals.spurious} spurious" if totals.spurious else ""
+    return (
+        f"{totals.f1:.3f}  {totals.matched} matched, {totals.missing} missing{spurious}"
+    )
+
+
+DERIVED_VIEWS = ("as read", "with derived")
+"""The two scores of a fieldtype code adds values to."""
+
+
+def _derived(derived: Sequence[DerivedTotals]) -> list[str]:
+    """Each fieldtype code adds to, as the backend read it and with what code added.
+
+    Side by side, so a gain on the line below is credited to code and not to
+    the backend. The field score above already counts the derived values.
+    """
+    width = _width(each.fieldtype for each in derived)
+    views = _width(DERIVED_VIEWS)
     lines = []
-    for each in totals:
-        spurious = f", {each.spurious} spurious" if each.spurious else ""
-        lines.append(
-            f"  {each.fieldtype.ljust(width)}  {each.f1:.3f}  "
-            f"{each.matched} matched, {each.missing} missing{spurious}"
-        )
+    for each in derived:
+        name = each.fieldtype.ljust(width)
+        for view, totals in zip(
+            DERIVED_VIEWS, (each.as_read, each.with_derived), strict=True
+        ):
+            lines.append(f"  {name}  {view.ljust(views)}  {_counts(totals)}")
+            name = " " * width  # the fieldtype is named once, then hangs
     return lines
 
 
