@@ -20,6 +20,10 @@ _Avoid_: filtering, validation
 
 ### Extraction
 
+**Derived value**:
+A value code fills into a reading from other values the same reading carries, never from the page or a model. A derived value carries no confidence.
+_Avoid_: inferred value, post-processed value
+
 **Confidence**:
 A backend's own score, returned alongside a value it read, for how likely that value is correct. Only some backends return one; a backend that does not has no confidence, never an assumed or model-graded one.
 _Avoid_: certainty, probability, self-reported confidence
