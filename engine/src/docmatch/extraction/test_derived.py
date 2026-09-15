@@ -34,3 +34,12 @@ def test_leaves_the_reading_as_the_backend_returned_it() -> None:
     derive(reading)
 
     assert reading.fields == {"amount_due": "$95.00"}
+
+
+def test_reads_a_currency_name_across_a_line_break() -> None:
+    """The scorer collapses whitespace, so a name split over two lines is known."""
+    reading = Prediction(fields={"amount_due": "95.00 US\nDOLLARS"})
+
+    assert derive(reading) == (
+        DerivedValue("currency_code_amount_due", "US\nDOLLARS", "amount_due"),
+    )

@@ -169,8 +169,8 @@ class SubsetScore:
         return tuple(
             DerivedTotals(
                 fieldtype=fieldtype,
-                as_read=as_read.get(fieldtype, _none(fieldtype)),
-                with_derived=with_derived.get(fieldtype, _none(fieldtype)),
+                as_read=as_read.get(fieldtype, _no_totals(fieldtype)),
+                with_derived=with_derived.get(fieldtype, _no_totals(fieldtype)),
             )
             for fieldtype in DERIVED_FIELDTYPES
         )
@@ -218,7 +218,8 @@ def _totals(scores: Iterable[FieldScore]) -> tuple[FieldTypeTotals, ...]:
     )
 
 
-def _none(fieldtype: str) -> FieldTypeTotals:
+def _no_totals(fieldtype: str) -> FieldTypeTotals:
+    """A fieldtype nothing was labeled, read or derived for, counted as zeros."""
     return FieldTypeTotals(fieldtype=fieldtype, matched=0, missing=0, spurious=0)
 
 

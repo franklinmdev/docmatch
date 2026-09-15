@@ -11,7 +11,12 @@ import pytest
 
 from docmatch.docile.dataset import DocileDataset, DocumentNotFoundError
 from docmatch.evals.manifest import Manifest, load
-from docmatch.evals.run import SubsetScore, read_predictions, score_subset
+from docmatch.evals.run import (
+    DerivedTotals,
+    SubsetScore,
+    read_predictions,
+    score_subset,
+)
 from docmatch.metrics.fields import Prediction, PredictionError
 
 
@@ -123,9 +128,7 @@ def test_scores_the_currency_as_read_and_with_derived_values(
 ) -> None:
     """eval0004 labels USD and its reading only prints `$95.00`; eval0003 labels
     no currency and its reading prints `$412.50`, which code copies anyway."""
-    currency = next(
-        each for each in run.derived if each.fieldtype == "currency_code_amount_due"
-    )
+    currency = _currency(run)
 
     as_read = currency.as_read
     with_derived = currency.with_derived
@@ -216,7 +219,7 @@ def test_a_currency_inside_a_longer_word_is_not_derived(
         {"eval0004": Prediction(fields={"amount_due": amount})},
     )
 
-    currency = run.derived[0].with_derived
+    currency = _currency(run).with_derived
     assert (currency.matched, currency.missing, currency.spurious) == (0, 1, 0)
 
 
@@ -229,4 +232,10 @@ def test_a_currency_the_scorer_does_not_know_is_not_derived(
         {"eval0004": Prediction(fields={"amount_total_gross": "95.00 CAD"})},
     )
 
-    assert run.derived[0].with_derived.spurious == 0
+    assert _currency(run).with_derived.spurious == 0
+
+
+def _currency(run: SubsetScore) -> DerivedTotals:
+    return next(
+        each for each in run.derived if each.fieldtype == "currency_code_amount_due"
+    )

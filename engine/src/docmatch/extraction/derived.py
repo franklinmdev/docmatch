@@ -34,10 +34,10 @@ from dataclasses import dataclass
 from docmatch.metrics.fields import FieldValues, Prediction
 from docmatch.metrics.normalization import CURRENCIES, reads_currency
 
-CURRENCY = "currency_code_amount_due"
+CURRENCY_FIELDTYPE = "currency_code_amount_due"
 CURRENCY_SOURCES = ("amount_due", "amount_total_gross")
 
-DERIVED_FIELDTYPES = (CURRENCY,)
+DERIVED_FIELDTYPES = (CURRENCY_FIELDTYPE,)
 """The fieldtypes a rule here adds values to, in the order a report lists them."""
 
 
@@ -51,7 +51,7 @@ class DerivedValue:
 
 
 _LETTER = r"[^\W\d_]"
-_CURRENCY = re.compile(
+_CURRENCY_PATTERN = re.compile(
     rf"(?<!{_LETTER})(?:"
     + "|".join(
         re.escape(name).replace(r"\ ", r"\s+")
@@ -73,9 +73,12 @@ def derive(prediction: Prediction) -> tuple[DerivedValue, ...]:
     found: dict[DerivedValue, None] = {}
     for source in CURRENCY_SOURCES:
         for text in header.get(source, ()):
-            for match in _CURRENCY.finditer(text):
-                if reads_currency(match.group()):
-                    found[DerivedValue(CURRENCY, match.group(), source)] = None
+            for match in _CURRENCY_PATTERN.finditer(text):
+                # The pattern allows any whitespace inside a name; the scorer
+                # collapses it, and this asks the scorer rather than assuming.
+                text_found = match.group()
+                if reads_currency(text_found):
+                    found[DerivedValue(CURRENCY_FIELDTYPE, text_found, source)] = None
     return tuple(found)
 
 

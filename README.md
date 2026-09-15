@@ -172,7 +172,8 @@ floor is supposed to be.
 The row was scored before code derived the currency from the amounts the model
 did read. `docmatch eval` now adds that derived value, so the command above
 reports field F1 0.550 on the same saved predictions, with the currency field
-at 0.812. That is a measurement of the rule, not a new row: the row changes
+at 0.812, as of
+[`e96d5bf`](https://github.com/franklinmdev/docmatch/commit/e96d5bf). That is a measurement of the rule, not a new row: the row changes
 when the subset is rerun.
 
 ### Matching, injected discrepancies
@@ -317,8 +318,8 @@ uv run docmatch eval --predictions predictions.json
 
 From a checkout with DocILE in `data/docile`, that is the command the numbers
 in the Benchmarks section come from. It prints field F1 and line-item F1 over
-the whole subset, a per-fieldtype breakdown of each, every field code derives
-a value for shown as read and with its derived values, and the ids behind two
+the whole subset, a per-fieldtype breakdown of each, the currency field both
+as read and with the value code derives for it, and the ids behind two
 counts that are not scores: pinned documents the run did not predict, and
 predicted documents the subset does not pin.
 
