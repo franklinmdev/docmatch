@@ -101,6 +101,9 @@ class DocumentRun:
     when none did."""
     prediction: Prediction | None
     failure: str | None
+    served_model: str | None
+    """The served model the vendor reports reading the prediction with, None when
+    the vendor named none or there is no prediction."""
 
     @property
     def predicted(self) -> bool:
@@ -112,6 +115,10 @@ class Run:
     """One backend over one manifest, document by document."""
 
     backend: str
+    """Which vendor's backend read the run, as `--backend` names it."""
+    requested_model: str
+    """The requested model, the same for every document; each one's served model
+    is its own."""
     manifest: Manifest
     long_edge: int
     """What a rendering backend was asked to render at, kept with the record."""
@@ -276,6 +283,7 @@ def _document(
             latency=read.latency,
             prediction=read.prediction,
             failure=None,
+            served_model=read.served_model,
         )
     return _failed(
         document_id,
@@ -307,6 +315,7 @@ def _failed(
         latency=latency,
         prediction=None,
         failure=failure,
+        served_model=None,
     )
 
 
@@ -339,6 +348,7 @@ def write_record(run: Run, path: Path) -> None:
     """
     body = {
         "backend": run.backend,
+        "requested_model": run.requested_model,
         "split": run.manifest.split,
         "size": run.manifest.size,
         "long_edge": run.long_edge,
@@ -359,6 +369,7 @@ def write_record(run: Run, path: Path) -> None:
                 "latency": each.latency,
                 "predicted": each.predicted,
                 "failure": each.failure,
+                "served_model": each.served_model,
             }
             for each in run.documents
         ],

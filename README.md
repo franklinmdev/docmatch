@@ -451,7 +451,13 @@ uv run --env-file .env docmatch extract --out data/runs/gemini
 uv run docmatch eval --predictions data/runs/gemini/predictions.json
 ```
 
-`--model` chooses the backend, `--long-edge` the pixels on a rendered page's
+`--backend` chooses the vendor, `gemini` by default; `azure` and `openai` are
+named and refused until their backends are wired. `--model` chooses the
+**requested model**, and each backend has its own default
+(`gemini-3.1-flash-lite` for Gemini) and its own price table in code, so a model
+with no written price is refused before any request. `run.json` records the
+requested model once and, on every document, the **served model** the vendor
+reports reading it with. `--long-edge` sets the pixels on a rendered page's
 longer side for a backend that renders pages, `--attempts` and `--cost-cap`
 bound what one document may spend before it is given up on, and `--limit` reads
 only the first few pinned documents, which is how to check that a run works
