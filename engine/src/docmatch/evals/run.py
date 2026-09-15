@@ -29,7 +29,7 @@ fieldtype is failing is what the breakdown is for, and a count says that.
 """
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,6 +37,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from docmatch.docile.dataset import DocileDataset
 from docmatch.evals.manifest import Manifest
+from docmatch.extraction.derived import DERIVED_FIELDTYPES, derive, with_derived
 from docmatch.metrics.fields import (
     FieldScore,
     Prediction,
@@ -83,6 +84,9 @@ class DocumentScore:
     predicted: bool
     """Whether the run said anything about this document at all."""
     fields: FieldScore
+    """The reading plus its derived values, which is what every number takes."""
+    fields_as_read: FieldScore
+    """The reading alone, so a report can say what code added to it."""
     line_items: LineItemScore
 
 
@@ -106,6 +110,15 @@ class FieldTypeTotals(Score):
     @property
     def false_positives(self) -> int:
         return self.spurious
+
+
+@dataclass(frozen=True)
+class DerivedTotals:
+    """One fieldtype code adds values to, as read and with those values."""
+
+    fieldtype: str
+    as_read: FieldTypeTotals
+    with_derived: FieldTypeTotals
 
 
 @dataclass(frozen=True)
@@ -139,22 +152,27 @@ class SubsetScore:
     @property
     def per_fieldtype(self) -> tuple[FieldTypeTotals, ...]:
         """Every KILE fieldtype seen on either side, with its three counts."""
-        matched: Counter[str] = Counter()
-        missing: Counter[str] = Counter()
-        spurious: Counter[str] = Counter()
-        for document in self.documents:
-            for each in document.fields.per_fieldtype:
-                matched[each.fieldtype] += len(each.matched)
-                missing[each.fieldtype] += len(each.missing)
-                spurious[each.fieldtype] += len(each.spurious)
+        return _totals(document.fields for document in self.documents)
+
+    @property
+    def derived(self) -> tuple[DerivedTotals, ...]:
+        """Every fieldtype code adds values to, as read and with derived values.
+
+        Listed whether or not anything was added or labeled, so the report
+        always shows the line and a zero is a finding rather than an absence.
+        """
+        as_read = {
+            each.fieldtype: each
+            for each in _totals(document.fields_as_read for document in self.documents)
+        }
+        with_derived = {each.fieldtype: each for each in self.per_fieldtype}
         return tuple(
-            FieldTypeTotals(
+            DerivedTotals(
                 fieldtype=fieldtype,
-                matched=matched[fieldtype],
-                missing=missing[fieldtype],
-                spurious=spurious[fieldtype],
+                as_read=as_read.get(fieldtype, _none(fieldtype)),
+                with_derived=with_derived.get(fieldtype, _none(fieldtype)),
             )
-            for fieldtype in sorted({*matched, *missing, *spurious})
+            for fieldtype in DERIVED_FIELDTYPES
         )
 
     @property
@@ -177,6 +195,31 @@ class SubsetScore:
             )
             for fieldtype in sorted({*correct, *labeled, *spurious})
         )
+
+
+def _totals(scores: Iterable[FieldScore]) -> tuple[FieldTypeTotals, ...]:
+    """Per-fieldtype counts summed over documents, every fieldtype seen."""
+    matched: Counter[str] = Counter()
+    missing: Counter[str] = Counter()
+    spurious: Counter[str] = Counter()
+    for score in scores:
+        for each in score.per_fieldtype:
+            matched[each.fieldtype] += len(each.matched)
+            missing[each.fieldtype] += len(each.missing)
+            spurious[each.fieldtype] += len(each.spurious)
+    return tuple(
+        FieldTypeTotals(
+            fieldtype=fieldtype,
+            matched=matched[fieldtype],
+            missing=missing[fieldtype],
+            spurious=spurious[fieldtype],
+        )
+        for fieldtype in sorted({*matched, *missing, *spurious})
+    )
+
+
+def _none(fieldtype: str) -> FieldTypeTotals:
+    return FieldTypeTotals(fieldtype=fieldtype, matched=0, missing=0, spurious=0)
 
 
 NOTHING = Prediction()
@@ -209,9 +252,13 @@ def _score_document(
     annotation = dataset.annotation(document_id)
     predicted = prediction is not None
     prediction = NOTHING if prediction is None else prediction
+    labeled = labeled_fields(annotation)
     return DocumentScore(
         document_id=document_id,
         predicted=predicted,
-        fields=score_fields(labeled_fields(annotation), prediction.header),
+        fields=score_fields(
+            labeled, with_derived(prediction.header, derive(prediction))
+        ),
+        fields_as_read=score_fields(labeled, prediction.header),
         line_items=score_line_items(labeled_line_items(annotation), prediction.rows),
     )

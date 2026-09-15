@@ -12,7 +12,7 @@ import pytest
 from docmatch.docile.dataset import DocileDataset, DocumentNotFoundError
 from docmatch.evals.manifest import Manifest, load
 from docmatch.evals.run import SubsetScore, read_predictions, score_subset
-from docmatch.metrics.fields import PredictionError
+from docmatch.metrics.fields import Prediction, PredictionError
 
 
 @pytest.fixture
@@ -36,10 +36,10 @@ def test_scores_every_document_the_manifest_pins(run: SubsetScore) -> None:
 
 def test_micro_averages_the_field_score_across_the_subset(run: SubsetScore) -> None:
     """Counts are summed, not ratios averaged, so every value weighs the same."""
-    assert (run.fields.true_positives, run.fields.false_negatives) == (14, 6)
-    assert run.fields.false_positives == 2
-    assert run.fields.precision == pytest.approx(0.875)
-    assert run.fields.recall == pytest.approx(0.7)
+    assert (run.fields.true_positives, run.fields.false_negatives) == (15, 6)
+    assert run.fields.false_positives == 3
+    assert run.fields.precision == pytest.approx(15 / 18)
+    assert run.fields.recall == pytest.approx(15 / 21)
 
 
 def test_micro_averages_the_line_item_score_across_the_subset(
@@ -118,6 +118,32 @@ def test_breaks_per_cell_accuracy_down_by_fieldtype(run: SubsetScore) -> None:
     assert by_fieldtype["line_item_amount_gross"].spurious == 2
 
 
+def test_scores_the_currency_as_read_and_with_derived_values(
+    run: SubsetScore,
+) -> None:
+    """eval0004 labels USD and its reading only prints `$95.00`; eval0003 labels
+    no currency and its reading prints `$412.50`, which code copies anyway."""
+    currency = next(
+        each for each in run.derived if each.fieldtype == "currency_code_amount_due"
+    )
+
+    as_read = currency.as_read
+    with_derived = currency.with_derived
+    assert (as_read.matched, as_read.missing, as_read.spurious) == (0, 1, 0)
+    assert (with_derived.matched, with_derived.missing, with_derived.spurious) == (
+        1,
+        0,
+        1,
+    )
+
+
+def test_the_field_score_counts_derived_values(run: SubsetScore) -> None:
+    by_fieldtype = {each.fieldtype: each for each in run.per_fieldtype}
+
+    assert by_fieldtype["currency_code_amount_due"].matched == 1
+    assert by_fieldtype["currency_code_amount_due"].spurious == 1
+
+
 def test_reports_a_pinned_document_the_dataset_does_not_hold(
     synthetic_subset: Path,
 ) -> None:
@@ -177,3 +203,30 @@ def test_names_the_document_and_the_cell_of_a_bad_prediction(tmp_path: Path) -> 
         read_predictions(path)
 
     assert "eval0002.line_items.1.line_item_quantity" in str(raised.value)
+
+
+@pytest.mark.parametrize("amount", ["USDA 95.00", "AU$ 95.00", "95.00 CHFX"])
+def test_a_currency_inside_a_longer_word_is_not_derived(
+    synthetic_subset: Path, amount: str
+) -> None:
+    """eval0004 labels USD, so a `$` or `USD` taken from inside a word would match."""
+    run = score_subset(
+        DocileDataset(synthetic_subset),
+        load(synthetic_subset / "subset.json"),
+        {"eval0004": Prediction(fields={"amount_due": amount})},
+    )
+
+    currency = run.derived[0].with_derived
+    assert (currency.matched, currency.missing, currency.spurious) == (0, 1, 0)
+
+
+def test_a_currency_the_scorer_does_not_know_is_not_derived(
+    synthetic_subset: Path,
+) -> None:
+    run = score_subset(
+        DocileDataset(synthetic_subset),
+        load(synthetic_subset / "subset.json"),
+        {"eval0004": Prediction(fields={"amount_total_gross": "95.00 CAD"})},
+    )
+
+    assert run.derived[0].with_derived.spurious == 0

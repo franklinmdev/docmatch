@@ -358,7 +358,7 @@ def _four_digit(year: int) -> int:
     return year + (2000 if year < _YEAR_PIVOT else 1900)
 
 
-_CURRENCIES = {
+CURRENCIES = {
     "$": "USD",
     "US$": "USD",
     "USD": "USD",
@@ -372,17 +372,22 @@ _CURRENCIES = {
     "YEN": "JPY",
     "CHF": "CHF",
 }
+"""Every currency the rule knows, as written, to its ISO 4217 code.
+
+Public because the derived currency value in `extraction.derived` copies only
+what this table knows, so the two can never disagree about what a currency is.
+"""
 
 
 def normalize_currency(text: str) -> str:
     """A currency as its ISO 4217 code, or the text rule if it is not one we know."""
-    code = _CURRENCIES.get(normalize_text(text).upper())
+    code = CURRENCIES.get(normalize_text(text).upper())
     return code.casefold() if code is not None else normalize_text(text)
 
 
 def reads_currency(text: str) -> bool:
     """Whether the currency rule knows this currency."""
-    return normalize_text(text).upper() in _CURRENCIES
+    return normalize_text(text).upper() in CURRENCIES
 
 
 _NORMALIZERS: dict[Rule, Callable[[str], str]] = {
