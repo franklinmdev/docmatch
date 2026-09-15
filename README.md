@@ -132,7 +132,7 @@ Filled in as phases complete. Every row names the commit that produced it.
 
 | Backend | Field F1 | Line-item F1 | Gate pass rate | Cost / doc | p50 / p95 latency | Commit |
 |---|---|---|---|---|---|---|
-| `gemini-3.1-flash-lite`, pages at 1600 px | 0.615 | 0.374 | phase 1 | $0.00203 | 5.2 s / 9.3 s | [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
+| `gemini-3.1-flash-lite`, pages at 1600 px | 0.615 | 0.374 | 0.915 of 47, eval at [`a125b0b`](https://github.com/franklinmdev/docmatch/commit/a125b0b) | $0.00203 | 5.2 s / 9.3 s | [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
 
 The two commands that produced the row, with DocILE's labels in `data/docile`
 and the pinned public copies in `data/ucsf`:
@@ -144,9 +144,10 @@ uv run docmatch eval --predictions data/runs/gemini/predictions.json
 
 All 100 pinned documents were read, every one on its first attempt, and none
 failed, so both numbers are over the whole subset. The run cost $0.20 and took
-144,353 input and 111,507 output tokens. There is no gate pass rate yet because
-there is no gate: the deterministic validation gate is phase 1, and the column
-is here so that the row it belongs to already exists.
+144,353 input and 111,507 output tokens. The gate pass rate is the same saved
+run scored by the eval at
+[`a125b0b`](https://github.com/franklinmdev/docmatch/commit/a125b0b), which
+added the gate; field F1 and line-item F1 did not move.
 
 **Why this row replaced the Phase 0 one.** The subset moved. The Phase 0 row
 was measured on 100 val documents whose pages the backend read from DocILE's
@@ -185,6 +186,36 @@ resolution and no retries on content, which is what a floor is supposed to be.
 recall miss and not a format one, since the scorer already reads `$` as USD.
 With the symbol code takes from `amount_due` and `amount_total_gross`, it is
 0.889, with 52 matched, 10 missing and 3 spurious.
+
+**The gate.** Two rules, each checked on a reading plus its derived values:
+dates sane (`date_issue` on or before `date_due`) and totals agree
+(`amount_total_gross` within 0.01 of `amount_due`, not checked when the reading
+carries `amount_paid`). A reading passes when at least one rule was checked and
+none failed, and a failed reading is kept and scored as is. Gate pass rate is
+passed over checked, so the 53 readings no rule could check count on neither
+side, and coverage is the gate's first limit on this row. On 2 readings dates
+sane was not checked because a date it needed could not be read.
+
+### Gate ablation, checked readings
+
+A reading is wrong when a value a checked rule used is unmatched against its
+label, so the gate is judged only on errors it could see. A value whose
+fieldtype the document does not label is unmatched too, the same verdict the
+field score gives it as spurious. A catch is a wrong
+reading the gate failed, a miss a wrong reading it passed, and a false alarm a
+right reading it failed. Confidence is filled in only for a backend that
+returns one natively.
+
+| Backend | Checked | Catches | Misses | False alarms | Confidence | Commit |
+|---|---|---|---|---|---|---|
+| `gemini-3.1-flash-lite` | 47 | 2 | 1 | 2 | no signal | [`a125b0b`](https://github.com/franklinmdev/docmatch/commit/a125b0b) |
+
+Measured with the same eval command over the saved run above. Of the 4
+readings the gate failed, half were right: the labels themselves break totals
+agree on 6.5% of the UCSF documents it can check, and a correct reading of
+such a document fails it too. Only 3 of the 47 checked readings are wrong,
+so this row says little yet about what the gate is worth; the other two
+backends decide that.
 
 ### Matching, injected discrepancies
 
@@ -369,7 +400,8 @@ uv run docmatch eval --predictions predictions.json
 From a checkout with DocILE in `data/docile`, that is the command the numbers
 in the Benchmarks section come from. It prints field F1 and line-item F1 over
 the whole subset, a per-fieldtype breakdown of each, the currency field both
-as read and with the value code derives for it, and the ids behind two
+as read and with the value code derives for it, gate verdicts with gate pass
+rate and unreadable values per rule, the gate ablation, and the ids behind two
 counts that are not scores: pinned documents the run did not predict, and
 predicted documents the subset does not pin.
 

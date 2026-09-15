@@ -5,7 +5,10 @@
     {"bbox": [0.70, 0.10, 0.92, 0.13], "fieldtype": "document_id", "page": 0, "text": "INV-1005"},
     {"bbox": [0.60, 0.70, 0.69, 0.73], "fieldtype": "tax_detail_rate", "page": 0, "text": "8.25%"},
     {"bbox": [0.60, 0.74, 0.69, 0.77], "fieldtype": "tax_detail_rate", "page": 0, "text": "5%"},
-    {"bbox": [0.70, 0.80, 0.92, 0.83], "fieldtype": "amount_total_gross", "page": 0, "text": "1.320,00"}
+    {"bbox": [0.70, 0.80, 0.92, 0.83], "fieldtype": "amount_total_gross", "page": 0, "text": "1.320,00"},
+    {"bbox": [0.70, 0.14, 0.92, 0.17], "fieldtype": "date_issue", "page": 0, "text": "05/11/26"},
+    {"bbox": [0.70, 0.18, 0.92, 0.21], "fieldtype": "date_due", "page": 0, "text": "06/10/26"},
+    {"bbox": [0.70, 0.84, 0.92, 0.87], "fieldtype": "amount_due", "page": 0, "text": "1.320,00"}
   ],
   "line_item_extractions": [
     {"bbox": [0.10, 0.50, 0.16, 0.53], "fieldtype": "line_item_quantity", "line_item_id": 1, "page": 0, "text": "10"},

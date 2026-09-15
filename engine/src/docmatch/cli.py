@@ -41,8 +41,10 @@ from docmatch.evals.corpus import Census, Coverage, RuleCoverage, Survey
 from docmatch.evals.manifest import Manifest, ManifestError, Reason
 from docmatch.evals.public import PublicCopyError
 from docmatch.evals.run import (
+    Ablation,
     DerivedTotals,
     FieldTypeTotals,
+    GateTotals,
     SubsetScore,
     read_predictions,
     score_subset,
@@ -886,6 +888,10 @@ def render_eval(path: Path, run: SubsetScore) -> str:
         "",
         f"Cell accuracy ({len(run.per_cell_fieldtype)})",
         *_accuracies(run.per_cell_fieldtype),
+        "",
+        *_gate(run.gate),
+        "",
+        *_ablation(run.ablation, run.gate.checked),
     ]
     return "\n".join([*lines, ""])
 
@@ -944,6 +950,43 @@ def _derived(derived: Sequence[DerivedTotals]) -> list[str]:
             lines.append(f"  {name}  {view.ljust(views)}  {_counts(totals)}")
             name = " " * width  # the fieldtype is named once, then hangs
     return lines
+
+
+def _gate(totals: GateTotals) -> list[str]:
+    """Verdict counts, the pass rate with n checked, and unreadable values per rule.
+
+    n checked sits beside the rate because a rate over three readings and one
+    over ninety are not the same finding.
+    """
+    return [
+        "Gate",
+        *_rows(
+            ("passed", str(totals.passed)),
+            ("failed", str(totals.failed)),
+            ("not checked", str(totals.not_checked)),
+            ("pass rate", f"{totals.pass_rate:.3f} of {totals.checked} checked"),
+        ),
+        "",
+        "Unreadable",
+        *_rows(*((rule, str(count)) for rule, count in totals.unreadable.items())),
+    ]
+
+
+NO_SIGNAL = "no signal"
+"""What the confidence side of the ablation says for a run carrying none."""
+
+
+def _ablation(ablation: Ablation, checked: int) -> list[str]:
+    """What the gate caught among checked readings, beside what confidence did."""
+    return [
+        f"Gate ablation, over {checked} checked",
+        *_rows(
+            ("catches", str(ablation.catches)),
+            ("misses", str(ablation.misses)),
+            ("false alarms", str(ablation.false_alarms)),
+            ("confidence", NO_SIGNAL),
+        ),
+    ]
 
 
 def _drift(pinned: Manifest, drawn: Sequence[str]) -> str:
