@@ -45,3 +45,7 @@ _Avoid_: gate eval, gate accuracy
 **Regression**:
 A change that lowers field F1 or line-item F1 on the fixed subset below the benchmark row of a backend it touches. A backend's first row has nothing to regress from.
 _Avoid_: degradation
+
+**Cost per document**:
+What reading one document costs at the vendor's list price for the units the vendor reported processing, tokens or pages, including attempts that failed. Free tiers and what was actually billed play no part, so every backend's cost means the same thing.
+_Avoid_: billed cost, spend, price per document
