@@ -386,18 +386,6 @@ def test_a_document_that_failed_has_no_served_model(subset: Subset) -> None:
     assert [each.served_model for each in run.documents] == [None, None]
 
 
-def test_the_served_model_is_the_one_that_produced_the_reading(
-    subset: Subset,
-) -> None:
-    extractor = FakeExtractor(
-        answers=[ExtractionError("rate limited"), READING], served_model="fake-003"
-    )
-
-    run = done(extractor, subset)
-
-    assert run.documents[0].served_model == "fake-003"
-
-
 def test_a_document_run_knows_whether_it_predicted_anything() -> None:
     nothing = DocumentRun(
         document_id="syn0001",

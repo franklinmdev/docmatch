@@ -1241,7 +1241,10 @@ def test_extract_keeps_the_documents_read_before_it_was_interrupted(
     assert "interrupted after 1 of 2 documents" in captured.err
     assert list(read_predictions(out / "predictions.json")) == ["syn0001"]
     assert load(out / "manifest.json").document_ids == ("syn0001",)
-    assert json.loads((out / "run.json").read_text())["size"] == 1
+    record = json.loads((out / "run.json").read_text())
+    assert record["size"] == 1
+    assert record["requested_model"] == "fake-001"
+    assert [each["served_model"] for each in record["documents"]] == ["fake-002"]
 
 
 def test_extract_keeps_the_documents_read_before_an_unexpected_failure(

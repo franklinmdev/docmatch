@@ -40,11 +40,7 @@ def test_a_model_given_by_name_is_the_one_asked_for(
 
 
 @pytest.mark.parametrize("backend", ["azure", "openai"])
-def test_a_backend_not_wired_yet_is_refused_by_name(
-    backend: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "not-a-real-key")
-
+def test_a_backend_not_wired_yet_is_refused_by_name(backend: str) -> None:
     with pytest.raises(ExtractionError, match=f"the {backend} backend is not wired"):
         backends.extractor(backend, None, long_edge=1600)
 
