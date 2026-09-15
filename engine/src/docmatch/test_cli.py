@@ -11,8 +11,11 @@ from pathlib import Path
 import pytest
 
 from docmatch.cli import main, render_extract
-from docmatch.evals.manifest import Manifest, load, select, write
+from docmatch.evals import public
+from docmatch.evals.manifest import Manifest, load, rank, select, write
+from docmatch.evals.public import FetchError
 from docmatch.evals.run import read_predictions
+from docmatch.evals.test_public import annotate
 from docmatch.extraction import gemini
 from docmatch.extraction.conftest import write_pdf
 from docmatch.extraction.extractor import Usage
@@ -445,29 +448,80 @@ def test_score_still_reports_the_dataset_errors_show_reports(
     assert "README.md" in capsys.readouterr().err
 
 
+UCSF_IDS = tuple(f"doc{number:04d}" for number in range(0, 500, 2))
+"""The half of `split_dir` whose public copies the archive publishes."""
+
+
 @pytest.fixture
 def split_dir(tmp_path: Path) -> Path:
     """A dataset whose val split is large enough to draw a subset from.
 
-    `subset` reads the split file and no annotation, so the documents it names
-    need not exist; the annotations directory is there because that is how a
-    downloaded dataset is told apart from a path that was never downloaded.
+    Every other document comes from UCSF, which is the pool the subset is
+    drawn from; the rest come from the FCC and are never ranked. Each page is
+    US Letter at 200 dpi, which is what the archive in `archive` serves.
     """
     root = tmp_path / "dataset"
-    (root / "annotations").mkdir(parents=True)
     ids = [f"doc{number:04d}" for number in range(500)]
+    for document_id in ids:
+        annotate(
+            root,
+            document_id,
+            original_filename=f"u{document_id}xyz",
+            page_sizes=[[1700, 2200]],
+            source="ucsf" if document_id in UCSF_IDS else "pif",
+        )
     (root / "val.json").write_text(json.dumps(ids), encoding="utf-8")
     return root
 
 
+class Archive:
+    """The UCSF archive, standing in for the network, with a copy per document.
+
+    Every copy is one US Letter page, except the documents in `two_pages`,
+    whose copies carry a page DocILE does not, and the ones in `missing`,
+    which the archive will not serve.
+    """
+
+    def __init__(self, tmp_path: Path) -> None:
+        self.one_page = write_pdf(tmp_path / "one.pdf").read_bytes()
+        self.two_pages_copy = write_pdf(tmp_path / "two.pdf", pages=2).read_bytes()
+        self.two_pages: set[str] = set()
+        self.missing: set[str] = set()
+        self.asked: list[str] = []
+
+    def fetch(self, ucsf_id: str) -> bytes:
+        self.asked.append(ucsf_id)
+        document_id = ucsf_id[1:8]
+        if document_id in self.missing:
+            raise FetchError(f"cannot fetch {ucsf_id}: HTTP Error 404")
+        if document_id in self.two_pages:
+            return self.two_pages_copy
+        return self.one_page
+
+
+@pytest.fixture
+def archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Archive:
+    stand_in = Archive(tmp_path)
+    monkeypatch.setattr(public, "fetch", stand_in.fetch)
+    return stand_in
+
+
+def write_subset(path: Path, split_dir: Path, *flags: str) -> int:
+    return main(
+        ["subset", "--write", *flags, "--manifest", str(path)]
+        + ["--data-dir", str(split_dir)]
+    )
+
+
 def test_subset_writes_the_manifest_it_draws(
-    split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    split_dir: Path,
+    archive: Archive,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     path = tmp_path / "subset.json"
 
-    exit_code = main(
-        ["subset", "--write", "--manifest", str(path), "--data-dir", str(split_dir)]
-    )
+    exit_code = write_subset(path, split_dir)
 
     assert exit_code == 0
     assert capsys.readouterr().out == "\n".join(
@@ -475,43 +529,102 @@ def test_subset_writes_the_manifest_it_draws(
             "Fixed subset",
             f"  manifest  {path}",
             "  split     val",
+            "  source    ucsf",
             "  seed      20260912",
             "  size      100",
+            "  rejected  0",
             "  written   yes",
             "",
         ]
     )
-    assert len(load(path).document_ids) == 100
+    written = load(path)
+    assert written.document_ids == select(UCSF_IDS, seed=20260912, size=100)
+    assert set(written.digests) == set(written.document_ids)
 
 
-def test_subset_reports_that_the_seed_still_draws_the_pinned_documents(
-    split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_subset_pins_every_reject_with_its_reason(
+    split_dir: Path,
+    archive: Archive,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     path = tmp_path / "subset.json"
-    main(["subset", "--write", "--manifest", str(path), "--data-dir", str(split_dir)])
+    ranked = rank(UCSF_IDS, seed=20260912)
+    archive.two_pages.add(ranked[0])
+    archive.missing.update(ranked[3:5])
+
+    write_subset(path, split_dir)
+
+    assert (
+        "  rejected  3: 1 page count differs, 2 fetch failed\n"
+        in capsys.readouterr().out
+    )
+    assert load(path).rejected == {
+        ranked[0]: "page count differs",
+        ranked[3]: "fetch failed",
+        ranked[4]: "fetch failed",
+    }
+
+
+def test_subset_checks_the_pinned_list_without_the_network(
+    split_dir: Path,
+    archive: Archive,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "subset.json"
+    archive.two_pages.add(rank(UCSF_IDS, seed=20260912)[1])
+    write_subset(path, split_dir)
     capsys.readouterr()
+    archive.asked.clear()
 
     exit_code = main(["subset", "--manifest", str(path), "--data-dir", str(split_dir)])
 
     assert exit_code == 0
     assert "  reproduced  yes" in capsys.readouterr().out
+    assert archive.asked == []
+
+
+def test_subset_fails_when_a_reject_is_no_longer_pinned(
+    split_dir: Path,
+    archive: Archive,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Without its rejects the ranking draws a document the manifest left out."""
+    path = tmp_path / "subset.json"
+    archive.two_pages.add(rank(UCSF_IDS, seed=20260912)[1])
+    write_subset(path, split_dir)
+    capsys.readouterr()
+    write(load(path).model_copy(update={"rejected": {}}), path)
+
+    exit_code = main(["subset", "--manifest", str(path), "--data-dir", str(split_dir)])
+
+    assert exit_code == 1
+    assert "  reproduced  no, 1 of the 100 documents are not pinned" in (
+        capsys.readouterr().out
+    )
 
 
 def test_subset_fails_when_the_seed_no_longer_draws_the_pinned_documents(
-    split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    split_dir: Path,
+    archive: Archive,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A subset that drifted is not a benchmark, so this is not a warning."""
     path = tmp_path / "subset.json"
-    main(["subset", "--write", "--manifest", str(path), "--data-dir", str(split_dir)])
+    write_subset(path, split_dir)
     capsys.readouterr()
     pinned = load(path)
-    undrawn = next(
-        f"doc{number:04d}"
-        for number in range(500)
-        if f"doc{number:04d}" not in pinned.document_ids
-    )
+    undrawn = next(each for each in UCSF_IDS if each not in pinned.document_ids)
     write(
-        pinned.model_copy(update={"document_ids": (undrawn, *pinned.document_ids[1:])}),
+        pinned.model_copy(
+            update={
+                "document_ids": (undrawn, *pinned.document_ids[1:]),
+                "digests": {},
+            }
+        ),
         path,
     )
 
@@ -524,11 +637,14 @@ def test_subset_fails_when_the_seed_no_longer_draws_the_pinned_documents(
 
 
 def test_subset_reports_the_pinned_documents_in_the_wrong_order(
-    split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    split_dir: Path,
+    archive: Archive,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A prefix of the subset is a sample, so the order is pinned too."""
     path = tmp_path / "subset.json"
-    main(["subset", "--write", "--manifest", str(path), "--data-dir", str(split_dir)])
+    write_subset(path, split_dir)
     capsys.readouterr()
     pinned = load(path)
     write(
@@ -547,27 +663,17 @@ def test_subset_reports_the_pinned_documents_in_the_wrong_order(
 
 
 def test_subset_draws_with_the_seed_it_is_given(
-    split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    split_dir: Path,
+    archive: Archive,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     path = tmp_path / "subset.json"
 
-    main(
-        [
-            "subset",
-            "--write",
-            "--seed",
-            "1",
-            "--manifest",
-            str(path),
-            "--data-dir",
-            str(split_dir),
-        ]
-    )
+    write_subset(path, split_dir, "--seed", "1")
 
     assert "  seed      1\n" in capsys.readouterr().out
-    assert load(path).document_ids == select(
-        [f"doc{number:04d}" for number in range(500)], seed=1, size=100
-    )
+    assert load(path).document_ids == select(UCSF_IDS, seed=1, size=100)
 
 
 def test_subset_reports_a_manifest_that_is_not_there(
@@ -602,6 +708,60 @@ def test_subset_reports_a_split_the_dataset_does_not_have(
 
     assert exit_code == 1
     assert "val.json" in capsys.readouterr().err
+
+
+def download(path: Path, split_dir: Path, copies: Path) -> int:
+    return main(
+        ["download", "--manifest", str(path), "--data-dir", str(split_dir)]
+        + ["--copies", str(copies)]
+    )
+
+
+def test_download_puts_every_pinned_copy_in_the_copies_directory(
+    split_dir: Path,
+    archive: Archive,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "subset.json"
+    copies = tmp_path / "ucsf"
+    write_subset(path, split_dir, "--size", "3")
+    capsys.readouterr()
+
+    exit_code = download(path, split_dir, copies)
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == "\n".join(
+        [
+            "Public copies",
+            f"  manifest  {path}",
+            f"  copies    {copies}",
+            "  fetched   3",
+            "  kept      0",
+            "  verified  yes",
+            "",
+        ]
+    )
+    assert sorted(each.name for each in copies.iterdir()) == sorted(
+        f"{each}.pdf" for each in load(path).document_ids
+    )
+
+
+def test_download_fails_loudly_when_a_copy_changed_in_the_archive(
+    split_dir: Path,
+    archive: Archive,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "subset.json"
+    write_subset(path, split_dir, "--size", "3")
+    capsys.readouterr()
+    archive.one_page += b"\n% rescanned"
+
+    exit_code = download(path, split_dir, tmp_path / "ucsf")
+
+    assert exit_code == 1
+    assert "but the manifest pins" in capsys.readouterr().err
 
 
 EXPECTED_EVAL_OUTPUT = "\n".join(
@@ -767,7 +927,12 @@ def test_eval_reports_a_pinned_document_the_dataset_does_not_hold(
 ) -> None:
     """A dataset that cannot satisfy the manifest produces no number at all."""
     manifest = tmp_path / "subset.json"
-    write(Manifest(split="val", seed=1, size=1, document_ids=("eval9999",)), manifest)
+    write(
+        Manifest(
+            split="val", seed=1, source="synthetic", size=1, document_ids=("eval9999",)
+        ),
+        manifest,
+    )
     predictions = tmp_path / "predictions.json"
     predictions.write_text("{}", encoding="utf-8")
 
@@ -822,6 +987,7 @@ def a_run(*documents: DocumentRun) -> Run:
         manifest=Manifest(
             split="val",
             seed=1,
+            source="synthetic",
             size=len(documents),
             document_ids=tuple(each.document_id for each in documents),
         ),
@@ -946,7 +1112,13 @@ def a_pdf_dataset(tmp_path: Path) -> tuple[Path, Path]:
     write_pdf(pdfs / "syn0002.pdf")
     pinned = tmp_path / "manifest.json"
     write(
-        Manifest(split="val", seed=1, size=2, document_ids=("syn0001", "syn0002")),
+        Manifest(
+            split="val",
+            seed=1,
+            source="synthetic",
+            size=2,
+            document_ids=("syn0001", "syn0002"),
+        ),
         pinned,
     )
     return tmp_path / "docile", pinned

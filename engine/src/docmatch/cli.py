@@ -7,9 +7,12 @@ fields and its line items, against those labels, which is how a human checks
 the metrics on a real document before they are run over a subset.
 
 `docmatch subset` re-derives the committed fixed subset from the split it was
-drawn from, which is how a reader checks that the pinned list is still the one
-the seed draws. `docmatch eval --predictions <file>` scores a whole run over
-that subset, which is the command every number in the README comes from.
+drawn from, offline, which is how a reader checks that the pinned list is still
+the one the seed and the rejects draw. `docmatch download` fetches the pinned
+public copies and verifies each against its digest, which is what a fresh
+machine runs before a benchmark row. `docmatch eval --predictions <file>`
+scores a whole run over that subset, which is the command every number in the
+README comes from.
 
 `docmatch corpus` recomputes the counts the rules in `metrics` are justified
 by, which is how a reader checks the numbers the docstrings there assert.
@@ -24,15 +27,17 @@ engine's, the terminal is this module's.
 import argparse
 import os
 import sys
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from docmatch.docile.annotation import Annotation, FieldExtraction
 from docmatch.docile.dataset import DatasetNotFoundError, DocileDataset, DocileError
-from docmatch.evals import corpus, manifest
+from docmatch.evals import corpus, manifest, public
 from docmatch.evals.corpus import Census, Coverage, RuleCoverage, Survey
-from docmatch.evals.manifest import Manifest, ManifestError
+from docmatch.evals.manifest import Manifest, ManifestError, Reason
+from docmatch.evals.public import PublicCopyError
 from docmatch.evals.run import (
     DerivedTotals,
     FieldTypeTotals,
@@ -69,6 +74,7 @@ from docmatch.metrics.score import Score
 
 DATA_DIR_VARIABLE = "DOCMATCH_DATA_DIR"
 DEFAULT_DATA_DIR = Path("data/docile")
+DEFAULT_COPIES_DIR = Path("data/ucsf")
 
 
 def money(given: str) -> Decimal:
@@ -227,9 +233,44 @@ def render_subset(path: Path, pinned: Manifest, note: tuple[str, str]) -> str:
             *_rows(
                 ("manifest", str(path)),
                 ("split", pinned.split),
+                ("source", pinned.source),
                 ("seed", str(pinned.seed)),
                 ("size", str(pinned.size)),
+                ("rejected", _rejects(pinned.rejected)),
                 note,
+            ),
+            "",
+        ]
+    )
+
+
+REASONS: tuple[Reason, ...] = (
+    "page count differs",
+    "page size differs",
+    "fetch failed",
+)
+
+
+def _rejects(rejected: dict[str, Reason]) -> str:
+    """How many documents admission left out, and why, in one line."""
+    if not rejected:
+        return "0"
+    counts = Counter(rejected.values())
+    why = ", ".join(f"{counts[each]} {each}" for each in REASONS if counts[each])
+    return f"{len(rejected)}: {why}"
+
+
+def render_download(path: Path, copies: Path, downloaded: public.Downloaded) -> str:
+    """Which pinned copies were fetched and which were already in place."""
+    return "\n".join(
+        [
+            "Public copies",
+            *_rows(
+                ("manifest", str(path)),
+                ("copies", str(copies)),
+                ("fetched", str(len(downloaded.fetched))),
+                ("kept", str(len(downloaded.kept))),
+                ("verified", "yes"),
             ),
             "",
         ]
@@ -357,7 +398,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     subset = subcommands.add_parser(
         "subset",
         parents=[dataset],
-        help="check that the seed still draws the pinned subset",
+        help="check, offline, that the seed and rejects still draw the pinned subset",
     )
     subset.add_argument(
         "--manifest",
@@ -383,7 +424,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     subset.add_argument(
         "--write",
         action="store_true",
-        help="draw the subset and write the manifest, replacing any there",
+        help=(
+            "fetch public copies in ranking order, admit them, and write the "
+            "manifest, replacing any there"
+        ),
+    )
+    fetching = subcommands.add_parser(
+        "download",
+        parents=[dataset],
+        help="download the pinned public copies and verify each against its digest",
+    )
+    fetching.add_argument(
+        "--manifest",
+        type=Path,
+        default=manifest.MANIFEST,
+        help=f"the pinned subset (default: {manifest.MANIFEST.name} beside the code)",
+    )
+    fetching.add_argument(
+        "--copies",
+        type=Path,
+        default=DEFAULT_COPIES_DIR,
+        help=f"where public copies are kept (default: {DEFAULT_COPIES_DIR})",
     )
 
     arguments = parser.parse_args(argv)
@@ -399,7 +460,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             subset.error(f"{' and '.join(drawing)} draws a subset, so it needs --write")
     try:
         output, exit_code = _run(arguments)
-    except (DocileError, PredictionError, ManifestError, ExtractionError) as error:
+    except (
+        DocileError,
+        PredictionError,
+        ManifestError,
+        ExtractionError,
+        PublicCopyError,
+    ) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
     print(output, end="")
@@ -415,6 +482,10 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
     dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
     if arguments.command == "subset":
         return _subset(arguments, dataset)
+    if arguments.command == "download":
+        pinned = manifest.load(arguments.manifest)
+        downloaded = public.download(dataset, pinned, arguments.copies, public.fetch)
+        return render_download(arguments.manifest, arguments.copies, downloaded), 0
     if arguments.command == "corpus":
         return _corpus(arguments, dataset)
     if arguments.command == "extract":
@@ -441,23 +512,27 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
 
 
 def _subset(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
-    """Write the pinned subset, or check that the seed still draws it.
+    """Admit and write the pinned subset, or check that the seed still draws it.
 
-    Not reproducing is a failure and exits non-zero, but the report is still
+    Writing is the one step that asks the archive for anything; the check reads
+    DocILE's metadata and the manifest's rejects, and no network. Not
+    reproducing is a failure and exits non-zero, but the report is still
     printed: what the seed draws now is the thing worth looking at.
     """
     if arguments.write:
-        written = manifest.selected(
-            dataset.document_ids(manifest.SPLIT),
+        written = manifest.admitted(
+            _pool(dataset, manifest.SPLIT, manifest.SOURCE),
             split=manifest.SPLIT,
             seed=manifest.SEED if arguments.seed is None else arguments.seed,
+            source=manifest.SOURCE,
             size=manifest.SIZE if arguments.size is None else arguments.size,
+            admit=public.admitter(dataset, public.fetch),
         )
         manifest.write(written, arguments.manifest)
         return render_subset(arguments.manifest, written, ("written", "yes")), 0
 
     pinned = manifest.load(arguments.manifest)
-    drawn = pinned.reproduced_from(dataset.document_ids(pinned.split))
+    drawn = pinned.reproduced_from(_pool(dataset, pinned.split, pinned.source))
     note = (
         "reproduced",
         "yes" if drawn == pinned.document_ids else _drift(pinned, drawn),
@@ -465,6 +540,15 @@ def _subset(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str,
     return (
         render_subset(arguments.manifest, pinned, note),
         0 if note[1] == "yes" else 1,
+    )
+
+
+def _pool(dataset: DocileDataset, split: str, source: str) -> tuple[str, ...]:
+    """The split's documents whose DocILE source is `source`, the ranked pool."""
+    return tuple(
+        document_id
+        for document_id in dataset.document_ids(split)
+        if dataset.annotation(document_id).metadata.source == source
     )
 
 
