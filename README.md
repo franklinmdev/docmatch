@@ -150,8 +150,9 @@ is here so that the row it belongs to already exists.
 
 **Why this row replaced the Phase 0 one.** The subset moved. The Phase 0 row
 was measured on 100 val documents whose pages the backend read from DocILE's
-own copies, and DocILE's terms bar third-party access to those copies, which a
-hosted model is. The subset is now 100 val UCSF documents read from the public
+own copies. DocILE's terms bar third-party access to its content and carve out
+no hosted API, so the engine reads that as barring those copies from a hosted
+model. The subset is now 100 val UCSF documents read from the public
 copies the UCSF Industry Documents Library publishes (see
 [The fixed subset](#the-fixed-subset)), so the two rows are over different
 documents and this one does not measure an improvement over the other. The old
