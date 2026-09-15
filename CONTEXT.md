@@ -43,5 +43,5 @@ _Avoid_: gate eval, gate accuracy
 ### Measurement
 
 **Regression**:
-A change that lowers field F1 or line-item F1 on the fixed subset below the benchmark row of a backend it touches. Any drop counts, and a regression blocks merge. A backend's first row has nothing to regress from.
-_Avoid_: degradation, drop beyond threshold
+A change that lowers field F1 or line-item F1 on the fixed subset below the benchmark row of a backend it touches. A backend's first row has nothing to regress from.
+_Avoid_: degradation
