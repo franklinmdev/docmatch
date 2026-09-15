@@ -1,43 +1,19 @@
 """Tests for admitting and downloading public copies, on fixture PDFs only."""
 
 import hashlib
-import json
 from pathlib import Path
 
 import pytest
 
 from docmatch.docile.dataset import DocileDataset
 from docmatch.evals import public
+from docmatch.evals.conftest import annotate
 from docmatch.evals.manifest import Manifest, Rejected
 from docmatch.evals.public import DigestError, FetchError, PublicCopyError
 from docmatch.extraction.conftest import write_pdf
 
 LETTER_AT_200_DPI = [1700, 2200]
 """612 by 792 points, 72 to the inch, at 200 dots per inch."""
-
-
-def annotate(
-    root: Path,
-    document_id: str,
-    *,
-    original_filename: str,
-    page_sizes: list[list[int]],
-    source: str = "ucsf",
-) -> None:
-    """A header-only annotation whose metadata is what admission reads."""
-    annotations = root / "annotations"
-    annotations.mkdir(parents=True, exist_ok=True)
-    body = {
-        "field_extractions": [],
-        "line_item_extractions": [],
-        "metadata": {
-            "original_filename": original_filename,
-            "page_count": len(page_sizes),
-            "page_sizes_at_200dpi": page_sizes,
-            "source": source,
-        },
-    }
-    (annotations / f"{document_id}.json").write_text(json.dumps(body), "utf-8")
 
 
 def pdf_bytes(tmp_path: Path, **shape: int) -> bytes:

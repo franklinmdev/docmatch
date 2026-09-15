@@ -308,10 +308,11 @@ extra page or a different page would score the backend against pages it never
 saw. A page the archive declares at another scale with the same aspect ratio is
 admitted, because labels are boxes relative to the page; a fixed 200 dpi
 comparison rejected 47 documents for that alone. The walk stops at 100 admitted
-documents; when fewer pass, the subset is every admitted document. The current
-walk read 105 copies and admitted 100; all 5 rejects carry a page DocILE's copy
-does not. 39 of the 43 UCSF documents in the earlier whole-split draw are
-still pinned, and the other 4 are among those rejects.
+documents; when fewer pass, the subset is every admitted document. The walk
+that pinned the current manifest (`uv run docmatch subset --write`, commit
+`9bcf002`) read 105 copies and admitted 100; all 5 rejects carry a page
+DocILE's copy does not. 39 of the 43 UCSF documents in the earlier whole-split
+draw are still pinned, and the other 4 are among those rejects.
 
 **Rejects and digests.** The manifest pins every rejected id with its reason
 (`page count differs`, `page size differs`, `fetch failed`) and the sha256 of

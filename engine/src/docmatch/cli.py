@@ -31,6 +31,7 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import get_args
 
 from docmatch.docile.annotation import Annotation, FieldExtraction
 from docmatch.docile.dataset import DatasetNotFoundError, DocileDataset, DocileError
@@ -244,11 +245,7 @@ def render_subset(path: Path, pinned: Manifest, note: tuple[str, str]) -> str:
     )
 
 
-REASONS: tuple[Reason, ...] = (
-    "page count differs",
-    "page size differs",
-    "fetch failed",
-)
+REASONS: tuple[Reason, ...] = get_args(Reason)
 
 
 def _rejects(rejected: dict[str, Reason]) -> str:
@@ -264,13 +261,12 @@ def render_download(path: Path, copies: Path, downloaded: public.Downloaded) -> 
     """Which pinned copies were fetched and which were already in place."""
     return "\n".join(
         [
-            "Public copies",
+            "Public copies, each verified against its digest",
             *_rows(
                 ("manifest", str(path)),
                 ("copies", str(copies)),
                 ("fetched", str(len(downloaded.fetched))),
                 ("kept", str(len(downloaded.kept))),
-                ("verified", "yes"),
             ),
             "",
         ]
@@ -429,18 +425,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             "manifest, replacing any there"
         ),
     )
-    fetching = subcommands.add_parser(
+    download = subcommands.add_parser(
         "download",
         parents=[dataset],
         help="download the pinned public copies and verify each against its digest",
     )
-    fetching.add_argument(
+    download.add_argument(
         "--manifest",
         type=Path,
         default=manifest.MANIFEST,
         help=f"the pinned subset (default: {manifest.MANIFEST.name} beside the code)",
     )
-    fetching.add_argument(
+    download.add_argument(
         "--copies",
         type=Path,
         default=DEFAULT_COPIES_DIR,

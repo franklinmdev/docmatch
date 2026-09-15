@@ -12,10 +12,10 @@ import pytest
 
 from docmatch.cli import main, render_extract
 from docmatch.evals import public
+from docmatch.evals.conftest import annotate
 from docmatch.evals.manifest import Manifest, load, rank, select, write
 from docmatch.evals.public import FetchError
 from docmatch.evals.run import read_predictions
-from docmatch.evals.test_public import annotate
 from docmatch.extraction import gemini
 from docmatch.extraction.conftest import write_pdf
 from docmatch.extraction.extractor import Usage
@@ -733,12 +733,11 @@ def test_download_puts_every_pinned_copy_in_the_copies_directory(
     assert exit_code == 0
     assert capsys.readouterr().out == "\n".join(
         [
-            "Public copies",
+            "Public copies, each verified against its digest",
             f"  manifest  {path}",
             f"  copies    {copies}",
             "  fetched   3",
             "  kept      0",
-            "  verified  yes",
             "",
         ]
     )

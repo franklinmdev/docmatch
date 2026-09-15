@@ -15,10 +15,13 @@ error, because a pinned document cannot be left out after the fact.
 
 HTTP is the standard library's `urllib.request` (Python 3.12 documentation,
 read 2026-09-15): redirects are followed, an error status raises `HTTPError`,
-and a transport failure raises `URLError`, both `OSError`s.
+and a transport failure raises `URLError`, both `OSError`s. A connection that
+drops partway through the body raises `http.client.IncompleteRead` from
+`read`, which is an `HTTPException` and not an `OSError`.
 """
 
 import hashlib
+import http.client
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -73,7 +76,7 @@ def fetch(ucsf_id: str) -> bytes:
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             body: bytes = response.read()
-    except OSError as error:  # HTTPError and URLError are both OSErrors
+    except (OSError, http.client.HTTPException) as error:
         raise FetchError(f"cannot fetch {url(ucsf_id)}: {error}") from error
     return body
 
