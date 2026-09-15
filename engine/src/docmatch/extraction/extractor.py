@@ -134,7 +134,7 @@ class Extraction:
     latency: float
     """Seconds spent waiting for the backend, one attempt only."""
     served_model: str | None
-    """The model the vendor reports reading with, or None when it reports none.
+    """The served model the vendor reports reading with, or None when it reports none.
 
     Taken off the answer and never filled in from the requested model: a vendor
     that points a name at a new version is what this is here to show.

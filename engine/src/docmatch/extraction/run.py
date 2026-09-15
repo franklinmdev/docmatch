@@ -102,8 +102,8 @@ class DocumentRun:
     prediction: Prediction | None
     failure: str | None
     served_model: str | None
-    """The model the vendor reports reading the prediction with, None when the
-    vendor named none or there is no prediction."""
+    """The served model the vendor reports reading the prediction with, None when
+    the vendor named none or there is no prediction."""
 
     @property
     def predicted(self) -> bool:
@@ -117,7 +117,8 @@ class Run:
     backend: str
     """Which vendor's backend read the run, as `--backend` names it."""
     requested_model: str
-    """The model every document was asked for; each one's served model is its own."""
+    """The requested model, the same for every document; each one's served model
+    is its own."""
     manifest: Manifest
     long_edge: int
     """What a rendering backend was asked to render at, kept with the record."""
