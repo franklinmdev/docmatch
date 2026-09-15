@@ -9,11 +9,13 @@ from pathlib import Path
 import pytest
 
 from docmatch.docile.dataset import DatasetNotFoundError, DocileDataset
+from docmatch.evals import public
+from docmatch.evals.conftest import annotate
 from docmatch.evals.manifest import Manifest, load
+from docmatch.evals.public import DigestError, PublicCopyError
 from docmatch.evals.run import read_predictions
 from docmatch.extraction.conftest import write_pdf
-from docmatch.extraction.extractor import Extraction, ExtractionError, Usage
-from docmatch.extraction.pages import PageImage
+from docmatch.extraction.extractor import Document, Extraction, ExtractionError, Usage
 from docmatch.extraction.run import (
     ATTEMPTS,
     COST_CAP,
@@ -37,14 +39,14 @@ class FakeExtractor:
     answers: Sequence[object]
     latency: float = 1.0
     cost: Decimal = Decimal("0.001")
-    attempts: list[int] = field(default_factory=list)
+    attempts: list[Document] = field(default_factory=list)
 
     @property
     def name(self) -> str:
         return "fake"
 
-    def extract(self, pages: Sequence[PageImage]) -> Extraction:
-        self.attempts.append(len(pages))
+    def extract(self, document: Document) -> Extraction:
+        self.attempts.append(document)
         given = self.answers[min(len(self.attempts), len(self.answers)) - 1]
         if isinstance(given, BaseException):  # a Ctrl-C is one of the answers
             raise given
@@ -57,31 +59,53 @@ class FakeExtractor:
         )
 
 
-@pytest.fixture
-def dataset(tmp_path: Path) -> DocileDataset:
-    """A dataset holding the PDFs of two documents and nothing else."""
-    pdfs = tmp_path / "pdfs"
-    pdfs.mkdir()
-    write_pdf(pdfs / "syn0001.pdf")
-    write_pdf(pdfs / "syn0002.pdf", pages=2)
-    return DocileDataset(tmp_path)
+@dataclass(frozen=True)
+class Subset:
+    """What a run reads: DocILE's annotations, the public copies, and the pin."""
+
+    dataset: DocileDataset
+    copies: Path
+    pinned: Manifest
 
 
-@pytest.fixture
-def pinned() -> Manifest:
-    return Manifest(
+def a_subset(root: Path, pages: Sequence[int] = (1, 2)) -> Subset:
+    """One document per entry in `pages`, `syn0001` onwards, that many pages each.
+
+    The annotations and the copies agree on the page count, and the manifest
+    pins the digest of each copy as written.
+    """
+    copies = root / "ucsf"
+    copies.mkdir(parents=True)
+    digests = {}
+    for number, count in enumerate(pages, start=1):
+        document_id = f"syn{number:04d}"
+        annotate(
+            root / "docile",
+            document_id,
+            original_filename=f"u{document_id}",
+            page_sizes=[[1700, 2200]] * count,
+        )
+        copy = write_pdf(public.path(copies, document_id), pages=count)
+        digests[document_id] = public.digest(copy.read_bytes())
+    pinned = Manifest(
         split="val",
         seed=1,
-        source="synthetic",
-        size=2,
-        document_ids=("syn0001", "syn0002"),
+        source="ucsf",
+        size=len(digests),
+        document_ids=tuple(digests),
+        digests=digests,
     )
+    return Subset(DocileDataset(root / "docile"), copies, pinned)
+
+
+@pytest.fixture
+def subset(tmp_path: Path) -> Subset:
+    return a_subset(tmp_path)
 
 
 def done(
     extractor: FakeExtractor,
-    dataset: DocileDataset,
-    pinned: Manifest,
+    subset: Subset,
     *,
     attempts: int = ATTEMPTS,
     cost_cap: Decimal = COST_CAP,
@@ -90,14 +114,14 @@ def done(
     """A finished run, with the waiting between attempts taken out."""
     return Run(
         backend=extractor.name,
-        manifest=pinned,
+        manifest=subset.pinned,
         long_edge=1600,
         documents=tuple(
             extract_subset(
                 extractor,
-                dataset,
-                pinned,
-                long_edge=1600,
+                subset.dataset,
+                subset.pinned,
+                subset.copies,
                 attempts=attempts,
                 cost_cap=cost_cap,
                 wait=wait,
@@ -106,24 +130,78 @@ def done(
     )
 
 
-def test_reads_every_pinned_document_in_manifest_order(
-    dataset: DocileDataset, pinned: Manifest
-) -> None:
+def test_reads_every_pinned_document_in_manifest_order(subset: Subset) -> None:
     extractor = FakeExtractor(answers=[READING])
 
-    run = done(extractor, dataset, pinned)
+    run = done(extractor, subset)
 
     assert [each.document_id for each in run.documents] == ["syn0001", "syn0002"]
     assert [each.pages for each in run.documents] == [1, 2]
     assert run.predictions() == {"syn0001": READING, "syn0002": READING}
 
 
+def test_hands_the_backend_the_public_copy_and_its_admitted_page_count(
+    subset: Subset,
+) -> None:
+    """The backend prepares its own input, so it is given the file, not pages."""
+    extractor = FakeExtractor(answers=[READING])
+
+    done(extractor, subset)
+
+    assert extractor.attempts == [
+        Document("syn0001", subset.copies / "syn0001.pdf", pages=1),
+        Document("syn0002", subset.copies / "syn0002.pdf", pages=2),
+    ]
+
+
+def test_a_missing_public_copy_ends_the_run_before_any_request(
+    subset: Subset,
+) -> None:
+    """One missing file is one message, not a document failure paid around it."""
+    public.path(subset.copies, "syn0002").unlink()
+    extractor = FakeExtractor(answers=[READING])
+
+    with pytest.raises(PublicCopyError) as raised:
+        done(extractor, subset)
+
+    assert "syn0002" in str(raised.value)
+    assert "docmatch download" in str(raised.value)
+    assert extractor.attempts == []
+
+
+def test_a_changed_public_copy_ends_the_run_before_any_request(
+    subset: Subset,
+) -> None:
+    """A copy that is not the pinned one would quietly move the benchmark."""
+    write_pdf(public.path(subset.copies, "syn0002"), pages=3)
+    extractor = FakeExtractor(answers=[READING])
+
+    with pytest.raises(DigestError) as raised:
+        done(extractor, subset)
+
+    assert "syn0002" in str(raised.value)
+    assert extractor.attempts == []
+
+
+def test_a_manifest_that_pins_no_digests_is_refused_before_any_request(
+    subset: Subset,
+) -> None:
+    """With nothing pinned there is nothing to verify, so nothing is read."""
+    unpinned = subset.pinned.model_copy(update={"digests": {}})
+    extractor = FakeExtractor(answers=[READING])
+
+    with pytest.raises(PublicCopyError):
+        done(extractor, Subset(subset.dataset, subset.copies, unpinned))
+
+    assert extractor.attempts == []
+
+
 def test_retries_a_document_that_failed_and_keeps_the_reading(
-    dataset: DocileDataset, pinned: Manifest
+    subset: Subset,
 ) -> None:
     extractor = FakeExtractor(answers=[ExtractionError("rate limited"), READING])
 
-    run = done(extractor, dataset, pinned)
+    run = done(extractor, subset)
 
     first = run.documents[0]
     assert first.attempts == 2
@@ -131,9 +209,7 @@ def test_retries_a_document_that_failed_and_keeps_the_reading(
     assert first.failure is None
 
 
-def test_gives_up_after_its_attempts_and_says_why(
-    dataset: DocileDataset, pinned: Manifest
-) -> None:
+def test_gives_up_after_its_attempts_and_says_why(subset: Subset) -> None:
     """A document that fails is left out, not written down as empty.
 
     `evals.run` scores a pinned document with no prediction as a prediction of
@@ -142,16 +218,14 @@ def test_gives_up_after_its_attempts_and_says_why(
     """
     extractor = FakeExtractor(answers=[ExtractionError("the page is a photograph")])
 
-    run = done(extractor, dataset, pinned, attempts=2)
+    run = done(extractor, subset, attempts=2)
 
     assert run.predictions() == {}
     assert [each.attempts for each in run.failed] == [2, 2]
     assert "photograph" in (run.failed[0].failure or "")
 
 
-def test_stops_retrying_a_document_that_has_spent_its_cap(
-    dataset: DocileDataset, pinned: Manifest
-) -> None:
+def test_stops_retrying_a_document_that_has_spent_its_cap(subset: Subset) -> None:
     """An attempt that reached the model is paid for whether or not it was usable.
 
     So the cap counts what a document has cost so far rather than how many
@@ -163,7 +237,7 @@ def test_stops_retrying_a_document_that_has_spent_its_cap(
         answers=[ExtractionError("half an answer", Decimal("1.00"))]
     )
 
-    run = done(extractor, dataset, pinned, attempts=5, cost_cap=Decimal("0.05"))
+    run = done(extractor, subset, attempts=5, cost_cap=Decimal("0.05"))
 
     assert [each.attempts for each in run.failed] == [1, 1]
     assert [each.cost for each in run.failed] == [Decimal("1.00"), Decimal("1.00")]
@@ -171,7 +245,7 @@ def test_stops_retrying_a_document_that_has_spent_its_cap(
 
 
 def test_adds_up_what_a_document_was_billed_for_attempts_that_failed(
-    dataset: DocileDataset, pinned: Manifest
+    subset: Subset,
 ) -> None:
     """A billed failure is part of what the document cost, and of the run's cost.
 
@@ -184,7 +258,7 @@ def test_adds_up_what_a_document_was_billed_for_attempts_that_failed(
         cost=Decimal("0.003"),
     )
 
-    run = done(extractor, dataset, pinned)
+    run = done(extractor, subset)
 
     first = run.documents[0]
     assert first.predicted
@@ -192,78 +266,56 @@ def test_adds_up_what_a_document_was_billed_for_attempts_that_failed(
     assert first.cost == Decimal("0.005")
 
 
-def test_a_call_that_never_reached_the_model_costs_nothing(
-    dataset: DocileDataset, pinned: Manifest
-) -> None:
+def test_a_call_that_never_reached_the_model_costs_nothing(subset: Subset) -> None:
     extractor = FakeExtractor(answers=[ExtractionError("the connection went away")])
 
-    run = done(extractor, dataset, pinned, attempts=2)
+    run = done(extractor, subset, attempts=2)
 
     assert run.cost == Decimal(0)
     assert [each.attempts for each in run.failed] == [2, 2]
 
 
-def test_a_missing_pdf_fails_its_own_document_and_not_the_run(
-    tmp_path: Path, pinned: Manifest
+def test_a_missing_annotation_fails_its_own_document_and_not_the_run(
+    subset: Subset,
 ) -> None:
     """A run that has already paid for eighty-nine documents must keep them.
 
-    `dataset.pdf` raises `DocumentNotFoundError`, which is a `DocileError` and
-    not a `PageError`, so this is the case that used to end the whole run and
-    write nothing at all.
+    The admitted page count is read from the annotation, and a pinned document
+    whose annotation is gone is that document's failure. Letting
+    `DocumentNotFoundError` out would end a paid run and write nothing at all.
     """
-    pdfs = tmp_path / "pdfs"
-    pdfs.mkdir()
-    write_pdf(pdfs / "syn0001.pdf")
+    (subset.dataset.root / "annotations" / "syn0002.json").unlink()
     extractor = FakeExtractor(answers=[READING])
 
-    run = done(extractor, DocileDataset(tmp_path), pinned)
+    run = done(extractor, subset)
 
     assert [each.document_id for each in run.predicted] == ["syn0001"]
     assert [each.document_id for each in run.failed] == ["syn0002"]
     assert "syn0002" in (run.failed[0].failure or "")
-
-
-def test_reports_a_document_whose_pages_cannot_be_rendered(
-    tmp_path: Path, pinned: Manifest
-) -> None:
-    pdfs = tmp_path / "pdfs"
-    pdfs.mkdir()
-    write_pdf(pdfs / "syn0001.pdf")
-    (pdfs / "syn0002.pdf").write_bytes(b"not a PDF at all")
-    extractor = FakeExtractor(answers=[READING])
-
-    run = done(extractor, DocileDataset(tmp_path), pinned)
-
-    assert [each.document_id for each in run.failed] == ["syn0002"]
     assert run.failed[0].attempts == 0
 
 
-def test_charges_the_run_over_every_pinned_document(
-    dataset: DocileDataset, pinned: Manifest
-) -> None:
+def test_charges_the_run_over_every_pinned_document(subset: Subset) -> None:
     """A backend that failed half the subset has not earned half off its price."""
     extractor = FakeExtractor(answers=[READING, ExtractionError("no")])
 
-    run = done(extractor, dataset, pinned, attempts=1)
+    run = done(extractor, subset, attempts=1)
 
     assert len(run.predicted) == 1
     assert run.cost_per_document == run.cost / 2
 
 
-def test_adds_up_the_tokens_of_the_whole_run(
-    dataset: DocileDataset, pinned: Manifest
-) -> None:
+def test_adds_up_the_tokens_of_the_whole_run(subset: Subset) -> None:
     extractor = FakeExtractor(answers=[READING])
 
-    run = done(extractor, dataset, pinned)
+    run = done(extractor, subset)
 
     assert run.tokens.input_tokens == 200
     assert run.tokens.output_tokens == 100
 
 
 def test_takes_latency_from_the_documents_that_produced_something(
-    dataset: DocileDataset, pinned: Manifest
+    subset: Subset,
 ) -> None:
     """A document that timed out three times is broken, not slow.
 
@@ -272,7 +324,7 @@ def test_takes_latency_from_the_documents_that_produced_something(
     """
     extractor = FakeExtractor(answers=[READING, ExtractionError("gone")], latency=2.0)
 
-    run = done(extractor, dataset, pinned, attempts=1)
+    run = done(extractor, subset, attempts=1)
 
     assert run.latency(50) == 2.0
     assert run.latency(95) == 2.0
@@ -292,11 +344,8 @@ def test_refuses_a_percentile_that_is_not_one() -> None:
         percentile_of([1.0], 0)
 
 
-def test_writes_the_predictions_the_eval_reads(
-    dataset: DocileDataset, pinned: Manifest, tmp_path: Path
-) -> None:
-    extractor = FakeExtractor(answers=[READING])
-    run = done(extractor, dataset, pinned)
+def test_writes_the_predictions_the_eval_reads(subset: Subset, tmp_path: Path) -> None:
+    run = done(FakeExtractor(answers=[READING]), subset)
     path = tmp_path / "predictions.json"
 
     write_predictions(run, path)
@@ -305,10 +354,9 @@ def test_writes_the_predictions_the_eval_reads(
 
 
 def test_writes_a_record_of_what_each_document_cost(
-    dataset: DocileDataset, pinned: Manifest, tmp_path: Path
+    subset: Subset, tmp_path: Path
 ) -> None:
-    extractor = FakeExtractor(answers=[READING])
-    run = done(extractor, dataset, pinned)
+    run = done(FakeExtractor(answers=[READING]), subset)
     path = tmp_path / "run.json"
 
     write_record(run, path)
@@ -338,15 +386,13 @@ def test_a_document_run_knows_whether_it_predicted_anything() -> None:
     assert not nothing.predicted
 
 
-def test_writes_the_subset_the_run_covered(
-    dataset: DocileDataset, pinned: Manifest, tmp_path: Path
-) -> None:
+def test_writes_the_subset_the_run_covered(subset: Subset, tmp_path: Path) -> None:
     """A `--limit` run covers a prefix, and its score has to be over that prefix.
 
     Scored against the whole pinned subset instead, the documents that were
     never attempted would count as recall the backend lost.
     """
-    run = done(FakeExtractor(answers=[READING]), dataset, pinned)
+    run = done(FakeExtractor(answers=[READING]), subset)
     path = tmp_path / "manifest.json"
 
     write_manifest(run, path)
@@ -354,9 +400,7 @@ def test_writes_the_subset_the_run_covered(
     assert load(path).document_ids == ("syn0001", "syn0002")
 
 
-def test_adds_up_the_tokens_of_the_attempts_that_failed(
-    dataset: DocileDataset, pinned: Manifest
-) -> None:
+def test_adds_up_the_tokens_of_the_attempts_that_failed(subset: Subset) -> None:
     """The tokens of a billed failure go where its cost goes.
 
     Otherwise a retried document records the cost of every attempt with the
@@ -374,14 +418,14 @@ def test_adds_up_the_tokens_of_the_attempts_that_failed(
         ]
     )
 
-    run = done(extractor, dataset, pinned)
+    run = done(extractor, subset)
 
     assert run.documents[0].usage == Usage(input_tokens=200, output_tokens=100)
     assert run.tokens == Usage(input_tokens=300, output_tokens=150)
 
 
 def test_stops_at_a_failure_the_backend_says_is_not_worth_retrying(
-    dataset: DocileDataset, pinned: Manifest
+    subset: Subset,
 ) -> None:
     """A refused key is refused again; the backoff would teach nobody anything."""
     waits: list[float] = []
@@ -389,7 +433,7 @@ def test_stops_at_a_failure_the_backend_says_is_not_worth_retrying(
         answers=[ExtractionError("the key was refused", retryable=False)]
     )
 
-    run = done(extractor, dataset, pinned, attempts=3, wait=waits.append)
+    run = done(extractor, subset, attempts=3, wait=waits.append)
 
     assert [each.attempts for each in run.failed] == [1, 1]
     assert waits == []
@@ -397,10 +441,13 @@ def test_stops_at_a_failure_the_backend_says_is_not_worth_retrying(
 
 
 def test_a_missing_dataset_ends_the_run_rather_than_every_document(
-    tmp_path: Path, pinned: Manifest
+    subset: Subset, tmp_path: Path
 ) -> None:
-    """One wrong --data-dir is one error, not a hundred documents with no PDF."""
+    """One wrong --data-dir is one error, not a hundred documents with no labels."""
     extractor = FakeExtractor(answers=[READING])
+    elsewhere = DocileDataset(tmp_path / "never-downloaded")
 
     with pytest.raises(DatasetNotFoundError):
-        done(extractor, DocileDataset(tmp_path / "never-downloaded"), pinned)
+        done(extractor, Subset(elsewhere, subset.copies, subset.pinned))
+
+    assert extractor.attempts == []

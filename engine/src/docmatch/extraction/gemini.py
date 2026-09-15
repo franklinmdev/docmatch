@@ -1,9 +1,10 @@
 """The cheap vision backend: a Gemini Flash-Lite model reading page images.
 
 This is the first backend behind `Extractor`, and the one the first row of the
-README's benchmark table is measured on. It renders nothing and scores nothing:
-it is given pages, it asks the model to fill in `schema.Invoice`, and it reports
-the reading with the tokens, the cost and the latency it took.
+README's benchmark table is measured on. It scores nothing: it is given a
+document, renders the pages of its public copy, asks the model to fill in
+`schema.Invoice`, and reports the reading with the tokens, the cost and the
+latency it took.
 
 What was read before this was written
 -------------------------------------
@@ -32,6 +33,12 @@ cents.
 Pages, and the order they are sent in
 -------------------------------------
 
+Every page is rendered by `pages.render` at `long_edge`, 1600 px by default,
+colour, PNG, with the page's `/Rotate` applied, and with neither the archive's
+footer cropped nor the scan deskewed (#34). That is the render the Phase 0 row
+was measured on, moved behind the backend so a backend that reads the PDF
+itself never renders anything.
+
 The instruction goes before the images, which is what the image-understanding
 guide asks for when text accompanies a single image. Pages follow in order,
 each announced by number, because a two-page invoice whose table continues over
@@ -51,8 +58,14 @@ from google import genai
 from google.genai.types import HttpOptions, HttpRetryOptions
 from pydantic import ValidationError
 
-from docmatch.extraction.extractor import Extraction, ExtractionError, Price, Usage
-from docmatch.extraction.pages import MIME_TYPE, PageImage
+from docmatch.extraction.extractor import (
+    Document,
+    Extraction,
+    ExtractionError,
+    Price,
+    Usage,
+)
+from docmatch.extraction.pages import LONG_EDGE, MIME_TYPE, PageError, PageImage, render
 from docmatch.extraction.schema import Invoice
 
 INLINE_LIMIT = 20_000_000
@@ -156,7 +169,7 @@ def client() -> genai.Client:
     )
 
 
-def extractor(model: str = MODEL) -> "GeminiExtractor":
+def extractor(model: str = MODEL, long_edge: int = LONG_EDGE) -> "GeminiExtractor":
     """A backend reading with the key in the environment, and its client kept.
 
     A model with no price written down is refused here, before a run has a
@@ -164,7 +177,9 @@ def extractor(model: str = MODEL) -> "GeminiExtractor":
     """
     price_of(model)
     keep = client()
-    return GeminiExtractor(interactions=keep.interactions, model=model, owner=keep)
+    return GeminiExtractor(
+        interactions=keep.interactions, model=model, long_edge=long_edge, owner=keep
+    )
 
 
 def price_of(model: str) -> Price:
@@ -254,10 +269,12 @@ class Counted(Protocol):
 
 @dataclass(frozen=True)
 class GeminiExtractor:
-    """Reads pages with one Gemini model, over the Interactions API."""
+    """Reads a document's rendered pages with one Gemini model, over Interactions."""
 
     interactions: Interactions
     model: str = MODEL
+    long_edge: int = LONG_EDGE
+    """Pixels on a rendered page's longer side."""
     schema: dict[str, Any] = field(default_factory=Invoice.model_json_schema)
     owner: object = None
     """Whatever `interactions` came off, kept only so that it outlives this.
@@ -277,19 +294,21 @@ class GeminiExtractor:
     def price(self) -> Price:
         return price_of(self.model)
 
-    def extract(self, pages: Sequence[PageImage]) -> Extraction:
+    def extract(self, document: Document) -> Extraction:
         """Read one document, or say why it could not be read.
 
         Everything that can be refused is refused before the call: the price
         is looked up first, because a model the provider bills and this module
         does not price would otherwise be paid for and then reported at
-        nothing, once per attempt, with the cap never reached.
+        nothing, once per attempt, with the cap never reached. A copy that
+        cannot be rendered is refused next, and not retried: the same bytes
+        fail the same way.
         """
         price = self.price
-        if not pages:
-            raise ExtractionError(
-                "a document with no pages cannot be read", retryable=False
-            )
+        try:
+            pages = render(document.path, self.long_edge)
+        except PageError as error:
+            raise ExtractionError(str(error), retryable=False) from error
         content = _content(pages)
         response_format = {
             "type": "text",

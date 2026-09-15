@@ -377,9 +377,15 @@ path on every push while the dataset stays on the machine that downloaded it.
 ### The baseline run
 
 `docmatch eval` scores a predictions file. `docmatch extract` is what produces
-one: it renders every pinned document's pages, asks one backend to fill in a
-schema built from DocILE's own fieldtype names, and writes the predictions
-beside a record of what each document cost.
+one: it hands every pinned document's public copy to one backend, which
+prepares its own input (Gemini renders the pages) and fills in a schema built
+from DocILE's own fieldtype names, and it writes the predictions beside a
+record of what each document cost.
+
+It reads the public copies `docmatch download` put in `data/ucsf` (`--copies`
+points elsewhere), and before the first request it checks every pinned copy
+against its digest. A missing or changed copy ends the run with one message
+naming it, and nothing is sent.
 
 ```bash
 uv run --env-file .env docmatch extract --out data/runs/baseline
@@ -404,9 +410,10 @@ uv run docmatch eval --predictions data/runs/baseline/predictions.json
 ```
 
 `--model` chooses the backend, `--long-edge` the pixels on a rendered page's
-longer side, `--attempts` and `--cost-cap` bound what one document may spend
-before it is given up on, and `--limit` reads only the first few pinned
-documents, which is how to check that a run works before paying for all of them.
+longer side for a backend that renders pages, `--attempts` and `--cost-cap`
+bound what one document may spend before it is given up on, and `--limit` reads
+only the first few pinned documents, which is how to check that a run works
+before paying for all of them.
 
 A `--limit` run has to be scored against the subset it covered, which is what
 the `manifest.json` beside its predictions is for:

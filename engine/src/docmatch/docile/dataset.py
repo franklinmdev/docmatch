@@ -66,19 +66,6 @@ class DocileDataset:
             )
         return Annotation.model_validate_json(path.read_bytes())
 
-    def pdf(self, document_id: str) -> Path:
-        """The document's PDF, which is what an extraction backend reads.
-
-        The path rather than the bytes: rendering opens it with its own reader,
-        and a 1.14 GB dataset is not something to pass around in memory.
-        """
-        path = self._pdfs() / f"{_name(document_id)}.pdf"
-        if not path.is_file():
-            raise DocumentNotFoundError(
-                f"no PDF for document {document_id!r} in {self.root}"
-            )
-        return path
-
     def document_ids(self, split: str) -> tuple[str, ...]:
         """Every document id in one split, in the order the split file lists them.
 
@@ -103,16 +90,6 @@ class DocileDataset:
     def _annotations(self) -> Path:
         """The annotations directory, which is what a downloaded dataset has."""
         return self._directory("annotations")
-
-    def _pdfs(self) -> Path:
-        """The PDFs directory, the other half of a downloaded dataset.
-
-        Checked on its own rather than through `_annotations`, because the
-        two are downloaded separately and a run that reads PDFs never opens
-        an annotation: a missing dataset has to be one error before the first
-        document, not a hundred "no PDF" failures after.
-        """
-        return self._directory("pdfs")
 
     def _directory(self, name: str) -> Path:
         directory = self.root / name
