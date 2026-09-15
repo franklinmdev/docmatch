@@ -151,7 +151,9 @@ def test_reports_a_pinned_document_the_dataset_does_not_hold(
     synthetic_subset: Path,
 ) -> None:
     """A manifest the dataset cannot satisfy produces no number at all."""
-    manifest = Manifest(split="val", seed=1, size=1, document_ids=("eval9999",))
+    manifest = Manifest(
+        split="val", seed=1, source="synthetic", size=1, document_ids=("eval9999",)
+    )
 
     with pytest.raises(DocumentNotFoundError):
         score_subset(DocileDataset(synthetic_subset), manifest, {})

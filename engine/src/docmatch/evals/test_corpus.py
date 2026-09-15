@@ -46,7 +46,14 @@ def document(
     fields: Sequence[FieldExtraction] = (), cells: Sequence[LineItemCell] = ()
 ) -> Annotation:
     return Annotation(
-        fields=list(fields), cells=list(cells), metadata=DocumentMetadata(page_count=1)
+        fields=list(fields),
+        cells=list(cells),
+        metadata=DocumentMetadata(
+            page_count=1,
+            page_sizes_at_200dpi=((1700, 2200),) * 1,
+            source="synthetic",
+            original_filename="synthetic",
+        ),
     )
 
 

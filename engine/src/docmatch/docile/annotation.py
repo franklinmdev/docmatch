@@ -50,6 +50,12 @@ class DocumentMetadata(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     page_count: int
+    page_sizes_at_200dpi: tuple[tuple[int, int], ...]
+    """Width and height of each page in pixels, rendered at 200 dpi."""
+    source: str
+    """The archive the document came from: `ucsf` or `pif` in DocILE."""
+    original_filename: str
+    """The document's id in that archive."""
     currency: str | None = None
     document_type: str | None = None
     language: str | None = None
