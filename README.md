@@ -132,49 +132,59 @@ Filled in as phases complete. Every row names the commit that produced it.
 
 | Backend | Field F1 | Line-item F1 | Gate pass rate | Cost / doc | p50 / p95 latency | Commit |
 |---|---|---|---|---|---|---|
-| `gemini-3.1-flash-lite`, pages at 1600 px | 0.515 | 0.101 | phase 1 | $0.00267 | 5.0 s / 13.2 s | [`d148896`](https://github.com/franklinmdev/docmatch/commit/d148896) |
+| `gemini-3.1-flash-lite`, pages at 1600 px | 0.615 | 0.374 | phase 1 | $0.00203 | 5.2 s / 9.3 s | [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
 
-The two commands that produced the row, against DocILE in `data/docile`:
+The two commands that produced the row, with DocILE's labels in `data/docile`
+and the pinned public copies in `data/ucsf`:
 
 ```bash
-uv run --env-file .env docmatch extract --out data/runs/baseline
-uv run docmatch eval --predictions data/runs/baseline/predictions.json
+uv run --env-file .env docmatch extract --out data/runs/gemini
+uv run docmatch eval --predictions data/runs/gemini/predictions.json
 ```
 
-All 100 pinned documents were read and none failed, so both numbers are over
-the whole subset. The run cost $0.27 and took 171,471 input and 149,723 output
-tokens. There is no gate pass rate yet because there is no gate: the
-deterministic validation gate is phase 1, and the column is here so that the
-row it belongs to already exists.
+All 100 pinned documents were read, every one on its first attempt, and none
+failed, so both numbers are over the whole subset. The run cost $0.20 and took
+144,353 input and 111,507 output tokens. There is no gate pass rate yet because
+there is no gate: the deterministic validation gate is phase 1, and the column
+is here so that the row it belongs to already exists.
+
+**Why this row replaced the Phase 0 one.** The subset moved. The Phase 0 row
+was measured on 100 val documents whose pages the backend read from DocILE's
+own copies. DocILE's terms bar third-party access to its content and carve out
+no hosted API, so the engine reads that as barring those copies from a hosted
+model. The subset is now 100 val UCSF documents read from the public
+copies the UCSF Industry Documents Library publishes (see
+[The fixed subset](#the-fixed-subset)), so the two rows are over different
+documents and this one does not measure an improvement over the other. The old
+row, field F1 0.515 and line-item F1 0.101, stays reachable at
+[`65916b4`](https://github.com/franklinmdev/docmatch/blob/65916b4/README.md#benchmarks).
 
 **What the two numbers mean.** Field F1 is over normalized header values, one
 fieldtype at a time. Line-item F1 is over whole rows, and it is much harsher
 than it looks next to the per-cell accuracies in the same report:
-`line_item_amount_gross` is read correctly in 77.3% of labeled cells,
-`line_item_quantity` in 77.2% and `line_item_position` in 83.2%, but a row
+`line_item_amount_gross` is read correctly in 74.5% of labeled cells,
+`line_item_quantity` in 69.8% and `line_item_description` in 64.5%, but a row
 counts as correct only when every one of its cells matches and it carries no
 cell the label does not. A row with four right cells and one wrong one scores
 zero. That is deliberate, and `engine/src/docmatch/metrics/line_items.py`
 argues for it; the per-cell table is where partial credit lives.
 
-**Where this baseline loses.** Header recall is 0.470 against precision 0.570,
+**Where this baseline loses.** Header recall is 0.590 against precision 0.641,
 so the model more often fails to find a value than invents one, and the
-weakness is concentrated: `currency_code_amount_due` is 0.105 because the model
-left it empty on 67 of the 71 documents that label it, a recall miss and not a
-format one, since the scorer already reads `$` as USD; and the two address fields
-are 0.160 and 0.064 while carrying the most spurious values of any field, which
-is what asking for every distinct value of a repeated field costs before any
-prompt work. `date_issue` at 0.891 and `amount_total_tax` at 0.875 are what the
-same model does on a field with one unambiguous form. None of that is tuned:
-this is one prompt, one resolution and no retries on content, which is what a
-floor is supposed to be.
+weakness is concentrated in the address fields: `customer_billing_address` is
+0.130 and `vendor_address` 0.262, and between them they carry 183 of the 472
+missed header values and 146 of the 381 spurious ones, which is what asking for
+every distinct value of a repeated field costs before any prompt work.
+`date_issue` at 0.959 and `date_due` at 0.919 are what the same model does on a
+field with one unambiguous form. None of that is tuned: this is one prompt, one
+resolution and no retries on content, which is what a floor is supposed to be.
 
-The row was scored before code derived the currency from the amounts the model
-did read. `docmatch eval` now adds that derived value, so the command above
-reports field F1 0.550 on the same saved predictions, with the currency field
-at 0.812, as of
-[`e96d5bf`](https://github.com/franklinmdev/docmatch/commit/e96d5bf). That is a measurement of the rule, not a new row: the row changes
-when the subset is rerun.
+**Currency, as read and derived.** Field F1 counts the value code derives for
+`currency_code_amount_due` beside what the model read. As read, the field is
+0.062: the model left it empty on 60 of the 62 documents that label it, a
+recall miss and not a format one, since the scorer already reads `$` as USD.
+With the symbol code takes from `amount_due` and `amount_total_gross`, it is
+0.889, with 52 matched, 10 missing and 3 spurious.
 
 ### Matching, injected discrepancies
 
@@ -388,7 +398,7 @@ against its digest. A missing or changed copy ends the run with one message
 naming it, and nothing is sent.
 
 ```bash
-uv run --env-file .env docmatch extract --out data/runs/baseline
+uv run --env-file .env docmatch extract --out data/runs/gemini
 ```
 
 It needs a `GEMINI_API_KEY` in `.env`, beside `DOCILE_TOKEN` (see
@@ -405,8 +415,8 @@ pages, attempts, tokens, cost, latency and any failure. So a benchmark row is
 reproduced by
 
 ```bash
-uv run --env-file .env docmatch extract --out data/runs/baseline
-uv run docmatch eval --predictions data/runs/baseline/predictions.json
+uv run --env-file .env docmatch extract --out data/runs/gemini
+uv run docmatch eval --predictions data/runs/gemini/predictions.json
 ```
 
 `--model` chooses the backend, `--long-edge` the pixels on a rendered page's
