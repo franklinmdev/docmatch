@@ -288,19 +288,58 @@ repository.
 
 ### The fixed subset
 
-Every number in the Benchmarks section is measured over the same 100 documents:
-a seeded draw from the val split, pinned as a list in
-`engine/src/docmatch/evals/subset.json`. The list and the seed are both
-committed, so the list is the subset and the seed is the audit trail. Check
-that the seed still draws it:
+Every number in the Benchmarks section is measured over the same 100 documents, pinned as a list in `engine/src/docmatch/evals/subset.json`.
+
+**Pool.** The val split's documents whose DocILE source is UCSF, 225 of its
+500. Hosted backends read each document's public copy, the PDF the UCSF
+Industry Documents Library publishes, because DocILE's terms bar third-party
+access to DocILE's own copies. FCC documents are left out: nothing DocILE
+records resolves them to a file.
+
+**Ranking.** Each id is ranked by `sha256("<seed>:<id>")` with seed 20260912,
+lowest first. Restricting the pool kept every UCSF document of the earlier
+whole-split draw, and a prefix of the list is still a sample of the same draw.
+
+**Admission.** The ranking is walked in order, and a document is admitted only
+when its public copy has DocILE's page count and every page has DocILE's shape:
+one scale puts both sides within 1 px of DocILE's size at 200 dpi, measured
+with the page's rotation applied. Labels come from DocILE, so a copy with an
+extra page or a different page would score the backend against pages it never
+saw. A page the archive declares at another scale with the same aspect ratio is
+admitted, because labels are boxes relative to the page; a fixed 200 dpi
+comparison rejected 47 documents for that alone. The walk stops at 100 admitted
+documents; when fewer pass, the subset is every admitted document. The current
+walk read 105 copies and admitted 100; all 5 rejects carry a page DocILE's copy
+does not. 39 of the 43 UCSF documents in the earlier whole-split draw are
+still pinned, and the other 4 are among those rejects.
+
+**Rejects and digests.** The manifest pins every rejected id with its reason
+(`page count differs`, `page size differs`, `fetch failed`) and the sha256 of
+every admitted public copy. Ids and digests carry no document content. Check,
+offline, that the ranking minus the rejects still draws the pinned list:
 
 ```bash
 uv run docmatch subset
 ```
 
-It exits non-zero when the pinned list is no longer what the seed draws.
-`--write` redraws the manifest, and changing the seed is a deliberate change of
-benchmark rather than a detail.
+It needs DocILE's metadata in `data/docile` and no network, and exits non-zero
+when the pinned list is no longer what the ranking minus the rejects draws.
+`--write` walks the ranking again, fetching every copy from the archive, and
+rewrites the manifest; changing the seed is a deliberate change of benchmark
+rather than a detail.
+
+**Public copies.** Download the pinned copies into the gitignored `data/ucsf`,
+each checked against its digest:
+
+```bash
+uv run docmatch download
+```
+
+A copy already there with the pinned digest is kept. A copy the archive serves
+with any other digest is not written and the command exits non-zero, so a file
+that changed in the archive stops the benchmark instead of quietly moving it.
+The download route is the one the library's own web app uses, undocumented, so
+it may change without notice.
 
 Score a run of predictions over the subset. The predictions file is a JSON
 object keyed by document id, each value the single-document shape above:
