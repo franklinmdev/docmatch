@@ -398,7 +398,7 @@ against its digest. A missing or changed copy ends the run with one message
 naming it, and nothing is sent.
 
 ```bash
-uv run --env-file .env docmatch extract --out data/runs/baseline
+uv run --env-file .env docmatch extract --out data/runs/gemini
 ```
 
 It needs a `GEMINI_API_KEY` in `.env`, beside `DOCILE_TOKEN` (see
@@ -415,8 +415,8 @@ pages, attempts, tokens, cost, latency and any failure. So a benchmark row is
 reproduced by
 
 ```bash
-uv run --env-file .env docmatch extract --out data/runs/baseline
-uv run docmatch eval --predictions data/runs/baseline/predictions.json
+uv run --env-file .env docmatch extract --out data/runs/gemini
+uv run docmatch eval --predictions data/runs/gemini/predictions.json
 ```
 
 `--model` chooses the backend, `--long-edge` the pixels on a rendered page's
