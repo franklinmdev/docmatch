@@ -150,6 +150,32 @@ def path(directory: Path, document_id: str) -> Path:
     return directory / f"{document_id}.pdf"
 
 
+def verify(manifest: Manifest, directory: Path) -> None:
+    """Raise unless every pinned copy is in `directory` with its pinned digest.
+
+    What a run does before its first request. A missing or changed copy ends
+    the run once, naming the first such document, rather than failing it among
+    documents already paid for or scoring a benchmark over a different file.
+    """
+    if not manifest.digests:
+        raise PublicCopyError(
+            "the manifest pins no digests, so there is no public copy to verify"
+        )
+    for document_id in manifest.document_ids:
+        local = path(directory, document_id)
+        if not local.is_file():
+            raise PublicCopyError(
+                f"no public copy of {document_id} at {local}: `docmatch download` "
+                "fetches the pinned copies"
+            )
+        found = digest(local.read_bytes())
+        if found != manifest.digests[document_id]:
+            raise DigestError(
+                f"the public copy of {document_id} at {local} has sha256 {found}, "
+                f"but the manifest pins {manifest.digests[document_id]}"
+            )
+
+
 @dataclass(frozen=True)
 class Downloaded:
     """Which pinned copies came from the archive and which were already there."""

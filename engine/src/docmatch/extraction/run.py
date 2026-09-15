@@ -1,8 +1,8 @@
 """Running one backend over the fixed subset, and what the run cost.
 
 `docmatch eval` scores a predictions file. This is what produces one: every
-document the manifest pins, rendered, read by an `Extractor`, and written out
-in the shape the scorer already takes. The two halves are kept apart on
+document the manifest pins, its public copy verified, read by an `Extractor`,
+and written out in the shape the scorer already takes. The two halves are kept apart on
 purpose. A run costs money and needs a key; scoring is free and deterministic,
 and a benchmark row is reproducible only if the second half can be re-run
 against a saved answer without paying for the first again.
@@ -34,6 +34,15 @@ attempt will cost is not known until it has been billed, so a document can end
 over the cap by at most one attempt; the cap bounds a runaway, it does not
 promise a ceiling to the cent.
 
+Public copies, verified before anything is paid for
+----------------------------------------------------
+
+A backend reads a document's public copy, never DocILE's (#16), and the copy it
+reads has to be the one the manifest pins. Every copy is checked against its
+digest before the first document is sent, so a missing or changed file ends
+the run once, the way a missing dataset does, instead of failing one document
+among others already paid for or quietly scoring a different file.
+
 One document at a time
 ----------------------
 
@@ -51,10 +60,15 @@ from decimal import Decimal
 from pathlib import Path
 
 from docmatch.docile.dataset import DatasetNotFoundError, DocileDataset, DocileError
-from docmatch.evals import manifest
+from docmatch.evals import manifest, public
 from docmatch.evals.manifest import Manifest
-from docmatch.extraction.extractor import NOTHING, ExtractionError, Extractor, Usage
-from docmatch.extraction.pages import PageError, render
+from docmatch.extraction.extractor import (
+    NOTHING,
+    Document,
+    ExtractionError,
+    Extractor,
+    Usage,
+)
 from docmatch.metrics.fields import Prediction
 
 ATTEMPTS = 3
@@ -100,6 +114,7 @@ class Run:
     backend: str
     manifest: Manifest
     long_edge: int
+    """What a rendering backend was asked to render at, kept with the record."""
     documents: tuple[DocumentRun, ...]
 
     @property
@@ -172,54 +187,60 @@ def extract_subset(
     extractor: Extractor,
     dataset: DocileDataset,
     manifest: Manifest,
+    copies: Path,
     *,
-    long_edge: int,
     attempts: int = ATTEMPTS,
     cost_cap: Decimal = COST_CAP,
     wait: Callable[[float], None] = time.sleep,
 ) -> Iterator[DocumentRun]:
-    """Read every pinned document, yielding each as it is done.
+    """Verify every pinned public copy, then read each document, yielding it as done.
 
-    Yielded rather than returned so a long run can print progress and a failure
-    on document ninety does not lose the eighty-nine before it.
+    The verification happens here, when this is called, and not when the first
+    document is asked for, so a caller can refuse to start before it has made
+    anything. Documents are yielded rather than returned so a long run can
+    print progress and a failure on document ninety does not lose the
+    eighty-nine before it.
     """
-    for document_id in manifest.document_ids:
-        yield _document(
+    public.verify(manifest, copies)
+    return (
+        _document(
             extractor,
             dataset,
             document_id,
-            long_edge=long_edge,
+            copies,
             attempts=attempts,
             cost_cap=cost_cap,
             wait=wait,
         )
+        for document_id in manifest.document_ids
+    )
 
 
 def _document(
     extractor: Extractor,
     dataset: DocileDataset,
     document_id: str,
+    copies: Path,
     *,
-    long_edge: int,
     attempts: int,
     cost_cap: Decimal,
     wait: Callable[[float], None],
 ) -> DocumentRun:
     """One document, retried until it is read, given up on, or too expensive."""
     try:
-        pages = render(dataset.pdf(document_id), long_edge)
+        pages = dataset.annotation(document_id).metadata.page_count
     except DatasetNotFoundError:
         # No dataset at all is the run's failure: every document would fail the
-        # same way, and a hundred "no PDF" lines would hide one wrong path.
+        # same way, and a hundred "no annotation" lines would hide one wrong path.
         raise
-    except (DocileError, PageError) as error:
-        # A document whose PDF is missing is this document's failure and not the
-        # run's. `dataset.pdf` raises `DocumentNotFoundError`, which is a
-        # `DocileError` and not a `PageError`, and letting it out here would end
-        # a paid run on document ninety and write none of the eighty-nine.
+    except DocileError as error:
+        # A pinned document whose annotation is missing is this document's
+        # failure and not the run's: letting it out here would end a paid run on
+        # document ninety and write none of the eighty-nine.
         return _failed(
             document_id, pages=0, attempts=0, latency=0.0, failure=str(error)
         )
+    document = Document(document_id, public.path(copies, document_id), pages)
 
     spent = Decimal(0)
     used = NOTHING
@@ -235,7 +256,7 @@ def _document(
         made = attempt
         started = time.perf_counter()
         try:
-            read = extractor.extract(pages)
+            read = extractor.extract(document)
         except ExtractionError as error:
             elapsed += time.perf_counter() - started
             spent += error.cost
@@ -248,7 +269,7 @@ def _document(
         used = used + read.usage
         return DocumentRun(
             document_id=document_id,
-            pages=len(pages),
+            pages=pages,
             attempts=attempt,
             usage=used,
             cost=spent,
@@ -258,7 +279,7 @@ def _document(
         )
     return _failed(
         document_id,
-        pages=len(pages),
+        pages=pages,
         attempts=made,
         latency=elapsed,
         failure=last,

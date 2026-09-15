@@ -1,10 +1,15 @@
 """The seam every extraction backend plugs into, and what one call costs.
 
-`Extractor` is the whole interface: pages in, one `Extraction` out. Phase 1
-adds a second provider, a commercial prebuilt invoice model, an OCR-first path
-and a local open-weight model behind this same protocol, and the benchmark
-compares them by running the same subset through each. Nothing above this
-module knows which backend produced a reading.
+`Extractor` is the whole interface: one document in, one `Extraction` out.
+Phase 1 adds a commercial prebuilt invoice model and a second vision LLM
+provider behind this same protocol, and the benchmark compares them by running
+the same subset through each. Nothing above this module knows which backend
+produced a reading.
+
+The document, not its pages, is what crosses the seam (#34). A vision LLM reads
+pages rendered to images and a prebuilt invoice model reads the PDF itself, so
+each backend prepares its own input from the verified public copy, and a
+rendering choice belongs to the backends that render.
 
 Every call reports what it cost. A benchmark row carries cost per document and
 p50 and p95 latency beside field F1, because a backend that is two points
@@ -22,12 +27,11 @@ changing it is a visible diff. `notes/fact-check.md` holds the reading log and
 the README's backend table carries the same dates.
 """
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 from typing import Protocol
 
-from docmatch.extraction.pages import PageImage
 from docmatch.metrics.fields import Prediction
 
 MILLION = Decimal(1_000_000)
@@ -55,7 +59,7 @@ NOTHING = Usage(input_tokens=0, output_tokens=0)
 
 
 class ExtractionError(Exception):
-    """A backend could not turn these pages into a reading.
+    """A backend could not turn this document into a reading.
 
     `cost` and `usage` are what the attempt was billed anyway. An answer that
     came back and could not be used, because it did not fit the schema or the
@@ -64,7 +68,7 @@ class ExtractionError(Exception):
     exists to compare. A call that never reached the model costs nothing and
     leaves both at zero.
 
-    `retryable` says whether sending the same pages again could end differently.
+    `retryable` says whether sending the same document again could end differently.
     A rate limit, a dropped connection or an answer that did not fit can; a
     document with no pages, a request the provider refuses as malformed or a key
     it refuses at all cannot, and a run that retried those would wait through
@@ -109,6 +113,17 @@ class Price:
 
 
 @dataclass(frozen=True)
+class Document:
+    """One pinned document, as a backend is handed it."""
+
+    document_id: str
+    path: Path
+    """The public copy, already verified against the digest the manifest pins."""
+    pages: int
+    """The page count admission matched against DocILE's copy."""
+
+
+@dataclass(frozen=True)
 class Extraction:
     """One backend's reading of one document, and what it took."""
 
@@ -121,11 +136,11 @@ class Extraction:
 
 
 class Extractor(Protocol):
-    """Pages in, one reading out. The seam phase 1 hangs every backend on."""
+    """A document in, one reading out. The seam phase 1 hangs every backend on."""
 
     @property
     def name(self) -> str:
         """How this backend is named in a benchmark row."""
 
-    def extract(self, pages: Sequence[PageImage]) -> Extraction:
+    def extract(self, document: Document) -> Extraction:
         """Read one document. Raises `ExtractionError` when it cannot."""

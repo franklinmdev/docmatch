@@ -3,7 +3,7 @@
 The simplest thing that is correct: every page rendered at a fixed long edge,
 in colour, with the page's own orientation applied. Phase 1 owns the refining,
 deskewing and the rest; this is the version the first benchmark row is measured
-on, and what matters here is that it is the same for every backend.
+on, and what matters here is that it is the same for every backend that renders.
 
 Orientation comes from the file rather than from a guess. A PDF page carries a
 `/Rotate` entry, and pdfium applies it in both `get_size` and `render`: page 0

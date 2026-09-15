@@ -17,8 +17,9 @@ README comes from.
 `docmatch corpus` recomputes the counts the rules in `metrics` are justified
 by, which is how a reader checks the numbers the docstrings there assert.
 
-`docmatch extract` reads the subset with one backend and writes the predictions
-file the eval scores, which is the half of a benchmark row that costs money.
+`docmatch extract` reads the pinned public copies with one backend and writes
+the predictions file the eval scores, which is the half of a benchmark row that
+costs money.
 
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
@@ -362,10 +363,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         help=f"the subset to read (default: {manifest.MANIFEST.name})",
     )
     extract.add_argument(
+        "--copies",
+        type=Path,
+        default=DEFAULT_COPIES_DIR,
+        help=(
+            "where the pinned public copies are kept, each verified before the "
+            f"run starts (default: {DEFAULT_COPIES_DIR})"
+        ),
+    )
+    extract.add_argument(
         "--long-edge",
         type=positive,
         default=pages.LONG_EDGE,
-        help=f"pixels on a page's longer side (default: {pages.LONG_EDGE})",
+        help=(
+            "pixels on a rendered page's longer side, for a backend that renders "
+            f"pages (default: {pages.LONG_EDGE})"
+        ),
     )
     extract.add_argument(
         "--attempts",
@@ -565,10 +578,19 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     pinned = manifest.load(arguments.manifest)
     if arguments.limit is not None:
         pinned = pinned.first(arguments.limit)
-    # The key and the price before the directory, so a run that cannot start
-    # leaves nothing behind; the directory before the first document, because
-    # an --out that cannot be written is worth a hundred documents of spend.
-    backend = gemini.extractor(arguments.model)
+    # The key, the price and the public copies before the directory, so a run
+    # that cannot start leaves nothing behind; the directory before the first
+    # document, because an --out that cannot be written is worth a hundred
+    # documents of spend.
+    backend = gemini.extractor(arguments.model, long_edge=arguments.long_edge)
+    reading = extract_subset(
+        backend,
+        dataset,
+        pinned,
+        arguments.copies,
+        attempts=arguments.attempts,
+        cost_cap=arguments.cost_cap,
+    )
     _prepare(arguments.out)
 
     def finished(covered: Manifest, documents: Sequence[DocumentRun]) -> Run:
@@ -581,14 +603,7 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
 
     documents: list[DocumentRun] = []
     try:
-        for document in extract_subset(
-            backend,
-            dataset,
-            pinned,
-            long_edge=arguments.long_edge,
-            attempts=arguments.attempts,
-            cost_cap=arguments.cost_cap,
-        ):
+        for document in reading:
             documents.append(document)
     except BaseException as stopped:
         if documents:
