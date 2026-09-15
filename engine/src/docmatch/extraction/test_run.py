@@ -69,7 +69,13 @@ def dataset(tmp_path: Path) -> DocileDataset:
 
 @pytest.fixture
 def pinned() -> Manifest:
-    return Manifest(split="val", seed=1, size=2, document_ids=("syn0001", "syn0002"))
+    return Manifest(
+        split="val",
+        seed=1,
+        source="synthetic",
+        size=2,
+        document_ids=("syn0001", "syn0002"),
+    )
 
 
 def done(

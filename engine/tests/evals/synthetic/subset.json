@@ -1,6 +1,7 @@
 {
   "split": "val",
   "seed": 1,
+  "source": "synthetic",
   "size": 5,
   "document_ids": [
     "eval0004",
@@ -8,5 +9,7 @@
     "eval0006",
     "eval0003",
     "eval0005"
-  ]
+  ],
+  "rejected": {},
+  "digests": {}
 }

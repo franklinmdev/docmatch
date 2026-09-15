@@ -324,7 +324,12 @@ def test_labeled_line_items_keeps_a_fieldtype_repeated_within_a_row() -> None:
             )
             for text in ("02/01/26", "02/28/26")
         ],
-        metadata=DocumentMetadata(page_count=1),
+        metadata=DocumentMetadata(
+            page_count=1,
+            page_sizes_at_200dpi=((1700, 2200),) * 1,
+            source="synthetic",
+            original_filename="synthetic",
+        ),
     )
 
     assert labeled_line_items(annotation) == (

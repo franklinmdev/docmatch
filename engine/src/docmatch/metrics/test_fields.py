@@ -109,7 +109,12 @@ def test_labeled_fields_groups_an_annotation_by_fieldtype() -> None:
             ),
         ],
         cells=[],
-        metadata=DocumentMetadata(page_count=2),
+        metadata=DocumentMetadata(
+            page_count=2,
+            page_sizes_at_200dpi=((1700, 2200),) * 2,
+            source="synthetic",
+            original_filename="synthetic",
+        ),
     )
 
     assert labeled_fields(annotation) == {
