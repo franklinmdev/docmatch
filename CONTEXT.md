@@ -39,3 +39,9 @@ _Avoid_: validation (on its own), filter, guardrail
 **Gate ablation**:
 The comparison of what the gate and confidence each catch among readings whose gated values are wrong, so the gate is judged only on errors it could see.
 _Avoid_: gate eval, gate accuracy
+
+### Measurement
+
+**Regression**:
+A change that lowers field F1 or line-item F1 on the fixed subset below the benchmark row of a backend it touches. Any drop counts, and a regression blocks merge. A backend's first row has nothing to regress from.
+_Avoid_: degradation, drop beyond threshold
