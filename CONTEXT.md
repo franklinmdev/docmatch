@@ -47,5 +47,5 @@ A change that lowers field F1 or line-item F1 on the fixed subset below the benc
 _Avoid_: degradation
 
 **Cost per document**:
-What reading one document costs at the vendor's list price for the units the vendor reported processing, tokens or pages, including attempts that failed. Free tiers and what was actually billed play no part, so every backend's cost means the same thing.
+What reading one document costs at the vendor's list price for the units the vendor reported processing, tokens or pages, including attempts that failed. When the vendor accepts an attempt but reports nothing, the units sent are counted. Free tiers and what was actually billed play no part, so every backend's cost means the same thing.
 _Avoid_: billed cost, spend, price per document
