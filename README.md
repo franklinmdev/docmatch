@@ -199,7 +199,9 @@ sane was not checked because a date it needed could not be read.
 ### Gate ablation, checked readings
 
 A reading is wrong when a value a checked rule used is unmatched against its
-label, so the gate is judged only on errors it could see. A catch is a wrong
+label, so the gate is judged only on errors it could see. A value whose
+fieldtype the document does not label is unmatched too, the same verdict the
+field score gives it as spurious. A catch is a wrong
 reading the gate failed, a miss a wrong reading it passed, and a false alarm a
 right reading it failed. Confidence is filled in only for a backend that
 returns one natively.
