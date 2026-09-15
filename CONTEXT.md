@@ -40,6 +40,14 @@ _Avoid_: validation (on its own), filter, guardrail
 The comparison of what the gate and confidence each catch among readings whose gated values are wrong, so the gate is judged only on errors it could see.
 _Avoid_: gate eval, gate accuracy
 
+**Requested model**:
+The model a run asks its backend to read with, one per run, written in the run's record. Each backend has a default; a model with no written price is refused.
+_Avoid_: model (on its own), backend
+
+**Served model**:
+The model version a vendor reports actually reading a document, recorded on that document's row. It can differ from the requested model when a vendor points a name at a new version.
+_Avoid_: actual model, resolved model
+
 ### Measurement
 
 **Regression**:
