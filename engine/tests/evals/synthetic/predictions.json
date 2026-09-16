@@ -54,7 +54,7 @@
       "document_id": "INV-1004",
       "date_issue": "July 3, 2026",
       "date_due": "June 2, 2026",
-      "amount_total_gross": "$95.00"
+      "amount_total_gross": ["$95.00", "95.00"]
     },
     "line_items": [
       {

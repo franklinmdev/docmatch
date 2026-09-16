@@ -817,6 +817,38 @@ EXPECTED_EVAL_OUTPUT = "\n".join(
         "  line_item_description   0.857  6 of 7, 1 spurious",
         "  line_item_quantity      0.714  5 of 7, 1 spurious",
         "",
+        # Ten fixed buckets, an empty one at n 0, and what came back with none.
+        "Calibration, header values",
+        "  confidence      n  accuracy",
+        "  [0.0, 0.1)      0",
+        "  [0.1, 0.2)      1     0.000",
+        "  [0.2, 0.3)      0",
+        "  [0.3, 0.4)      1     0.000",
+        "  [0.4, 0.5)      0",
+        "  [0.5, 0.6)      0",
+        "  [0.6, 0.7)      1     1.000",
+        "  [0.7, 0.8)      1     1.000",
+        "  [0.8, 0.9)      2     1.000",
+        "  [0.9, 1.0]     10     1.000",
+        "  no confidence   6     0.667",
+        "",
+        "Calibration, line-item cells",
+        "  confidence      n  accuracy",
+        "  [0.0, 0.1)      0",
+        "  [0.1, 0.2)      0",
+        "  [0.2, 0.3)      0",
+        "  [0.3, 0.4)      0",
+        "  [0.4, 0.5)      1     0.000",
+        "  [0.5, 0.6)      1     0.000",
+        "  [0.6, 0.7)      0",
+        "  [0.7, 0.8)      1     1.000",
+        "  [0.8, 0.9)      4     0.750",
+        "  [0.9, 1.0]     12     1.000",
+        "  no confidence   1     0.000",
+        "",
+        # Precision only: a value never read carries no confidence.
+        "Calibration speaks to precision only.",
+        "",
         # Not checked counts on neither side of the rate, so n checked is beside it.
         "Gate",
         "  passed       1",
@@ -834,7 +866,33 @@ EXPECTED_EVAL_OUTPUT = "\n".join(
         "  catches       1",
         "  misses        1",
         "  false alarms  1",
-        "  confidence    no signal",
+        "",
+        # Wrong readings by what flagged them, and false alarms from each side.
+        "Confidence sweep, over 3 checked",
+        "  edge  gate only  confidence only  both  neither  gate false alarms  "
+        "confidence false alarms",
+        "  0.1           1                0     0        1                  1  "
+        "                      0",
+        "  0.2           0                0     1        1                  1  "
+        "                      0",
+        "  0.3           0                0     1        1                  1  "
+        "                      0",
+        "  0.4           0                1     1        0                  1  "
+        "                      0",
+        "  0.5           0                1     1        0                  1  "
+        "                      0",
+        "  0.6           0                1     1        0                  1  "
+        "                      0",
+        "  0.7           0                1     1        0                  1  "
+        "                      0",
+        "  0.8           0                1     1        0                  1  "
+        "                      1",
+        "  0.9           0                1     1        0                  1  "
+        "                      1",
+        "",
+        # A gated value with no confidence never flags, so the readings holding
+        # one are counted rather than read as unconfident.
+        "  readings with a gated value with no confidence  1",
         "",
     ]
 )
@@ -884,6 +942,25 @@ def test_eval_derives_from_currency_symbols_saved_beside_the_predictions(
     assert "with derived  0.500  1 matched, 0 missing, 2 spurious" in (
         capsys.readouterr().out
     )
+
+
+def test_eval_says_no_signal_for_a_run_with_no_confidence(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A Gemini run saved no confidence file, and an empty one means the same."""
+    predictions = tmp_path / "predictions.json"
+    predictions.write_bytes((synthetic_subset / "predictions.json").read_bytes())
+    (tmp_path / "confidence.json").write_text("{}", encoding="utf-8")
+    arguments = evaluate(synthetic_subset)
+    arguments[arguments.index("--predictions") + 1] = str(predictions)
+
+    exit_code = main(arguments)
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Calibration\n  no signal\n" in out
+    assert "  confidence    no signal\n" in out
+    assert "Confidence sweep" not in out
 
 
 def test_eval_prints_no_label_text(

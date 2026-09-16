@@ -10,14 +10,17 @@ from pathlib import Path
 import pytest
 
 from docmatch.docile.dataset import DocileDataset, DocumentNotFoundError
+from docmatch.evals.confidence import Bucket, SweepLine
 from docmatch.evals.manifest import Manifest, load
 from docmatch.evals.run import (
     DerivedTotals,
     SubsetScore,
+    read_confidence,
     read_currency_symbols,
     read_predictions,
     score_subset,
 )
+from docmatch.extraction.extractor import Confidence
 from docmatch.gate import RULES
 from docmatch.metrics.fields import Prediction, PredictionError
 
@@ -28,6 +31,7 @@ def run(synthetic_subset: Path) -> SubsetScore:
         DocileDataset(synthetic_subset),
         load(synthetic_subset / "subset.json"),
         read_predictions(synthetic_subset / "predictions.json"),
+        confidence=read_confidence(synthetic_subset / "confidence.json"),
     )
 
 
@@ -346,6 +350,192 @@ def test_reports_a_currency_symbols_file_that_is_not_one(tmp_path: Path) -> None
 
     with pytest.raises(PredictionError, match="currency symbols"):
         read_currency_symbols(path)
+
+
+def test_calibrates_header_values_in_ten_fixed_buckets(run: SubsetScore) -> None:
+    """eval0004 and eval0005 misread their due dates at 0.18 and 0.35."""
+    assert run.calibration is not None
+    buckets = run.calibration.header.buckets
+
+    assert [(each.n, each.correct) for each in buckets] == [
+        (0, 0),
+        (1, 0),
+        (0, 0),
+        (1, 0),
+        (0, 0),
+        (0, 0),
+        (1, 1),
+        (1, 1),
+        (2, 2),
+        (10, 10),
+    ]
+    assert [(each.low, each.high) for each in buckets[:2]] == [(0.0, 0.1), (0.1, 0.2)]
+    assert buckets[-1].high == 1.0
+
+
+def test_an_empty_bucket_has_n_zero(run: SubsetScore) -> None:
+    assert run.calibration is not None
+    empty = run.calibration.header.buckets[0]
+
+    assert (empty.n, empty.correct) == (0, 0)
+
+
+def test_a_value_read_twice_is_counted_once_at_its_higher_confidence(
+    run: SubsetScore,
+) -> None:
+    """eval0004 reads `$95.00` at 0.61 and `95.00` at 0.83, one normalized value."""
+    assert run.calibration is not None
+    buckets = run.calibration.header.buckets
+
+    assert buckets[6] == Bucket(low=0.6, high=0.7, n=1, correct=1)
+    assert buckets[8] == Bucket(low=0.8, high=0.9, n=2, correct=2)
+
+
+def test_counts_values_with_no_confidence_on_their_own_line(run: SubsetScore) -> None:
+    """eval0003's amount due came back with none, and eval0002 has no entry at all.
+
+    Of eval0002's five values its document id and email are wrong.
+    """
+    assert run.calibration is not None
+
+    assert run.calibration.header.no_confidence == Bucket(
+        low=None, high=None, n=6, correct=4
+    )
+
+
+def test_derived_values_never_enter_the_calibration_table(run: SubsetScore) -> None:
+    """Three readings print `$`, so code derives a currency no backend scored."""
+    assert run.calibration is not None
+    header = run.calibration.header
+    as_read = sum(each.n for each in (*header.buckets, header.no_confidence))
+
+    assert as_read == 22
+
+
+def test_calibrates_cells_on_the_row_they_were_paired_with(run: SubsetScore) -> None:
+    """eval0005's second row misreads its amount at 0.84, and its third row is
+    paired with no labeled row, so its cells are wrong at 0.4 and 0.55."""
+    assert run.calibration is not None
+    cells = run.calibration.cells
+
+    assert [(each.n, each.correct) for each in cells.buckets] == [
+        (0, 0),
+        (0, 0),
+        (0, 0),
+        (0, 0),
+        (1, 0),
+        (1, 0),
+        (0, 0),
+        (1, 1),
+        (4, 3),
+        (12, 12),
+    ]
+    assert (cells.no_confidence.n, cells.no_confidence.correct) == (1, 0)
+
+
+def test_sweeps_the_confidence_edge_beside_the_gate(run: SubsetScore) -> None:
+    """eval0004 is wrong, failed, and least confident at 0.18; eval0005 is wrong,
+    passed, and least confident at 0.35; eval0003 is right, failed, and least
+    confident at 0.72 on the gated values that carry one."""
+    assert run.sweep is not None
+
+    assert [
+        (
+            line.edge,
+            line.gate_only,
+            line.confidence_only,
+            line.both,
+            line.neither,
+            line.gate_false_alarms,
+            line.confidence_false_alarms,
+        )
+        for line in run.sweep.lines
+    ] == [
+        (0.1, 1, 0, 0, 1, 1, 0),
+        (0.2, 0, 0, 1, 1, 1, 0),
+        (0.3, 0, 0, 1, 1, 1, 0),
+        (0.4, 0, 1, 1, 0, 1, 0),
+        (0.5, 0, 1, 1, 0, 1, 0),
+        (0.6, 0, 1, 1, 0, 1, 0),
+        (0.7, 0, 1, 1, 0, 1, 0),
+        (0.8, 0, 1, 1, 0, 1, 1),
+        (0.9, 0, 1, 1, 0, 1, 1),
+    ]
+
+
+def test_counts_readings_with_a_gated_value_that_has_no_confidence(
+    run: SubsetScore,
+) -> None:
+    """eval0003's amount due."""
+    assert run.sweep is not None
+    assert run.sweep.unconfident == 1
+
+
+def test_a_gated_value_with_no_confidence_never_flags(synthetic_subset: Path) -> None:
+    """eval0004 is due before it was issued, and neither date carries a confidence."""
+    run = score_subset(
+        DocileDataset(synthetic_subset),
+        load(synthetic_subset / "subset.json"),
+        {
+            "eval0004": Prediction(
+                fields={"date_issue": "July 3, 2026", "date_due": "June 2, 2026"}
+            )
+        },
+        confidence={
+            "eval0004": Confidence(fields={"date_issue": (None,), "date_due": (None,)})
+        },
+    )
+
+    assert run.sweep is not None
+    assert run.sweep.lines[-1] == SweepLine(
+        edge=0.9,
+        gate_only=1,
+        confidence_only=0,
+        both=0,
+        neither=0,
+        gate_false_alarms=0,
+        confidence_false_alarms=0,
+    )
+    assert run.sweep.unconfident == 1
+
+
+def test_a_run_with_no_confidence_has_no_signal(synthetic_subset: Path) -> None:
+    run = score_subset(
+        DocileDataset(synthetic_subset),
+        load(synthetic_subset / "subset.json"),
+        read_predictions(synthetic_subset / "predictions.json"),
+    )
+
+    assert run.calibration is None
+    assert run.sweep is None
+
+
+def test_reads_the_confidence_saved_beside_the_predictions(tmp_path: Path) -> None:
+    path = tmp_path / "confidence.json"
+    path.write_text(
+        '{"eval0004": {"fields": {"date_due": [0.5, null]}, '
+        '"line_items": [{"line_item_quantity": 0.25}]}}',
+        encoding="utf-8",
+    )
+
+    assert read_confidence(path) == {
+        "eval0004": Confidence(
+            fields={"date_due": (0.5, None)},
+            line_items=({"line_item_quantity": 0.25},),
+        )
+    }
+
+
+def test_a_run_with_no_confidence_file_has_none(tmp_path: Path) -> None:
+    assert read_confidence(tmp_path / "confidence.json") == {}
+
+
+def test_reports_a_confidence_file_that_is_not_one(tmp_path: Path) -> None:
+    path = tmp_path / "confidence.json"
+    path.write_text('{"eval0004": {"fields": {"date_due": 0.5}}}', encoding="utf-8")
+
+    with pytest.raises(PredictionError, match="confidence"):
+        read_confidence(path)
 
 
 def _currency(run: SubsetScore) -> DerivedTotals:

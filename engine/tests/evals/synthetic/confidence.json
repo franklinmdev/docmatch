@@ -1,0 +1,43 @@
+{
+  "eval0003": {
+    "fields": {
+      "vendor_name": [0.93],
+      "document_id": [0.9],
+      "amount_total_gross": [0.72],
+      "amount_due": [null]
+    },
+    "line_items": [
+      {"line_item_quantity": 0.92, "line_item_description": 0.91, "line_item_amount_gross": 0.9},
+      {"line_item_quantity": 0.88, "line_item_description": 0.93, "line_item_amount_gross": 0.9},
+      {"line_item_description": 0.86, "line_item_amount_gross": 0.79}
+    ]
+  },
+  "eval0004": {
+    "fields": {
+      "vendor_name": [0.97],
+      "document_id": [0.89],
+      "date_issue": [0.94],
+      "date_due": [0.18],
+      "amount_total_gross": [0.61, 0.83]
+    },
+    "line_items": [
+      {"line_item_quantity": 0.99, "line_item_description": 0.97, "line_item_amount_gross": 0.95}
+    ]
+  },
+  "eval0005": {
+    "fields": {
+      "vendor_name": [0.98],
+      "document_id": [0.95],
+      "tax_detail_rate": [0.91, 0.62],
+      "date_issue": [0.97],
+      "date_due": [0.35],
+      "amount_total_gross": [0.99],
+      "amount_due": [0.99]
+    },
+    "line_items": [
+      {"line_item_quantity": 0.96, "line_item_description": 0.88, "line_item_amount_gross": 0.93},
+      {"line_item_quantity": 0.9, "line_item_description": 0.9, "line_item_amount_gross": 0.84},
+      {"line_item_quantity": 0.4, "line_item_description": 0.55, "line_item_amount_gross": null}
+    ]
+  }
+}
