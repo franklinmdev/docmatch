@@ -71,7 +71,10 @@ The response carries no billing field, so pages processed are the length of
 not retried, charged for the pages processed. An analysis that was accepted
 and never reported a page count, because polling dropped, failed or ran out of
 time, is charged for the pages sent and may be retried. A request refused
-outright costs nothing (#35).
+outright costs nothing (#35). So does any error the analyze POST itself
+raises, including a timeout after Azure may already have accepted it: whether
+Azure bills that operation is not documented, and with no operation to poll
+there is no way to tell it from a refusal.
 """
 
 import io
@@ -184,7 +187,7 @@ CELLS = {
 }
 """An `Items` row's subfields and the LIR fieldtype each one fills."""
 
-CURRENCY_SOURCES = {"AmountDue": "amount_due", "InvoiceTotal": "amount_total_gross"}
+SYMBOL_FIELDS = {"AmountDue": "amount_due", "InvoiceTotal": "amount_total_gross"}
 """The amounts whose `currency_symbol` is kept, by the fieldtype they fill."""
 
 
@@ -326,7 +329,7 @@ def _extraction(
 
     def keep(fieldtype: str, found: DocumentField) -> None:
         printed = found.content
-        if printed:
+        if printed and printed.strip():
             header.setdefault(fieldtype, []).append(printed)
             header_confidence.setdefault(fieldtype, []).append(found.confidence)
 
@@ -345,13 +348,13 @@ def _extraction(
             for subname, fieldtype in CELLS.items():
                 cell = row.get(subname)
                 printed = None if cell is None else cell.content
-                if cell is not None and printed:
+                if cell is not None and printed and printed.strip():
                     cells[fieldtype] = printed
                     confidence[fieldtype] = cell.confidence
             if cells:
                 rows.append(cells)
                 row_confidence.append(confidence)
-        for name, fieldtype in CURRENCY_SOURCES.items():
+        for name, fieldtype in SYMBOL_FIELDS.items():
             currency = fields[name].value_currency if name in fields else None
             symbol = None if currency is None else currency.currency_symbol
             if symbol:

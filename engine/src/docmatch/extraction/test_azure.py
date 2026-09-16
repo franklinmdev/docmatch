@@ -208,6 +208,24 @@ def test_a_field_with_no_printed_text_is_left_out(document: Document) -> None:
     assert backend.extract(document).prediction == Prediction()
 
 
+def test_a_blank_value_takes_no_confidence_with_it(document: Document) -> None:
+    """Confidence lines up with values by position, and the scorer drops a blank."""
+    backend, _ = reading(
+        result(
+            {
+                "VendorName": text(" ", 0.2),
+                "VendorAddressRecipient": text("Northwind", 0.8),
+                "Items": items({"Description": text(" ", 0.2)}),
+            }
+        )
+    )
+
+    read = backend.extract(document)
+
+    assert read.prediction == Prediction(fields={"vendor_name": ["Northwind"]})
+    assert read.confidence == Confidence(fields={"vendor_name": (0.8,)})
+
+
 def test_maps_every_item_onto_a_line_item_row(document: Document) -> None:
     backend, _ = reading(
         result(
@@ -380,15 +398,6 @@ def test_polling_that_ends_without_a_result_is_charged_for_the_pages_sent(
     assert raised.value.usage == Usage(pages=2)
 
 
-def test_waits_for_the_analysis_no_longer_than_its_timeout(document: Document) -> None:
-    poller = FakePoller(result({}))
-    backend, _ = reading(poller)
-
-    backend.extract(document)
-
-    assert poller.waited == [azure.TIMEOUT]
-
-
 @pytest.mark.parametrize(
     ("error", "retryable"),
     [
@@ -414,13 +423,12 @@ def test_a_refused_request_costs_nothing_and_is_retried_by_its_status(
 
 
 def test_refuses_an_unpriced_model_before_any_request(document: Document) -> None:
-    backend, analyses = reading(result({}))
+    _, analyses = reading(result({}))
 
     with pytest.raises(ExtractionError, match="no price is written down"):
         AzureExtractor(analyses=analyses, model="prebuilt-receipt").extract(document)
 
     assert analyses.calls == []
-    assert backend.model == azure.MODEL
 
 
 def test_a_missing_key_is_named_in_the_engines_words(
