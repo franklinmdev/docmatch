@@ -208,8 +208,10 @@ Every value is the printed text Azure returns as `content`, never its typed
 value, so both rows go through the same normalizer. The mapping onto DocILE's
 fieldtypes is a table in `engine/src/docmatch/extraction/azure.py`, written
 against the 2024-11-30 field list read on 2026-09-16; a DocILE fieldtype no
-Azure field feeds stays empty, which is why `vendor_email`, `payment_reference`,
-`tax_detail_net` and the line items' net amounts score 0 here. Header F1 is
+Azure field feeds stays empty, which is why fieldtypes such as `vendor_email`,
+`payment_reference`, `tax_detail_net` and the line items' net amounts score 0
+here. `vendor_tax_id` is mapped and scores 0 too: Azure returned no value for
+any of its 24 labels. Header F1 is
 below Gemini's at 0.556 (precision 0.584, recall 0.530) and line-item F1 above
 it at 0.396, with `line_item_amount_gross` read in 83.8% of labeled cells.
 `customer_billing_address` is 0.033, 3 matched of 93 labeled; on the Gemini run
