@@ -39,11 +39,12 @@ class FakeExtractor:
     answers: Sequence[object]
     latency: float = 1.0
     cost: Decimal = Decimal("0.001")
+    served_model: str | None = "fake-002"
     attempts: list[Document] = field(default_factory=list)
 
     @property
-    def name(self) -> str:
-        return "fake"
+    def model(self) -> str:
+        return "fake-001"
 
     def extract(self, document: Document) -> Extraction:
         self.attempts.append(document)
@@ -56,6 +57,7 @@ class FakeExtractor:
             usage=Usage(input_tokens=100, output_tokens=50),
             cost=self.cost,
             latency=self.latency,
+            served_model=self.served_model,
         )
 
 
@@ -113,7 +115,8 @@ def done(
 ) -> Run:
     """A finished run, with the waiting between attempts taken out."""
     return Run(
-        backend=extractor.name,
+        backend="fake",
+        requested_model=extractor.model,
         manifest=subset.pinned,
         long_edge=1600,
         documents=tuple(
@@ -363,12 +366,24 @@ def test_writes_a_record_of_what_each_document_cost(
 
     record = json.loads(path.read_text())
     assert record["backend"] == "fake"
+    assert record["requested_model"] == "fake-001"
     assert record["long_edge"] == 1600
     assert [each["document_id"] for each in record["documents"]] == [
         "syn0001",
         "syn0002",
     ]
     assert all(each["predicted"] for each in record["documents"])
+    assert [each["served_model"] for each in record["documents"]] == [
+        "fake-002",
+        "fake-002",
+    ]
+
+
+def test_a_document_that_failed_has_no_served_model(subset: Subset) -> None:
+    """No answer was used, so no vendor said which model read it."""
+    run = done(FakeExtractor(answers=[ExtractionError("no")]), subset)
+
+    assert [each.served_model for each in run.documents] == [None, None]
 
 
 def test_a_document_run_knows_whether_it_predicted_anything() -> None:
@@ -381,6 +396,7 @@ def test_a_document_run_knows_whether_it_predicted_anything() -> None:
         latency=0.0,
         prediction=None,
         failure="gave up",
+        served_model=None,
     )
 
     assert not nothing.predicted

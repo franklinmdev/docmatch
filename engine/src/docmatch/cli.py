@@ -49,7 +49,7 @@ from docmatch.evals.run import (
     read_predictions,
     score_subset,
 )
-from docmatch.extraction import gemini, pages
+from docmatch.extraction import backends, gemini, pages
 from docmatch.extraction.extractor import ExtractionError
 from docmatch.extraction.run import (
     ATTEMPTS,
@@ -354,9 +354,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="a directory to write predictions.json, manifest.json and run.json into",
     )
     extract.add_argument(
+        "--backend",
+        choices=backends.BACKENDS,
+        default=backends.BACKENDS[0],
+        help=f"the vendor to read with (default: {backends.BACKENDS[0]})",
+    )
+    extract.add_argument(
         "--model",
-        default=gemini.MODEL,
-        help=f"the Gemini model to read with (default: {gemini.MODEL})",
+        default=None,
+        help=(
+            "the model to read with, one the backend has a price for (default: "
+            f"the backend's own, {gemini.MODEL} for gemini)"
+        ),
     )
     extract.add_argument(
         "--manifest",
@@ -584,7 +593,9 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     # that cannot start leaves nothing behind; the directory before the first
     # document, because an --out that cannot be written is worth a hundred
     # documents of spend.
-    backend = gemini.extractor(arguments.model, long_edge=arguments.long_edge)
+    backend = backends.extractor(
+        arguments.backend, arguments.model, long_edge=arguments.long_edge
+    )
     reading = extract_subset(
         backend,
         dataset,
@@ -597,7 +608,8 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
 
     def finished(covered: Manifest, documents: Sequence[DocumentRun]) -> Run:
         return Run(
-            backend=backend.name,
+            backend=arguments.backend,
+            requested_model=backend.model,
             manifest=covered,
             long_edge=arguments.long_edge,
             documents=tuple(documents),
@@ -811,6 +823,8 @@ def render_extract(where: Path, extracted: Run) -> str:
         "Extraction run",
         *_rows(
             ("backend", extracted.backend),
+            ("requested", extracted.requested_model),
+            ("served", _served(extracted.documents)),
             ("split", extracted.manifest.split),
             ("size", str(extracted.manifest.size)),
             ("long edge", f"{extracted.long_edge} px"),
@@ -835,6 +849,14 @@ def render_extract(where: Path, extracted: Run) -> str:
         *_failures(extracted.failed),
     ]
     return "\n".join([*lines, ""])
+
+
+def _served(documents: Sequence[DocumentRun]) -> str:
+    """Every served model the vendor reported, in the order they first appeared."""
+    served = dict.fromkeys(
+        each.served_model for each in documents if each.served_model is not None
+    )
+    return ", ".join(served) or "none reported"
 
 
 def _failures(failed: Sequence[DocumentRun]) -> list[str]:
