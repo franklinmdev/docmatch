@@ -95,8 +95,8 @@ class DocumentRun:
     pages: int
     attempts: int
     usage: Usage
-    """The tokens of every attempt that was billed, the same way `cost` adds
-    them up, so the rates in the record reproduce the money."""
+    """The tokens or pages of every attempt that was billed, the same way `cost`
+    adds them up, so the rates in the record reproduce the money."""
     cost: Decimal
     latency: float
     """Seconds of the attempt that produced the prediction, or of all of them

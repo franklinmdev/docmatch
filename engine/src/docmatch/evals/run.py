@@ -31,8 +31,8 @@ reading is wrong when any value a checked rule used is not matched against its
 label by the field scorer, so the gate is judged on errors it could see and not
 on a misread vendor name no date or total could reveal. A catch is a wrong
 reading the gate failed, a miss a wrong reading it passed, and a false alarm a
-right reading it failed. No backend here returns a confidence yet, so the
-confidence side of the ablation has no signal.
+right reading it failed. The eval does not read a run's saved confidence yet
+(#48), so the confidence side of the ablation has no signal on any row.
 
 Counts, not values
 ------------------

@@ -214,8 +214,8 @@ below Gemini's at 0.556 (precision 0.584, recall 0.530) and line-item F1 above
 it at 0.396, with `line_item_amount_gross` read in 83.8% of labeled cells.
 `customer_billing_address` is 0.033, 3 matched of 93 labeled; on the Gemini run
 the same field's labels carried the party name the reading left out (#54), and
-whether that is the cause here is not measured yet. The run saved Azure's confidence beside every value and
-cell for the calibration table (#48), and `currency_symbol` beside 60 readings'
+whether that is the cause here is not measured yet. The run saved Azure's
+confidence beside every value and cell for the calibration table (#48), and `currency_symbol` beside 60 readings'
 totals; `currency_code_amount_due`, which Azure has no field for, scores 0.902
 with derived values, and the same without the saved symbols, because the
 amounts Azure printed already carry them.
