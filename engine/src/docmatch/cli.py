@@ -46,6 +46,7 @@ from docmatch.evals.run import (
     FieldTypeTotals,
     GateTotals,
     SubsetScore,
+    read_currency_symbols,
     read_predictions,
     score_subset,
 )
@@ -326,7 +327,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--predictions",
         type=Path,
         required=True,
-        help="a JSON object keyed by document id, each holding one prediction",
+        help=(
+            "a JSON object keyed by document id, each holding one prediction; a "
+            f"{CURRENCY_SYMBOLS_FILE} beside it is read too"
+        ),
     )
     evaluate.add_argument(
         "--manifest",
@@ -517,6 +521,9 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
             dataset,
             manifest.load(arguments.manifest),
             read_predictions(arguments.predictions),
+            currency_symbols=read_currency_symbols(
+                arguments.predictions.parent / CURRENCY_SYMBOLS_FILE
+            ),
         )
         return render_eval(arguments.manifest, run), 0
     annotation = dataset.annotation(arguments.document_id)
@@ -638,12 +645,15 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     )
 
 
+CURRENCY_SYMBOLS_FILE = "currency_symbols.json"
+"""Read by `docmatch eval` beside the predictions when a run saved one."""
+
 RUN_FILES = (
     "predictions.json",
     "manifest.json",
     "run.json",
     "confidence.json",
-    "currency_symbols.json",
+    CURRENCY_SYMBOLS_FILE,
 )
 
 

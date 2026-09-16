@@ -866,6 +866,26 @@ def test_eval_reports_both_numbers_over_the_subset(
     assert exit_code == 0
 
 
+def test_eval_derives_from_currency_symbols_saved_beside_the_predictions(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A saved Azure run is re-scored with its symbols, without being told to."""
+    predictions = tmp_path / "predictions.json"
+    predictions.write_bytes((synthetic_subset / "predictions.json").read_bytes())
+    (tmp_path / "currency_symbols.json").write_text(
+        '{"eval0005": {"amount_due": ["€"]}}', encoding="utf-8"
+    )
+    arguments = evaluate(synthetic_subset)
+    arguments[arguments.index("--predictions") + 1] = str(predictions)
+
+    exit_code = main(arguments)
+
+    assert exit_code == 0
+    assert "with derived  0.500  1 matched, 0 missing, 2 spurious" in (
+        capsys.readouterr().out
+    )
+
+
 def test_eval_prints_no_label_text(
     synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

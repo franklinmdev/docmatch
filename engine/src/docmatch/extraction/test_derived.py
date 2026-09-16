@@ -43,3 +43,29 @@ def test_reads_a_currency_name_across_a_line_break() -> None:
     assert derive(reading) == (
         DerivedValue("currency_code_amount_due", "US\nDOLLARS", "amount_due"),
     )
+
+
+def test_adds_the_currency_symbols_a_vendor_returned_beside_an_amount() -> None:
+    """Azure's `currency_symbol` on AmountDue and InvoiceTotal (#24)."""
+    reading = Prediction(fields={"amount_due": "95.00"})
+
+    assert derive(reading, {"amount_due": ("$",), "amount_total_gross": ("€",)}) == (
+        DerivedValue("currency_code_amount_due", "$", "amount_due"),
+        DerivedValue("currency_code_amount_due", "€", "amount_total_gross"),
+    )
+
+
+def test_a_vendor_symbol_the_scorer_does_not_know_is_not_derived() -> None:
+    assert derive(Prediction(), {"amount_due": ("zł",)}) == ()
+
+
+def test_a_vendor_symbol_beside_another_amount_is_not_derived() -> None:
+    assert derive(Prediction(), {"amount_total_net": ("$",)}) == ()
+
+
+def test_a_symbol_printed_and_returned_is_derived_once() -> None:
+    reading = Prediction(fields={"amount_due": "$95.00"})
+
+    assert derive(reading, {"amount_due": ("$",)}) == (
+        DerivedValue("currency_code_amount_due", "$", "amount_due"),
+    )
