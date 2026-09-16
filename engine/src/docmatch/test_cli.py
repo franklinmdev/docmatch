@@ -1068,6 +1068,14 @@ def test_extract_reports_the_pages_a_per_page_backend_billed(tmp_path: Path) -> 
     assert "pages billed   3" in render_extract(tmp_path, run)
 
 
+def test_extract_says_a_backend_that_reads_the_pdf_rendered_nothing(
+    tmp_path: Path,
+) -> None:
+    run = replace(a_run(a_document("syn0001")), backend="azure", long_edge=None)
+
+    assert "long edge   not rendered" in render_extract(tmp_path, run)
+
+
 def test_extract_names_every_model_the_vendor_said_it_served(tmp_path: Path) -> None:
     """A name pointed at a new version mid-run shows up here, not only in run.json."""
     run = a_run(

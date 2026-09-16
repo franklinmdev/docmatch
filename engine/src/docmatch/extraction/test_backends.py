@@ -99,3 +99,7 @@ def test_an_unpriced_model_is_refused_before_a_client_is_made(
 
 def test_every_backend_named_is_one_the_command_offers() -> None:
     assert backends.BACKENDS == ("gemini", "azure", "openai")
+
+
+def test_only_the_vision_backends_render_pages() -> None:
+    assert backends.RENDERING == ("gemini", "openai")

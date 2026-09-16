@@ -17,6 +17,9 @@ from docmatch.extraction.extractor import ExtractionError, Extractor
 
 BACKENDS = ("gemini", "azure", "openai")
 
+RENDERING = ("gemini", "openai")
+"""The backends that render pages at `--long-edge`; the rest read the PDF itself."""
+
 
 def extractor(backend: str, model: str | None, *, long_edge: int) -> Extractor:
     """The named backend reading with `model`, or with its own default when None."""

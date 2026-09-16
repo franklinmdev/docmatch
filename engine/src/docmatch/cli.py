@@ -620,7 +620,9 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
             backend=arguments.backend,
             requested_model=backend.model,
             manifest=covered,
-            long_edge=arguments.long_edge,
+            long_edge=(
+                arguments.long_edge if arguments.backend in backends.RENDERING else None
+            ),
             documents=tuple(documents),
         )
 
@@ -847,7 +849,12 @@ def render_extract(where: Path, extracted: Run) -> str:
             ("served", _served(extracted.documents)),
             ("split", extracted.manifest.split),
             ("size", str(extracted.manifest.size)),
-            ("long edge", f"{extracted.long_edge} px"),
+            (
+                "long edge",
+                "not rendered"
+                if extracted.long_edge is None
+                else f"{extracted.long_edge} px",
+            ),
             ("predicted", str(len(extracted.predicted))),
             ("failed", str(len(extracted.failed))),
             ("written to", str(where)),

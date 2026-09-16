@@ -126,8 +126,9 @@ class Run:
     """The requested model, the same for every document; each one's served model
     is its own."""
     manifest: Manifest
-    long_edge: int
-    """What a rendering backend was asked to render at, kept with the record."""
+    long_edge: int | None
+    """What a rendering backend was asked to render at, kept with the record;
+    None for a backend that reads the PDF and renders nothing."""
     documents: tuple[DocumentRun, ...]
 
     @property
