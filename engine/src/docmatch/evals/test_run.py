@@ -14,6 +14,7 @@ from docmatch.evals.manifest import Manifest, load
 from docmatch.evals.run import (
     DerivedTotals,
     SubsetScore,
+    read_currency_symbols,
     read_predictions,
     score_subset,
 )
@@ -307,6 +308,44 @@ def test_a_currency_the_scorer_does_not_know_is_not_derived(
     )
 
     assert _currency(run).with_derived.spurious == 0
+
+
+def test_derives_the_currency_from_symbols_the_vendor_returned(
+    synthetic_subset: Path,
+) -> None:
+    """eval0004 labels USD, and this reading prints no currency of its own."""
+    run = score_subset(
+        DocileDataset(synthetic_subset),
+        load(synthetic_subset / "subset.json"),
+        {"eval0004": Prediction(fields={"amount_due": "95.00"})},
+        currency_symbols={"eval0004": {"amount_due": ("$",)}},
+    )
+
+    currency = _currency(run)
+    assert currency.as_read.matched == 0
+    assert currency.with_derived.matched == 1
+
+
+def test_reads_the_currency_symbols_saved_beside_the_predictions(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "currency_symbols.json"
+    path.write_text('{"eval0004": {"amount_due": ["$"]}}', encoding="utf-8")
+
+    assert read_currency_symbols(path) == {"eval0004": {"amount_due": ("$",)}}
+
+
+def test_a_run_with_no_currency_symbols_file_has_none(tmp_path: Path) -> None:
+    """Runs saved before the file existed, and hand-written predictions."""
+    assert read_currency_symbols(tmp_path / "currency_symbols.json") == {}
+
+
+def test_reports_a_currency_symbols_file_that_is_not_one(tmp_path: Path) -> None:
+    path = tmp_path / "currency_symbols.json"
+    path.write_text('{"eval0004": "$"}', encoding="utf-8")
+
+    with pytest.raises(PredictionError, match="currency symbols"):
+        read_currency_symbols(path)
 
 
 def _currency(run: SubsetScore) -> DerivedTotals:

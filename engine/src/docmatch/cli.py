@@ -46,10 +46,11 @@ from docmatch.evals.run import (
     FieldTypeTotals,
     GateTotals,
     SubsetScore,
+    read_currency_symbols,
     read_predictions,
     score_subset,
 )
-from docmatch.extraction import backends, gemini, pages
+from docmatch.extraction import azure, backends, gemini, pages
 from docmatch.extraction.extractor import ExtractionError
 from docmatch.extraction.run import (
     ATTEMPTS,
@@ -57,6 +58,8 @@ from docmatch.extraction.run import (
     DocumentRun,
     Run,
     extract_subset,
+    write_confidence,
+    write_currency_symbols,
     write_manifest,
     write_predictions,
     write_record,
@@ -324,7 +327,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--predictions",
         type=Path,
         required=True,
-        help="a JSON object keyed by document id, each holding one prediction",
+        help=(
+            "a JSON object keyed by document id, each holding one prediction; a "
+            f"{CURRENCY_SYMBOLS_FILE} beside it is read too"
+        ),
     )
     evaluate.add_argument(
         "--manifest",
@@ -364,7 +370,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help=(
             "the model to read with, one the backend has a price for (default: "
-            f"the backend's own, {gemini.MODEL} for gemini)"
+            f"the backend's own, {gemini.MODEL} for gemini, {azure.MODEL} for azure)"
         ),
     )
     extract.add_argument(
@@ -515,6 +521,9 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
             dataset,
             manifest.load(arguments.manifest),
             read_predictions(arguments.predictions),
+            currency_symbols=read_currency_symbols(
+                arguments.predictions.parent / CURRENCY_SYMBOLS_FILE
+            ),
         )
         return render_eval(arguments.manifest, run), 0
     annotation = dataset.annotation(arguments.document_id)
@@ -611,7 +620,9 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
             backend=arguments.backend,
             requested_model=backend.model,
             manifest=covered,
-            long_edge=arguments.long_edge,
+            long_edge=(
+                arguments.long_edge if arguments.backend in backends.RENDERING else None
+            ),
             documents=tuple(documents),
         )
 
@@ -636,13 +647,22 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     )
 
 
-RUN_FILES = ("predictions.json", "manifest.json", "run.json")
+CURRENCY_SYMBOLS_FILE = "currency_symbols.json"
+"""Read by `docmatch eval` beside the predictions when a run saved one."""
+
+RUN_FILES = (
+    "predictions.json",
+    "manifest.json",
+    "run.json",
+    "confidence.json",
+    CURRENCY_SYMBOLS_FILE,
+)
 
 
 def _prepare(out: Path) -> None:
     """Make sure the run can be written, before the first document is paid for.
 
-    The directory is made now, and the three names checked for a directory in
+    The directory is made now, and the run's file names checked for a directory in
     the way of one of them: a write that fails after the run has ended costs
     the whole run, and one that fails on the second file leaves predictions
     beside no manifest, to be scored against the whole subset.
@@ -661,11 +681,13 @@ def _prepare(out: Path) -> None:
 
 
 def _write(extracted: Run, out: Path) -> None:
-    """The three files of a run, or a message rather than a traceback."""
+    """The files of a run, or a message rather than a traceback."""
     try:
         write_predictions(extracted, out / RUN_FILES[0])
         write_manifest(extracted, out / RUN_FILES[1])
         write_record(extracted, out / RUN_FILES[2])
+        write_confidence(extracted, out / RUN_FILES[3])
+        write_currency_symbols(extracted, out / RUN_FILES[4])
     except OSError as error:
         raise ExtractionError(f"cannot write the run to {out}: {error}") from error
 
@@ -827,7 +849,12 @@ def render_extract(where: Path, extracted: Run) -> str:
             ("served", _served(extracted.documents)),
             ("split", extracted.manifest.split),
             ("size", str(extracted.manifest.size)),
-            ("long edge", f"{extracted.long_edge} px"),
+            (
+                "long edge",
+                "not rendered"
+                if extracted.long_edge is None
+                else f"{extracted.long_edge} px",
+            ),
             ("predicted", str(len(extracted.predicted))),
             ("failed", str(len(extracted.failed))),
             ("written to", str(where)),
@@ -839,6 +866,7 @@ def render_extract(where: Path, extracted: Run) -> str:
             ("per document", f"${extracted.cost_per_document:.6f}"),
             ("input tokens", f"{tokens.input_tokens:,}"),
             ("output tokens", f"{tokens.output_tokens:,}"),
+            ("pages billed", f"{tokens.pages:,}"),
         ),
         "",
         "Latency, over the documents that produced a prediction",

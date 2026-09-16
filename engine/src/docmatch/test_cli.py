@@ -5,6 +5,7 @@ directory, so the suite runs in CI with no dataset present.
 """
 
 import json
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -865,6 +866,26 @@ def test_eval_reports_both_numbers_over_the_subset(
     assert exit_code == 0
 
 
+def test_eval_derives_from_currency_symbols_saved_beside_the_predictions(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A saved Azure run is re-scored with its symbols, without being told to."""
+    predictions = tmp_path / "predictions.json"
+    predictions.write_bytes((synthetic_subset / "predictions.json").read_bytes())
+    (tmp_path / "currency_symbols.json").write_text(
+        '{"eval0005": {"amount_due": ["€"]}}', encoding="utf-8"
+    )
+    arguments = evaluate(synthetic_subset)
+    arguments[arguments.index("--predictions") + 1] = str(predictions)
+
+    exit_code = main(arguments)
+
+    assert exit_code == 0
+    assert "with derived  0.500  1 matched, 0 missing, 2 spurious" in (
+        capsys.readouterr().out
+    )
+
+
 def test_eval_prints_no_label_text(
     synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1039,6 +1060,22 @@ def test_extract_reports_what_the_run_cost(tmp_path: Path) -> None:
     assert "p95  5.00 s" in report
 
 
+def test_extract_reports_the_pages_a_per_page_backend_billed(tmp_path: Path) -> None:
+    run = a_run(
+        replace(a_document("syn0001"), usage=Usage(pages=3), cost=Decimal("0.03"))
+    )
+
+    assert "pages billed   3" in render_extract(tmp_path, run)
+
+
+def test_extract_says_a_backend_that_reads_the_pdf_rendered_nothing(
+    tmp_path: Path,
+) -> None:
+    run = replace(a_run(a_document("syn0001")), backend="azure", long_edge=None)
+
+    assert "long edge   not rendered" in render_extract(tmp_path, run)
+
+
 def test_extract_names_every_model_the_vendor_said_it_served(tmp_path: Path) -> None:
     """A name pointed at a new version mid-run shows up here, not only in run.json."""
     run = a_run(
@@ -1058,7 +1095,7 @@ def test_extract_says_when_no_served_model_was_reported(tmp_path: Path) -> None:
     assert "served      none reported" in render_extract(tmp_path, run)
 
 
-@pytest.mark.parametrize("backend", ["azure", "openai"])
+@pytest.mark.parametrize("backend", ["openai"])
 def test_extract_refuses_a_backend_not_wired_yet_before_making_the_run_directory(
     backend: str,
     tmp_path: Path,
@@ -1082,6 +1119,32 @@ def test_extract_refuses_a_backend_not_wired_yet_before_making_the_run_directory
 
     assert exit_code == 1
     assert f"the {backend} backend is not wired yet" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_extract_on_azure_names_the_missing_endpoint_before_making_the_run_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT", raising=False)
+    monkeypatch.delenv("AZURE_DOCUMENT_INTELLIGENCE_KEY", raising=False)
+    out = tmp_path / "run"
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(out),
+            "--data-dir",
+            str(tmp_path),
+            "--backend",
+            "azure",
+        ]
+    )
+
+    assert exit_code == 1
+    assert "no $AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT" in capsys.readouterr().err
     assert not out.exists()
 
 
@@ -1245,6 +1308,8 @@ def test_extract_keeps_the_documents_read_before_it_was_interrupted(
     assert record["size"] == 1
     assert record["requested_model"] == "fake-001"
     assert [each["served_model"] for each in record["documents"]] == ["fake-002"]
+    assert json.loads((out / "confidence.json").read_text()) == {}
+    assert json.loads((out / "currency_symbols.json").read_text()) == {}
 
 
 def test_extract_keeps_the_documents_read_before_an_unexpected_failure(

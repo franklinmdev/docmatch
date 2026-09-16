@@ -25,10 +25,16 @@ A currency counts only when `normalization.CURRENCIES` knows it, and only as a
 whole word, so `USDA` is not `USD` and the `$` of `AU$` is not a dollar the
 scorer would read as USD. What is found is copied verbatim: resolving `$` to a
 code is an ambiguous decision, and only the scorer makes it.
+
+A vendor that returns an amount's currency apart from its text, as Azure's
+prebuilt invoice model does with `currency_symbol` on `AmountDue` and
+`InvoiceTotal`, is a second source for the same rule (#24): each symbol is
+added under the amount it came with, on the same terms, and never its
+`currency_code`, which would be the vendor resolving `$` to a code.
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from docmatch.metrics.fields import FieldValues, Prediction
@@ -67,9 +73,17 @@ space beside it is fine: `118.00USD` prints a currency, `USDA` does not.
 """
 
 
-def derive(prediction: Prediction) -> tuple[DerivedValue, ...]:
-    """Every derived value for one reading, in source then document order."""
+def derive(
+    prediction: Prediction,
+    currency_symbols: Mapping[str, Sequence[str]] | None = None,
+) -> tuple[DerivedValue, ...]:
+    """Every derived value for one reading, in source then document order.
+
+    `currency_symbols` are what the vendor returned beside each amount, keyed
+    by the amount's fieldtype; they follow the ones printed in that amount.
+    """
     header = prediction.header
+    returned = currency_symbols or {}
     found: dict[DerivedValue, None] = {}
     for source in CURRENCY_SOURCES:
         for text in header.get(source, ()):
@@ -79,6 +93,9 @@ def derive(prediction: Prediction) -> tuple[DerivedValue, ...]:
                 text_found = match.group()
                 if reads_currency(text_found):
                     found[DerivedValue(CURRENCY_FIELDTYPE, text_found, source)] = None
+        for symbol in returned.get(source, ()):
+            if reads_currency(symbol):
+                found[DerivedValue(CURRENCY_FIELDTYPE, symbol, source)] = None
     return tuple(found)
 
 

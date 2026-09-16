@@ -27,22 +27,27 @@ changing it is a visible diff. `notes/fact-check.md` holds the reading log and
 the README's backend table carries the same dates.
 """
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import Protocol
 
+from pydantic import BaseModel, ConfigDict
+
 from docmatch.metrics.fields import Prediction
 
 MILLION = Decimal(1_000_000)
+THOUSAND = Decimal(1_000)
 
 
 @dataclass(frozen=True)
 class Usage:
-    """The tokens one call was billed for."""
+    """The units one call was billed for: tokens, or pages for a per-page backend."""
 
-    input_tokens: int
-    output_tokens: int
+    input_tokens: int = 0
+    output_tokens: int = 0
+    pages: int = 0
 
     @property
     def total_tokens(self) -> int:
@@ -52,10 +57,11 @@ class Usage:
         return Usage(
             input_tokens=self.input_tokens + other.input_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
+            pages=self.pages + other.pages,
         )
 
 
-NOTHING = Usage(input_tokens=0, output_tokens=0)
+NOTHING = Usage()
 
 
 class ExtractionError(Exception):
@@ -89,14 +95,36 @@ class ExtractionError(Exception):
         self.retryable = retryable
 
 
-@dataclass(frozen=True)
-class Price:
-    """What a model charges, and when that was last read from the vendor."""
+def retryable(error: Exception) -> bool:
+    """Whether the same request could succeed next time.
 
-    input_per_million: Decimal
-    output_per_million: Decimal
+    An HTTP error from a vendor SDK carries its status as `status_code`, which
+    google-genai and azure-core both name that way. A rate limit or a server
+    error is the provider's moment and not this request's; anything else in
+    the 4xx range is a request the provider will refuse again, a bad key, a
+    model it does not serve or a body it does not accept. An exception with
+    no status never reached an answer, which a retry may fix.
+    """
+    status = getattr(error, "status_code", None)
+    if not isinstance(status, int):
+        return True
+    return status in (408, 409, 429) or status >= 500
+
+
+@dataclass(frozen=True, kw_only=True)
+class Price:
+    """What a model charges, and when that was last read from the vendor.
+
+    A vision LLM charges per token and a prebuilt invoice model per page, so a
+    rate a model does not charge is zero, and cost stays list price times the
+    units the vendor reported, whichever units they are (#28).
+    """
+
+    input_per_million: Decimal = Decimal(0)
+    output_per_million: Decimal = Decimal(0)
+    per_thousand_pages: Decimal = Decimal(0)
     read: str
-    """The date the two rates were read, `YYYY-MM-DD`."""
+    """The date the rates were read, `YYYY-MM-DD`."""
 
     def of(self, usage: Usage) -> Decimal:
         """What this usage costs, in US dollars, unrounded.
@@ -109,7 +137,7 @@ class Price:
         return (
             usage.input_tokens * self.input_per_million
             + usage.output_tokens * self.output_per_million
-        ) / MILLION
+        ) / MILLION + usage.pages * self.per_thousand_pages / THOUSAND
 
 
 @dataclass(frozen=True)
@@ -121,6 +149,30 @@ class Document:
     """The public copy, already verified against the digest the manifest pins."""
     pages: int
     """The page count admission matched against DocILE's copy."""
+
+
+class Confidence(BaseModel):
+    """A backend's own confidence in each value it read, shaped like its reading.
+
+    Kept beside the reading and never inside the schema a model fills in (#22).
+    `fields` lists one confidence per value of a header fieldtype, in the order
+    the reading lists the values; `line_items` holds one row per row of the
+    reading, a confidence per cell. None is a value the backend returned with
+    no confidence, which is never read as 0.0.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    fields: dict[str, tuple[float | None, ...]] = {}
+    line_items: tuple[dict[str, float | None], ...] = ()
+
+
+CurrencySymbols = Mapping[str, tuple[str, ...]]
+"""Currency symbols a vendor returned beside the amounts it read.
+
+Keyed by the DocILE fieldtype of the amount they came with, `amount_due` or
+`amount_total_gross`, which is the source a derived value is tagged with.
+"""
 
 
 @dataclass(frozen=True)
@@ -139,6 +191,10 @@ class Extraction:
     Taken off the answer and never filled in from the requested model: a vendor
     that points a name at a new version is what this is here to show.
     """
+    confidence: Confidence | None = None
+    """The backend's native confidence, or None for a backend that returns none."""
+    currency_symbols: CurrencySymbols = field(default_factory=dict)
+    """What a vendor returned as the currency of an amount, apart from its text."""
 
 
 class Extractor(Protocol):

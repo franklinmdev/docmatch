@@ -31,8 +31,8 @@ reading is wrong when any value a checked rule used is not matched against its
 label by the field scorer, so the gate is judged on errors it could see and not
 on a misread vendor name no date or total could reveal. A catch is a wrong
 reading the gate failed, a miss a wrong reading it passed, and a false alarm a
-right reading it failed. No backend here returns a confidence yet, so the
-confidence side of the ablation has no signal.
+right reading it failed. The eval does not read a run's saved confidence yet
+(#48), so the confidence side of the ablation has no signal on any row.
 
 Counts, not values
 ------------------
@@ -45,7 +45,7 @@ fieldtype is failing is what the breakdown is for, and a count says that.
 """
 
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -91,6 +91,36 @@ def read_predictions(path: Path) -> dict[str, Prediction]:
             f"{path} is not a run's predictions: expected a JSON object keyed by "
             f'document id, each holding one document\'s "fields" and "line_items". '
             f"{first_problem(error, within=1)}"
+        ) from error
+
+
+CURRENCY_SYMBOLS = TypeAdapter(dict[str, dict[str, tuple[str, ...]]])
+"""A run's currency symbols: document id to amount fieldtype to symbols."""
+
+CurrencySymbolsByDocument = Mapping[str, Mapping[str, Sequence[str]]]
+
+
+def read_currency_symbols(path: Path) -> dict[str, dict[str, tuple[str, ...]]]:
+    """The currency symbols a vendor returned, saved beside a run's predictions.
+
+    A run with no such file has none: a backend that returns no symbols, a run
+    saved before the file existed, or a predictions file written by hand.
+    """
+    try:
+        body = path.read_bytes()
+    except FileNotFoundError:
+        return {}
+    except OSError as error:
+        raise PredictionError(
+            f"cannot read the currency symbols {path}: {error}"
+        ) from error
+    try:
+        return CURRENCY_SYMBOLS.validate_json(body)
+    except ValidationError as error:
+        raise PredictionError(
+            f"{path} is not a run's currency symbols: expected a JSON object keyed "
+            "by document id, each mapping an amount fieldtype to a list of "
+            f"symbols. {first_problem(error, within=1)}"
         ) from error
 
 
@@ -313,10 +343,22 @@ def score_subset(
     dataset: DocileDataset,
     manifest: Manifest,
     predictions: Mapping[str, Prediction],
+    *,
+    currency_symbols: CurrencySymbolsByDocument | None = None,
 ) -> SubsetScore:
-    """Score a run against the documents the manifest pins, in manifest order."""
+    """Score a run against the documents the manifest pins, in manifest order.
+
+    `currency_symbols` are what a vendor returned beside each document's
+    amounts, the second source of its derived currency.
+    """
+    symbols = currency_symbols or {}
     documents = tuple(
-        _score_document(dataset, document_id, predictions.get(document_id))
+        _score_document(
+            dataset,
+            document_id,
+            predictions.get(document_id),
+            symbols.get(document_id, {}),
+        )
         for document_id in manifest.document_ids
     )
     pinned = set(manifest.document_ids)
@@ -330,13 +372,16 @@ def score_subset(
 
 
 def _score_document(
-    dataset: DocileDataset, document_id: str, prediction: Prediction | None
+    dataset: DocileDataset,
+    document_id: str,
+    prediction: Prediction | None,
+    currency_symbols: Mapping[str, Sequence[str]],
 ) -> DocumentScore:
     annotation = dataset.annotation(document_id)
     predicted = prediction is not None
     prediction = NOTHING if prediction is None else prediction
     labeled = labeled_fields(annotation)
-    reading = with_derived(prediction.header, derive(prediction))
+    reading = with_derived(prediction.header, derive(prediction, currency_symbols))
     fields = score_fields(labeled, reading)
     gated = gate(reading)
     return DocumentScore(

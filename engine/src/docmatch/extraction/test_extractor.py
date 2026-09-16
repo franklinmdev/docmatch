@@ -34,3 +34,20 @@ def test_keeps_a_document_worth_of_cost_instead_of_rounding_it_away() -> None:
     assert one > 0
     assert round(one, 2) == Decimal("0.00")
     assert one * 100 > Decimal("0.19")
+
+
+AZURE_PREBUILT = Price(per_thousand_pages=Decimal("10"), read="2026-09-16")
+
+
+def test_charges_a_per_page_backend_for_the_pages_it_reported() -> None:
+    assert AZURE_PREBUILT.of(Usage(pages=3)) == Decimal("0.03")
+
+
+def test_a_per_page_price_charges_nothing_for_tokens() -> None:
+    assert AZURE_PREBUILT.of(Usage(input_tokens=1_000_000, output_tokens=1)) == 0
+
+
+def test_adds_up_pages_beside_tokens() -> None:
+    both = Usage(input_tokens=1, output_tokens=2, pages=3) + Usage(pages=2)
+
+    assert both == Usage(input_tokens=1, output_tokens=2, pages=5)

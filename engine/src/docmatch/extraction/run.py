@@ -55,7 +55,7 @@ import json
 import math
 import time
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
@@ -64,6 +64,8 @@ from docmatch.evals import manifest, public
 from docmatch.evals.manifest import Manifest
 from docmatch.extraction.extractor import (
     NOTHING,
+    Confidence,
+    CurrencySymbols,
     Document,
     ExtractionError,
     Extractor,
@@ -93,8 +95,8 @@ class DocumentRun:
     pages: int
     attempts: int
     usage: Usage
-    """The tokens of every attempt that was billed, the same way `cost` adds
-    them up, so the rates in the record reproduce the money."""
+    """The tokens or pages of every attempt that was billed, the same way `cost`
+    adds them up, so the rates in the record reproduce the money."""
     cost: Decimal
     latency: float
     """Seconds of the attempt that produced the prediction, or of all of them
@@ -104,6 +106,10 @@ class DocumentRun:
     served_model: str | None
     """The served model the vendor reports reading the prediction with, None when
     the vendor named none or there is no prediction."""
+    confidence: Confidence | None = None
+    """The confidence the backend returned with the prediction, when it has one."""
+    currency_symbols: CurrencySymbols = field(default_factory=dict)
+    """The currency symbols the vendor returned with the prediction."""
 
     @property
     def predicted(self) -> bool:
@@ -120,8 +126,9 @@ class Run:
     """The requested model, the same for every document; each one's served model
     is its own."""
     manifest: Manifest
-    long_edge: int
-    """What a rendering backend was asked to render at, kept with the record."""
+    long_edge: int | None
+    """What a rendering backend was asked to render at, kept with the record;
+    None for a backend that reads the PDF and renders nothing."""
     documents: tuple[DocumentRun, ...]
 
     @property
@@ -153,6 +160,7 @@ class Run:
         return Usage(
             input_tokens=sum(each.usage.input_tokens for each in self.documents),
             output_tokens=sum(each.usage.output_tokens for each in self.documents),
+            pages=sum(each.usage.pages for each in self.documents),
         )
 
     def latency(self, percentile: int) -> float:
@@ -284,6 +292,8 @@ def _document(
             prediction=read.prediction,
             failure=None,
             served_model=read.served_model,
+            confidence=read.confidence,
+            currency_symbols=read.currency_symbols,
         )
     return _failed(
         document_id,
@@ -356,6 +366,7 @@ def write_record(run: Run, path: Path) -> None:
         "cost_per_document": str(run.cost_per_document),
         "input_tokens": run.tokens.input_tokens,
         "output_tokens": run.tokens.output_tokens,
+        "pages_billed": run.tokens.pages,
         "latency_p50": run.latency(50),
         "latency_p95": run.latency(95),
         "documents": [
@@ -365,6 +376,7 @@ def write_record(run: Run, path: Path) -> None:
                 "attempts": each.attempts,
                 "input_tokens": each.usage.input_tokens,
                 "output_tokens": each.usage.output_tokens,
+                "pages_billed": each.usage.pages,
                 "cost": str(each.cost),
                 "latency": each.latency,
                 "predicted": each.predicted,
@@ -373,5 +385,33 @@ def write_record(run: Run, path: Path) -> None:
             }
             for each in run.documents
         ],
+    }
+    path.write_text(json.dumps(body, indent=2, ensure_ascii=False) + "\n", "utf-8")
+
+
+def write_confidence(run: Run, path: Path) -> None:
+    """Each predicted document's confidence, beside the predictions and apart from them.
+
+    Only documents whose backend returned a confidence are listed, so a run on a
+    backend with none writes an empty object, which is what "no signal" reads.
+    """
+    body = {
+        each.document_id: each.confidence.model_dump(mode="json")
+        for each in run.predicted
+        if each.confidence is not None
+    }
+    path.write_text(json.dumps(body, indent=2, ensure_ascii=False) + "\n", "utf-8")
+
+
+def write_currency_symbols(run: Run, path: Path) -> None:
+    """The currency symbols a vendor returned beside each predicted document.
+
+    Saved so a derived value can be computed again from a saved run, the same
+    way it is from the predictions (#24).
+    """
+    body = {
+        each.document_id: {source: list(symbols) for source, symbols in found.items()}
+        for each in run.predicted
+        if (found := each.currency_symbols)
     }
     path.write_text(json.dumps(body, indent=2, ensure_ascii=False) + "\n", "utf-8")
