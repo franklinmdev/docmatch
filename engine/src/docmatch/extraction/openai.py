@@ -3,8 +3,9 @@
 The third backend behind `Extractor` (#21, #36). It is the Gemini backend with
 the provider swapped and nothing else: the same 1600 px renders, the same
 instruction, the same `schema.Invoice`, pages announced the same way, reasoning
-effort left at the vendor's default and no logprobs asked for (#22). So the two
-vision LLM rows differ by provider and model only.
+effort left at the vendor's default and no logprobs asked for (#22). What
+differs is what the provider's API needs to receive the same request: pages
+as data URLs and the schema marked strict (below).
 
 What was read before this was written
 -------------------------------------
@@ -108,7 +109,6 @@ def client() -> openai.OpenAI:
         raise ExtractionError(
             f"no ${KEY_VARIABLE} in the environment. The openai backend needs "
             "one; put it in .env beside DOCILE_TOKEN, as .env.example shows.",
-            retryable=False,
         )
     return openai.OpenAI(api_key=key, timeout=TIMEOUT, max_retries=0)
 
