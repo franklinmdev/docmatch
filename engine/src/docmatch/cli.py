@@ -37,6 +37,7 @@ from typing import get_args
 from docmatch.docile.annotation import Annotation, FieldExtraction
 from docmatch.docile.dataset import DatasetNotFoundError, DocileDataset, DocileError
 from docmatch.evals import corpus, manifest, public
+from docmatch.evals.confidence import Buckets, Calibration, Sweep
 from docmatch.evals.corpus import Census, Coverage, RuleCoverage, Survey
 from docmatch.evals.manifest import Manifest, ManifestError, Reason
 from docmatch.evals.public import PublicCopyError
@@ -46,6 +47,7 @@ from docmatch.evals.run import (
     FieldTypeTotals,
     GateTotals,
     SubsetScore,
+    read_confidence,
     read_currency_symbols,
     read_predictions,
     score_subset,
@@ -77,7 +79,7 @@ from docmatch.metrics.line_items import (
     labeled_line_items,
     score_line_items,
 )
-from docmatch.metrics.score import Score
+from docmatch.metrics.score import Score, ratio
 
 DATA_DIR_VARIABLE = "DOCMATCH_DATA_DIR"
 DEFAULT_DATA_DIR = Path("data/docile")
@@ -524,6 +526,7 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
             currency_symbols=read_currency_symbols(
                 arguments.predictions.parent / CURRENCY_SYMBOLS_FILE
             ),
+            confidence=read_confidence(arguments.predictions.parent / CONFIDENCE_FILE),
         )
         return render_eval(arguments.manifest, run), 0
     annotation = dataset.annotation(arguments.document_id)
@@ -650,11 +653,14 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
 CURRENCY_SYMBOLS_FILE = "currency_symbols.json"
 """Read by `docmatch eval` beside the predictions when a run saved one."""
 
+CONFIDENCE_FILE = "confidence.json"
+"""Read by `docmatch eval` beside the predictions; empty or absent is no signal."""
+
 RUN_FILES = (
     "predictions.json",
     "manifest.json",
     "run.json",
-    "confidence.json",
+    CONFIDENCE_FILE,
     CURRENCY_SYMBOLS_FILE,
 )
 
@@ -939,9 +945,11 @@ def render_eval(path: Path, run: SubsetScore) -> str:
         f"Cell accuracy ({len(run.per_cell_fieldtype)})",
         *_accuracies(run.per_cell_fieldtype),
         "",
+        *_calibration(run.calibration),
+        "",
         *_gate(run.gate),
         "",
-        *_ablation(run.ablation, run.gate.checked),
+        *_ablation(run.ablation, run.gate.checked, run.sweep),
     ]
     return "\n".join([*lines, ""])
 
@@ -1023,20 +1031,122 @@ def _gate(totals: GateTotals) -> list[str]:
 
 
 NO_SIGNAL = "no signal"
-"""What the confidence side of the ablation says for a run carrying none."""
+"""What every confidence section says for a run carrying none."""
 
 
-def _ablation(ablation: Ablation, checked: int) -> list[str]:
-    """What the gate caught among checked readings, beside what confidence did."""
+def _calibration(calibration: Calibration | None) -> list[str]:
+    """Accuracy by confidence bucket, header values and cells apart."""
+    if calibration is None:
+        return ["Calibration", f"  {NO_SIGNAL}"]
     return [
+        "Calibration, header values",
+        *_buckets(calibration.header),
+        "",
+        "Calibration, line-item cells",
+        *_buckets(calibration.cells),
+        "",
+        # A value the backend never read has no confidence to be bucketed by.
+        "Calibration speaks to precision only.",
+    ]
+
+
+def _buckets(buckets: Buckets) -> list[str]:
+    """Ten fixed buckets and the no-confidence line, accuracy left out at n 0."""
+    labeled = [
+        (f"[{each.low:.1f}, {each.high:.1f}{']' if each.high == 1.0 else ')'}", each)
+        for each in buckets.buckets
+        if each.low is not None and each.high is not None
+    ]
+    labeled.append(("no confidence", buckets.no_confidence))
+    return _table(
+        ("confidence", "n", "accuracy"),
+        [
+            (label, str(each.n), f"{ratio(each.correct, each.n):.3f}")
+            if each.n
+            else (label, str(each.n))
+            for label, each in labeled
+        ],
+    )
+
+
+def _ablation(ablation: Ablation, checked: int, swept: Sweep | None) -> list[str]:
+    """What the gate caught among checked readings, beside what confidence did."""
+    lines = [
         f"Gate ablation, over {checked} checked",
         *_rows(
             ("catches", str(ablation.catches)),
             ("misses", str(ablation.misses)),
             ("false alarms", str(ablation.false_alarms)),
-            ("confidence", NO_SIGNAL),
+            *((("confidence", NO_SIGNAL),) if swept is None else ()),
         ),
     ]
+    if swept is None:
+        return lines
+    return [
+        *lines,
+        "",
+        f"Confidence sweep, over {checked} checked",
+        *_table(
+            (
+                "edge",
+                "gate only",
+                "confidence only",
+                "both",
+                "neither",
+                "gate false alarms",
+                "confidence false alarms",
+            ),
+            [
+                (
+                    f"{line.edge:.1f}",
+                    *map(
+                        str,
+                        (
+                            line.gate_only,
+                            line.confidence_only,
+                            line.both,
+                            line.neither,
+                            line.gate_false_alarms,
+                            line.confidence_false_alarms,
+                        ),
+                    ),
+                )
+                for line in swept.lines
+            ],
+        ),
+        "",
+        *_rows(
+            ("readings with a gated value with no confidence", str(swept.unconfident))
+        ),
+    ]
+
+
+def _table(header: Sequence[str], rows: Sequence[Sequence[str]]) -> list[str]:
+    """A header over rows: the first column left-aligned, the rest right-aligned.
+
+    A row may stop short, which leaves its last columns blank.
+    """
+    widths = [
+        max(
+            len(header[column]),
+            *(len(row[column]) for row in rows if column < len(row)),
+        )
+        for column in range(len(header))
+    ]
+
+    def aligned(cells: Sequence[str]) -> str:
+        first, *rest = cells
+        return "  ".join(
+            [
+                f"  {first.ljust(widths[0])}",
+                *(
+                    cell.rjust(width)
+                    for cell, width in zip(rest, widths[1:], strict=False)
+                ),
+            ]
+        )
+
+    return [aligned(header), *(aligned(row) for row in rows)]
 
 
 def _drift(pinned: Manifest, drawn: Sequence[str]) -> str:
