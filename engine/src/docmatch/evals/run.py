@@ -31,8 +31,9 @@ reading is wrong when any value a checked rule used is not matched against its
 label by the field scorer, so the gate is judged on errors it could see and not
 on a misread vendor name no date or total could reveal. A catch is a wrong
 reading the gate failed, a miss a wrong reading it passed, and a false alarm a
-right reading it failed. The eval does not read a run's saved confidence yet
-(#48), so the confidence side of the ablation has no signal on any row.
+right reading it failed. When the run saved a confidence, the sweep in
+`confidence` sets it beside the gate at every fixed edge, and the calibration
+table says what each bucket of it is worth; a run with none has no signal.
 
 Counts, not values
 ------------------
@@ -52,8 +53,20 @@ from pathlib import Path
 from pydantic import TypeAdapter, ValidationError
 
 from docmatch.docile.dataset import DocileDataset
+from docmatch.evals.confidence import (
+    Calibration,
+    Checked,
+    Judged,
+    Sweep,
+    bucketed,
+    gated_confidence,
+    judge_cells,
+    judge_header,
+    sweep,
+)
 from docmatch.evals.manifest import Manifest
 from docmatch.extraction.derived import DERIVED_FIELDTYPES, derive, with_derived
+from docmatch.extraction.extractor import Confidence
 from docmatch.gate import RULES, GateResult, RuleName, gate
 from docmatch.metrics.fields import (
     FieldScore,
@@ -124,6 +137,35 @@ def read_currency_symbols(path: Path) -> dict[str, dict[str, tuple[str, ...]]]:
         ) from error
 
 
+CONFIDENCE = TypeAdapter(dict[str, Confidence])
+"""A run's confidence: document id to what the backend returned beside the reading."""
+
+ConfidenceByDocument = Mapping[str, Confidence]
+
+
+def read_confidence(path: Path) -> dict[str, Confidence]:
+    """The confidence a backend returned, saved beside a run's predictions.
+
+    A run with no such file has none, and neither does one whose file is empty:
+    a backend that returns no confidence writes `{}`, which is "no signal".
+    """
+    try:
+        body = path.read_bytes()
+    except FileNotFoundError:
+        return {}
+    except OSError as error:
+        raise PredictionError(f"cannot read the confidence {path}: {error}") from error
+    try:
+        return CONFIDENCE.validate_json(body)
+    except ValidationError as error:
+        raise PredictionError(
+            f"{path} is not a run's confidence: expected a JSON object keyed by "
+            'document id, each holding "fields", a fieldtype to a list of '
+            'confidences, and "line_items", a list of cells to one confidence. '
+            f"{first_problem(error, within=1)}"
+        ) from error
+
+
 @dataclass(frozen=True)
 class DocumentScore:
     """One document of the subset, scored on both axes."""
@@ -140,6 +182,12 @@ class DocumentScore:
     """The gate on the reading plus its derived values."""
     wrong: bool
     """Whether a value a checked rule used is unmatched against its label."""
+    values: tuple[Judged, ...]
+    """Each distinct header value read, with its confidence and verdict."""
+    cells: tuple[Judged, ...]
+    """Each predicted cell's values, with its confidence and verdict."""
+    gated_confidence: tuple[float | None, ...]
+    """The confidence of every value a checked rule used."""
 
 
 @dataclass(frozen=True)
@@ -213,6 +261,8 @@ class SubsetScore:
     documents: tuple[DocumentScore, ...]
     unpinned: tuple[str, ...]
     """Predicted, and not in the manifest, so not in either number."""
+    confident: bool
+    """Whether the run saved any confidence, without which there is no signal."""
 
     @property
     def fields(self) -> MicroAverage:
@@ -288,6 +338,37 @@ class SubsetScore:
         )
 
     @property
+    def calibration(self) -> Calibration | None:
+        """Header values and cells by confidence bucket, or None for no signal."""
+        if not self.confident:
+            return None
+        return Calibration(
+            header=bucketed(
+                each for document in self.documents for each in document.values
+            ),
+            cells=bucketed(
+                each for document in self.documents for each in document.cells
+            ),
+        )
+
+    @property
+    def sweep(self) -> Sweep | None:
+        """The gate beside a confidence edge over checked readings, or None."""
+        if not self.confident:
+            return None
+        return sweep(
+            [
+                Checked(
+                    failed=document.gate.verdict == "failed",
+                    wrong=document.wrong,
+                    confidence=document.gated_confidence,
+                )
+                for document in self.documents
+                if document.gate.verdict != "not checked"
+            ]
+        )
+
+    @property
     def per_cell_fieldtype(self) -> tuple[CellAccuracy, ...]:
         """Per-cell accuracy per LIR fieldtype, summed over every table."""
         correct: Counter[str] = Counter()
@@ -338,6 +419,9 @@ def _no_totals(fieldtype: str) -> FieldTypeTotals:
 NOTHING = Prediction()
 """What a document the run left out is scored against."""
 
+NO_CONFIDENCE = Confidence()
+"""What a document with no saved confidence is judged with: none on any value."""
+
 
 def score_subset(
     dataset: DocileDataset,
@@ -345,19 +429,23 @@ def score_subset(
     predictions: Mapping[str, Prediction],
     *,
     currency_symbols: CurrencySymbolsByDocument | None = None,
+    confidence: ConfidenceByDocument | None = None,
 ) -> SubsetScore:
     """Score a run against the documents the manifest pins, in manifest order.
 
     `currency_symbols` are what a vendor returned beside each document's
-    amounts, the second source of its derived currency.
+    amounts, the second source of its derived currency. `confidence` is what
+    it returned beside each reading; a run with none has no signal.
     """
     symbols = currency_symbols or {}
+    confident = confidence or {}
     documents = tuple(
         _score_document(
             dataset,
             document_id,
             predictions.get(document_id),
             symbols.get(document_id, {}),
+            confident.get(document_id, NO_CONFIDENCE),
         )
         for document_id in manifest.document_ids
     )
@@ -368,6 +456,7 @@ def score_subset(
         unpinned=tuple(
             document_id for document_id in predictions if document_id not in pinned
         ),
+        confident=bool(confident),
     )
 
 
@@ -376,6 +465,7 @@ def _score_document(
     document_id: str,
     prediction: Prediction | None,
     currency_symbols: Mapping[str, Sequence[str]],
+    confidence: Confidence,
 ) -> DocumentScore:
     annotation = dataset.annotation(document_id)
     predicted = prediction is not None
@@ -383,15 +473,20 @@ def _score_document(
     labeled = labeled_fields(annotation)
     reading = with_derived(prediction.header, derive(prediction, currency_symbols))
     fields = score_fields(labeled, reading)
+    as_read = score_fields(labeled, prediction.header)
+    line_items = score_line_items(labeled_line_items(annotation), prediction.rows)
     gated = gate(reading)
     return DocumentScore(
         document_id=document_id,
         predicted=predicted,
         fields=fields,
-        fields_as_read=score_fields(labeled, prediction.header),
-        line_items=score_line_items(labeled_line_items(annotation), prediction.rows),
+        fields_as_read=as_read,
+        line_items=line_items,
         gate=gated,
         wrong=_wrong(gated, fields),
+        values=judge_header(prediction.fields, confidence, as_read),
+        cells=judge_cells(prediction.line_items, confidence, line_items),
+        gated_confidence=gated_confidence(prediction.fields, confidence, gated),
     )
 
 
