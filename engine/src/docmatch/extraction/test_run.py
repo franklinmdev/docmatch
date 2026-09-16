@@ -15,7 +15,13 @@ from docmatch.evals.manifest import Manifest, load
 from docmatch.evals.public import DigestError, PublicCopyError
 from docmatch.evals.run import read_predictions
 from docmatch.extraction.conftest import write_pdf
-from docmatch.extraction.extractor import Document, Extraction, ExtractionError, Usage
+from docmatch.extraction.extractor import (
+    Confidence,
+    Document,
+    Extraction,
+    ExtractionError,
+    Usage,
+)
 from docmatch.extraction.run import (
     ATTEMPTS,
     COST_CAP,
@@ -23,6 +29,8 @@ from docmatch.extraction.run import (
     Run,
     extract_subset,
     percentile_of,
+    write_confidence,
+    write_currency_symbols,
     write_manifest,
     write_predictions,
     write_record,
@@ -40,6 +48,9 @@ class FakeExtractor:
     latency: float = 1.0
     cost: Decimal = Decimal("0.001")
     served_model: str | None = "fake-002"
+    usage: Usage = Usage(input_tokens=100, output_tokens=50)
+    confidence: Confidence | None = None
+    currency_symbols: dict[str, tuple[str, ...]] = field(default_factory=dict)
     attempts: list[Document] = field(default_factory=list)
 
     @property
@@ -54,10 +65,12 @@ class FakeExtractor:
         assert isinstance(given, Prediction)
         return Extraction(
             prediction=given,
-            usage=Usage(input_tokens=100, output_tokens=50),
+            usage=self.usage,
             cost=self.cost,
             latency=self.latency,
             served_model=self.served_model,
+            confidence=self.confidence,
+            currency_symbols=self.currency_symbols,
         )
 
 
@@ -467,3 +480,132 @@ def test_a_missing_dataset_ends_the_run_rather_than_every_document(
         done(extractor, Subset(elsewhere, subset.copies, subset.pinned))
 
     assert extractor.attempts == []
+
+
+def test_a_per_page_document_can_end_after_two_billed_attempts(tmp_path: Path) -> None:
+    """At a cent a page, two failed reads of three pages are past a five cent cap.
+
+    The cap counts what was spent and never predicts the next attempt (#35), so
+    the third attempt is refused rather than the second.
+    """
+    three_pages = a_subset(tmp_path, pages=(3,))
+    extractor = FakeExtractor(
+        answers=[
+            ExtractionError(
+                "accepted, then polling timed out",
+                Decimal("0.03"),
+                usage=Usage(pages=3),
+            )
+        ]
+    )
+
+    run = done(extractor, three_pages)
+
+    failed = run.failed[0]
+    assert failed.attempts == 2
+    assert failed.cost == Decimal("0.06")
+    assert failed.usage.pages == 6
+    assert "gave up after spending" in (failed.failure or "")
+
+
+def test_a_page_gap_fails_the_document_at_once_with_what_was_processed(
+    tmp_path: Path,
+) -> None:
+    three_pages = a_subset(tmp_path, pages=(3,))
+    extractor = FakeExtractor(
+        answers=[
+            ExtractionError(
+                "2 of 3 pages processed",
+                Decimal("0.02"),
+                usage=Usage(pages=2),
+                retryable=False,
+            )
+        ]
+    )
+
+    run = done(extractor, three_pages)
+
+    failed = run.failed[0]
+    assert failed.attempts == 1
+    assert failed.cost == Decimal("0.02")
+    assert failed.usage.pages == 2
+
+
+def test_records_the_pages_billed_per_document_and_for_the_run(
+    subset: Subset, tmp_path: Path
+) -> None:
+    extractor = FakeExtractor(
+        answers=[READING], usage=Usage(pages=2), cost=Decimal("0.02")
+    )
+    path = tmp_path / "run.json"
+
+    write_record(done(extractor, subset), path)
+
+    record = json.loads(path.read_text())
+    assert record["pages_billed"] == 4
+    assert [each["pages_billed"] for each in record["documents"]] == [2, 2]
+
+
+CONFIDENT = Confidence(
+    fields={"vendor_name": (0.93,)},
+    line_items=({"line_item_description": 0.71, "line_item_quantity": None},),
+)
+
+
+def test_keeps_confidence_and_currency_symbols_beside_the_reading(
+    subset: Subset,
+) -> None:
+    extractor = FakeExtractor(
+        answers=[READING],
+        confidence=CONFIDENT,
+        currency_symbols={"amount_due": ("$",)},
+    )
+
+    run = done(extractor, subset)
+
+    assert run.predictions() == {"syn0001": READING, "syn0002": READING}
+    assert [each.confidence for each in run.documents] == [CONFIDENT, CONFIDENT]
+    assert [each.currency_symbols for each in run.documents] == [
+        {"amount_due": ("$",)},
+        {"amount_due": ("$",)},
+    ]
+
+
+def test_writes_confidence_and_currency_symbols_in_their_own_files(
+    subset: Subset, tmp_path: Path
+) -> None:
+    """The predictions file stays exactly what the backend read."""
+    run = done(
+        FakeExtractor(
+            answers=[READING, ExtractionError("no")],
+            confidence=CONFIDENT,
+            currency_symbols={"amount_total_gross": ("US$",)},
+        ),
+        subset,
+        attempts=1,
+    )
+
+    write_confidence(run, tmp_path / "confidence.json")
+    write_currency_symbols(run, tmp_path / "currency_symbols.json")
+
+    assert json.loads((tmp_path / "confidence.json").read_text()) == {
+        "syn0001": {
+            "fields": {"vendor_name": [0.93]},
+            "line_items": [{"line_item_description": 0.71, "line_item_quantity": None}],
+        }
+    }
+    assert json.loads((tmp_path / "currency_symbols.json").read_text()) == {
+        "syn0001": {"amount_total_gross": ["US$"]}
+    }
+
+
+def test_a_backend_with_no_confidence_writes_empty_files(
+    subset: Subset, tmp_path: Path
+) -> None:
+    run = done(FakeExtractor(answers=[READING]), subset)
+
+    write_confidence(run, tmp_path / "confidence.json")
+    write_currency_symbols(run, tmp_path / "currency_symbols.json")
+
+    assert json.loads((tmp_path / "confidence.json").read_text()) == {}
+    assert json.loads((tmp_path / "currency_symbols.json").read_text()) == {}

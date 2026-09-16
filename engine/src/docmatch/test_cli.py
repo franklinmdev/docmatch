@@ -5,6 +5,7 @@ directory, so the suite runs in CI with no dataset present.
 """
 
 import json
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -1039,6 +1040,14 @@ def test_extract_reports_what_the_run_cost(tmp_path: Path) -> None:
     assert "p95  5.00 s" in report
 
 
+def test_extract_reports_the_pages_a_per_page_backend_billed(tmp_path: Path) -> None:
+    run = a_run(
+        replace(a_document("syn0001"), usage=Usage(pages=3), cost=Decimal("0.03"))
+    )
+
+    assert "pages billed   3" in render_extract(tmp_path, run)
+
+
 def test_extract_names_every_model_the_vendor_said_it_served(tmp_path: Path) -> None:
     """A name pointed at a new version mid-run shows up here, not only in run.json."""
     run = a_run(
@@ -1245,6 +1254,8 @@ def test_extract_keeps_the_documents_read_before_it_was_interrupted(
     assert record["size"] == 1
     assert record["requested_model"] == "fake-001"
     assert [each["served_model"] for each in record["documents"]] == ["fake-002"]
+    assert json.loads((out / "confidence.json").read_text()) == {}
+    assert json.loads((out / "currency_symbols.json").read_text()) == {}
 
 
 def test_extract_keeps_the_documents_read_before_an_unexpected_failure(

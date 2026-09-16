@@ -57,6 +57,8 @@ from docmatch.extraction.run import (
     DocumentRun,
     Run,
     extract_subset,
+    write_confidence,
+    write_currency_symbols,
     write_manifest,
     write_predictions,
     write_record,
@@ -636,13 +638,19 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     )
 
 
-RUN_FILES = ("predictions.json", "manifest.json", "run.json")
+RUN_FILES = (
+    "predictions.json",
+    "manifest.json",
+    "run.json",
+    "confidence.json",
+    "currency_symbols.json",
+)
 
 
 def _prepare(out: Path) -> None:
     """Make sure the run can be written, before the first document is paid for.
 
-    The directory is made now, and the three names checked for a directory in
+    The directory is made now, and the run's file names checked for a directory in
     the way of one of them: a write that fails after the run has ended costs
     the whole run, and one that fails on the second file leaves predictions
     beside no manifest, to be scored against the whole subset.
@@ -661,11 +669,13 @@ def _prepare(out: Path) -> None:
 
 
 def _write(extracted: Run, out: Path) -> None:
-    """The three files of a run, or a message rather than a traceback."""
+    """The files of a run, or a message rather than a traceback."""
     try:
         write_predictions(extracted, out / RUN_FILES[0])
         write_manifest(extracted, out / RUN_FILES[1])
         write_record(extracted, out / RUN_FILES[2])
+        write_confidence(extracted, out / RUN_FILES[3])
+        write_currency_symbols(extracted, out / RUN_FILES[4])
     except OSError as error:
         raise ExtractionError(f"cannot write the run to {out}: {error}") from error
 
@@ -839,6 +849,7 @@ def render_extract(where: Path, extracted: Run) -> str:
             ("per document", f"${extracted.cost_per_document:.6f}"),
             ("input tokens", f"{tokens.input_tokens:,}"),
             ("output tokens", f"{tokens.output_tokens:,}"),
+            ("pages billed", f"{tokens.pages:,}"),
         ),
         "",
         "Latency, over the documents that produced a prediction",
