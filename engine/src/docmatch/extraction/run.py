@@ -157,11 +157,7 @@ class Run:
 
     @property
     def tokens(self) -> Usage:
-        return Usage(
-            input_tokens=sum(each.usage.input_tokens for each in self.documents),
-            output_tokens=sum(each.usage.output_tokens for each in self.documents),
-            pages=sum(each.usage.pages for each in self.documents),
-        )
+        return sum((each.usage for each in self.documents), NOTHING)
 
     def latency(self, percentile: int) -> float:
         """Seconds at a percentile of the documents that produced a prediction.
@@ -365,6 +361,8 @@ def write_record(run: Run, path: Path) -> None:
         "cost": str(run.cost),
         "cost_per_document": str(run.cost_per_document),
         "input_tokens": run.tokens.input_tokens,
+        "cached_input_tokens": run.tokens.cached_input_tokens,
+        "cache_write_tokens": run.tokens.cache_write_tokens,
         "output_tokens": run.tokens.output_tokens,
         "pages_billed": run.tokens.pages,
         "latency_p50": run.latency(50),
@@ -375,6 +373,8 @@ def write_record(run: Run, path: Path) -> None:
                 "pages": each.pages,
                 "attempts": each.attempts,
                 "input_tokens": each.usage.input_tokens,
+                "cached_input_tokens": each.usage.cached_input_tokens,
+                "cache_write_tokens": each.usage.cache_write_tokens,
                 "output_tokens": each.usage.output_tokens,
                 "pages_billed": each.usage.pages,
                 "cost": str(each.cost),

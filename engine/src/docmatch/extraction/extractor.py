@@ -46,6 +46,10 @@ class Usage:
     """The units one call was billed for: tokens, or pages for a per-page backend."""
 
     input_tokens: int = 0
+    cached_input_tokens: int = 0
+    """The part of `input_tokens` the vendor reported serving from its cache."""
+    cache_write_tokens: int = 0
+    """The part of `input_tokens` the vendor reported writing to its cache."""
     output_tokens: int = 0
     pages: int = 0
 
@@ -56,6 +60,8 @@ class Usage:
     def __add__(self, other: "Usage") -> "Usage":
         return Usage(
             input_tokens=self.input_tokens + other.input_tokens,
+            cached_input_tokens=self.cached_input_tokens + other.cached_input_tokens,
+            cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
             pages=self.pages + other.pages,
         )
@@ -117,10 +123,16 @@ class Price:
 
     A vision LLM charges per token and a prebuilt invoice model per page, so a
     rate a model does not charge is zero, and cost stays list price times the
-    units the vendor reported, whichever units they are (#28).
+    units the vendor reported, whichever units they are (#28). Input tokens
+    read from a vendor's cache and input tokens written to it are counted
+    inside the input and charged at their own rates, the rest of the input at
+    the input rate, so a backend that reports neither count pays the input
+    rate for all of it.
     """
 
     input_per_million: Decimal = Decimal(0)
+    cached_input_per_million: Decimal = Decimal(0)
+    cache_write_per_million: Decimal = Decimal(0)
     output_per_million: Decimal = Decimal(0)
     per_thousand_pages: Decimal = Decimal(0)
     read: str
@@ -135,7 +147,10 @@ class Price:
         nothing at all.
         """
         return (
-            usage.input_tokens * self.input_per_million
+            (usage.input_tokens - usage.cached_input_tokens - usage.cache_write_tokens)
+            * self.input_per_million
+            + usage.cached_input_tokens * self.cached_input_per_million
+            + usage.cache_write_tokens * self.cache_write_per_million
             + usage.output_tokens * self.output_per_million
         ) / MILLION + usage.pages * self.per_thousand_pages / THOUSAND
 
