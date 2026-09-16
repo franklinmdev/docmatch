@@ -217,7 +217,8 @@ it at 0.396, with `line_item_amount_gross` read in 83.8% of labeled cells.
 `customer_billing_address` is 0.033, 3 matched of 93 labeled; on the Gemini run
 the same field's labels carried the party name the reading left out (#54), and
 whether that is the cause here is not measured yet. The run saved Azure's
-confidence beside every value and cell for the calibration table (#48), and `currency_symbol` beside 60 readings'
+confidence beside every value and cell, which the
+[calibration table](#calibration-native-confidence) buckets, and `currency_symbol` beside 60 readings'
 totals; `currency_code_amount_due`, which Azure has no field for, scores 0.902
 with derived values, and the same without the saved symbols, because the
 amounts Azure printed already carry them.
@@ -244,7 +245,7 @@ returns one natively.
 | Backend | Checked | Catches | Misses | False alarms | Confidence | Commit |
 |---|---|---|---|---|---|---|
 | `gemini-3.1-flash-lite` | 47 | 2 | 1 | 2 | no signal | [`a125b0b`](https://github.com/franklinmdev/docmatch/commit/a125b0b) |
-| Azure `prebuilt-invoice` | 52 | 1 | 3 | 2 | sweep in #48 | [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
+| Azure `prebuilt-invoice` | 52 | 1 | 3 | 2 | sweep below, eval at [`e0e0808`](https://github.com/franklinmdev/docmatch/commit/e0e0808) | [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
 
 Measured with the same eval command over the saved run above. Of the 4
 readings the gate failed, half were right: the labels themselves break totals
@@ -253,6 +254,70 @@ such a document fails it too. Only 3 of the 47 checked readings are wrong,
 so this row says little yet about what the gate is worth; the other two
 backends decide that. Azure's row points the same way: 4 of its 52 checked
 readings are wrong, and the gate caught 1 of them.
+
+**The confidence sweep, Azure.** The same 52 checked readings, re-scored from
+the saved run by the eval at [`e0e0808`](https://github.com/franklinmdev/docmatch/commit/e0e0808). At each edge a reading is flagged by
+confidence when the lowest confidence over the values its checked rules used is
+below the edge; a gated value with no confidence never flags, and none of the
+52 readings holds one. Wrong readings are split by what flagged them, and false
+alarms, right readings flagged, are counted for each side.
+
+| Edge | Gate only | Confidence only | Both | Neither | Gate false alarms | Confidence false alarms |
+|---|---|---|---|---|---|---|
+| 0.1 | 1 | 0 | 0 | 3 | 2 | 0 |
+| 0.2 | 1 | 0 | 0 | 3 | 2 | 0 |
+| 0.3 | 1 | 0 | 0 | 3 | 2 | 0 |
+| 0.4 | 1 | 0 | 0 | 3 | 2 | 3 |
+| 0.5 | 0 | 1 | 1 | 2 | 2 | 14 |
+| 0.6 | 0 | 2 | 1 | 1 | 2 | 20 |
+| 0.7 | 0 | 2 | 1 | 1 | 2 | 24 |
+| 0.8 | 0 | 3 | 1 | 0 | 2 | 27 |
+| 0.9 | 0 | 3 | 1 | 0 | 2 | 29 |
+
+Confidence finds the wrong readings the gate passes, but only by flagging most
+of the right ones: at 0.8 it has flagged all 4 wrong readings and 27 of the 48
+right ones, where the gate flags 1 wrong and 2 right. Below 0.5 it flags no
+wrong reading at all. The gate's one catch is also flagged by confidence from
+0.5 up, so on this row the gate catches nothing confidence cannot, at a
+fraction of the false alarms. With 4 wrong readings this is a direction, not a
+finding.
+
+### Calibration, native confidence
+
+Accuracy by the confidence a backend returned beside its reading, in ten fixed
+buckets. A header value is one distinct normalized value, correct when field F1
+matched it, and when two readings normalize to one value the higher confidence
+is kept. A cell is correct when the row it belongs to was paired with a labeled
+row carrying the same normalized value, the pairing line-item F1 uses; row
+confidence is not read. Derived values carry no confidence and are left out.
+**Calibration speaks to precision only**: a value the backend missed has no
+confidence, so no bucket says anything about recall.
+
+Azure `prebuilt-invoice`, from the saved run above, eval at [`e0e0808`](https://github.com/franklinmdev/docmatch/commit/e0e0808):
+
+| Confidence | Header values n | Header accuracy | Cells n | Cell accuracy |
+|---|---|---|---|---|
+| [0.0, 0.1) | 1 | 0.000 | 20 | 0.400 |
+| [0.1, 0.2) | 2 | 0.500 | 5 | 0.400 |
+| [0.2, 0.3) | 3 | 0.000 | 9 | 0.444 |
+| [0.3, 0.4) | 26 | 0.500 | 20 | 0.450 |
+| [0.4, 0.5) | 70 | 0.471 | 25 | 0.400 |
+| [0.5, 0.6) | 53 | 0.509 | 20 | 0.650 |
+| [0.6, 0.7) | 45 | 0.467 | 34 | 0.706 |
+| [0.7, 0.8) | 43 | 0.395 | 47 | 0.553 |
+| [0.8, 0.9) | 280 | 0.325 | 86 | 0.802 |
+| [0.9, 1.0] | 464 | 0.761 | 627 | 0.730 |
+| no confidence | 0 | | 0 | |
+
+`gemini-3.1-flash-lite`: no signal, since no vision LLM is asked for a
+confidence.
+
+Azure's header confidence is not calibrated. A value at 0.8 to 0.9 is right a
+third of the time, less often than one at 0.3 to 0.4, and that bucket holds 280
+of the 987 header values. Only the top bucket rises, to 0.761. Cells track
+confidence more closely, 0.4 to 0.45 below 0.5 and 0.73 to 0.80 above 0.8, but
+even at 0.9 and above a quarter of them are wrong. Every value Azure returned
+carried a confidence.
 
 ### Matching, injected discrepancies
 
@@ -438,7 +503,9 @@ From a checkout with DocILE in `data/docile`, that is the command the numbers
 in the Benchmarks section come from. It prints field F1 and line-item F1 over
 the whole subset, a per-fieldtype breakdown of each, the currency field both
 as read and with the value code derives for it, gate verdicts with gate pass
-rate and unreadable values per rule, the gate ablation, and the ids behind two
+rate and unreadable values per rule, the calibration table and the gate
+ablation with its confidence sweep when the run saved a confidence ("no
+signal" when it did not), and the ids behind two
 counts that are not scores: pinned documents the run did not predict, and
 predicted documents the subset does not pin.
 
@@ -483,7 +550,7 @@ subset this run actually covered; `run.json`, which carries per-document
 pages, attempts, tokens, pages billed, cost, latency and any failure; and
 `confidence.json` and `currency_symbols.json`, what a backend returned beside
 the reading, both empty for a backend that returns neither. `docmatch eval`
-reads `currency_symbols.json` from beside the predictions it scores. So a benchmark row is
+reads both from beside the predictions it scores. So a benchmark row is
 reproduced by
 
 ```bash
