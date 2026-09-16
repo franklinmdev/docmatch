@@ -50,7 +50,7 @@ from docmatch.evals.run import (
     read_predictions,
     score_subset,
 )
-from docmatch.extraction import backends, gemini, pages
+from docmatch.extraction import azure, backends, gemini, pages
 from docmatch.extraction.extractor import ExtractionError
 from docmatch.extraction.run import (
     ATTEMPTS,
@@ -370,7 +370,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help=(
             "the model to read with, one the backend has a price for (default: "
-            f"the backend's own, {gemini.MODEL} for gemini)"
+            f"the backend's own, {gemini.MODEL} for gemini, {azure.MODEL} for azure)"
         ),
     )
     extract.add_argument(

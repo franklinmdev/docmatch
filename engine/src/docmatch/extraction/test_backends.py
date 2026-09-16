@@ -2,7 +2,7 @@
 
 import pytest
 
-from docmatch.extraction import backends, gemini
+from docmatch.extraction import azure, backends, gemini
 from docmatch.extraction.extractor import ExtractionError
 from docmatch.extraction.test_run import READING, FakeExtractor
 
@@ -39,10 +39,52 @@ def test_a_model_given_by_name_is_the_one_asked_for(
     assert built == ["gemini-3.5-flash-lite"]
 
 
-@pytest.mark.parametrize("backend", ["azure", "openai"])
-def test_a_backend_not_wired_yet_is_refused_by_name(backend: str) -> None:
-    with pytest.raises(ExtractionError, match=f"the {backend} backend is not wired"):
-        backends.extractor(backend, None, long_edge=1600)
+def test_a_backend_not_wired_yet_is_refused_by_name() -> None:
+    with pytest.raises(ExtractionError, match="the openai backend is not wired"):
+        backends.extractor("openai", None, long_edge=1600)
+
+
+def test_azure_reads_with_its_own_default_when_no_model_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built: list[str] = []
+    fake = FakeExtractor(answers=[READING])
+
+    def backend(model: str) -> FakeExtractor:
+        built.append(model)
+        return fake
+
+    monkeypatch.setattr(azure, "extractor", backend)
+
+    assert backends.extractor("azure", None, long_edge=1600) is fake
+    assert built == ["prebuilt-invoice"]
+
+
+def test_azure_passes_a_model_given_by_name_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built: list[str] = []
+
+    def backend(model: str) -> FakeExtractor:
+        built.append(model)
+        return FakeExtractor(answers=[READING])
+
+    monkeypatch.setattr(azure, "extractor", backend)
+
+    backends.extractor("azure", "prebuilt-invoice", long_edge=1600)
+
+    assert built == ["prebuilt-invoice"]
+
+
+def test_an_unpriced_azure_model_is_refused_before_a_client_is_made(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No endpoint or key in the environment, so reaching the client would say so."""
+    monkeypatch.delenv(azure.ENDPOINT_VARIABLE, raising=False)
+    monkeypatch.delenv(azure.KEY_VARIABLE, raising=False)
+
+    with pytest.raises(ExtractionError, match="no price is written down"):
+        backends.extractor("azure", "prebuilt-receipt", long_edge=1600)
 
 
 def test_an_unpriced_model_is_refused_before_a_client_is_made(

@@ -64,6 +64,7 @@ from docmatch.extraction.extractor import (
     ExtractionError,
     Price,
     Usage,
+    retryable,
 )
 from docmatch.extraction.pages import LONG_EDGE, MIME_TYPE, PageError, PageImage, render
 from docmatch.extraction.schema import Invoice
@@ -348,7 +349,7 @@ class GeminiExtractor:
             )
         except Exception as error:
             raise ExtractionError(
-                f"{type(error).__name__}: {error}", retryable=_retryable(error)
+                f"{type(error).__name__}: {error}", retryable=retryable(error)
             ) from error
         latency = time.perf_counter() - started
         if not isinstance(answer, Answer):
@@ -368,21 +369,6 @@ class GeminiExtractor:
             latency=latency,
             served_model=answer.model,
         )
-
-
-def _retryable(error: Exception) -> bool:
-    """Whether the same request could succeed next time.
-
-    An HTTP error from the SDK carries its status. A rate limit or a server
-    error is the provider's moment and not this request's; anything else in
-    the 4xx range is a request the provider will refuse again, a bad key, a
-    model it does not serve or a body it does not accept. An exception with
-    no status never reached an answer, which a retry may fix.
-    """
-    status = getattr(error, "status_code", None)
-    if not isinstance(status, int):
-        return True
-    return status in (408, 409, 429) or status >= 500
 
 
 def _read(answer: Answer, cost: Decimal, usage: Usage) -> Invoice:

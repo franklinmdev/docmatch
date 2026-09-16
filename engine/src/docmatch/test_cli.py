@@ -1087,7 +1087,7 @@ def test_extract_says_when_no_served_model_was_reported(tmp_path: Path) -> None:
     assert "served      none reported" in render_extract(tmp_path, run)
 
 
-@pytest.mark.parametrize("backend", ["azure", "openai"])
+@pytest.mark.parametrize("backend", ["openai"])
 def test_extract_refuses_a_backend_not_wired_yet_before_making_the_run_directory(
     backend: str,
     tmp_path: Path,
@@ -1111,6 +1111,32 @@ def test_extract_refuses_a_backend_not_wired_yet_before_making_the_run_directory
 
     assert exit_code == 1
     assert f"the {backend} backend is not wired yet" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_extract_on_azure_names_the_missing_endpoint_before_making_the_run_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT", raising=False)
+    monkeypatch.delenv("AZURE_DOCUMENT_INTELLIGENCE_KEY", raising=False)
+    out = tmp_path / "run"
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(out),
+            "--data-dir",
+            str(tmp_path),
+            "--backend",
+            "azure",
+        ]
+    )
+
+    assert exit_code == 1
+    assert "no $AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT" in capsys.readouterr().err
     assert not out.exists()
 
 

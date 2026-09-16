@@ -95,6 +95,22 @@ class ExtractionError(Exception):
         self.retryable = retryable
 
 
+def retryable(error: Exception) -> bool:
+    """Whether the same request could succeed next time.
+
+    An HTTP error from a vendor SDK carries its status as `status_code`, which
+    google-genai and azure-core both name that way. A rate limit or a server
+    error is the provider's moment and not this request's; anything else in
+    the 4xx range is a request the provider will refuse again, a bad key, a
+    model it does not serve or a body it does not accept. An exception with
+    no status never reached an answer, which a retry may fix.
+    """
+    status = getattr(error, "status_code", None)
+    if not isinstance(status, int):
+        return True
+    return status in (408, 409, 429) or status >= 500
+
+
 @dataclass(frozen=True, kw_only=True)
 class Price:
     """What a model charges, and when that was last read from the vendor.
