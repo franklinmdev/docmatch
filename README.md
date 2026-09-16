@@ -314,7 +314,7 @@ confidence.
 
 Azure's header confidence is not calibrated. A value at 0.8 to 0.9 is right a
 third of the time, less often than one at 0.3 to 0.4, and that bucket holds 280
-of the 987 header values. Only the top bucket rises, to 0.761. Cells track
+of the 987 header values. Only the top bucket clearly rises, to 0.761. Cells track
 confidence more closely, 0.4 to 0.45 below 0.5 and 0.73 to 0.80 above 0.8, but
 even at 0.9 and above a quarter of them are wrong. Every value Azure returned
 carried a confidence.

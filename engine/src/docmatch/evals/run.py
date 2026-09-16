@@ -261,7 +261,7 @@ class SubsetScore:
     documents: tuple[DocumentScore, ...]
     unpinned: tuple[str, ...]
     """Predicted, and not in the manifest, so not in either number."""
-    confident: bool
+    has_confidence: bool
     """Whether the run saved any confidence, without which there is no signal."""
 
     @property
@@ -340,7 +340,7 @@ class SubsetScore:
     @property
     def calibration(self) -> Calibration | None:
         """Header values and cells by confidence bucket, or None for no signal."""
-        if not self.confident:
+        if not self.has_confidence:
             return None
         return Calibration(
             header=bucketed(
@@ -354,7 +354,7 @@ class SubsetScore:
     @property
     def sweep(self) -> Sweep | None:
         """The gate beside a confidence edge over checked readings, or None."""
-        if not self.confident:
+        if not self.has_confidence:
             return None
         return sweep(
             [
@@ -438,14 +438,14 @@ def score_subset(
     it returned beside each reading; a run with none has no signal.
     """
     symbols = currency_symbols or {}
-    confident = confidence or {}
+    saved = confidence or {}
     documents = tuple(
         _score_document(
             dataset,
             document_id,
             predictions.get(document_id),
             symbols.get(document_id, {}),
-            confident.get(document_id, NO_CONFIDENCE),
+            saved.get(document_id, NO_CONFIDENCE),
         )
         for document_id in manifest.document_ids
     )
@@ -456,7 +456,7 @@ def score_subset(
         unpinned=tuple(
             document_id for document_id in predictions if document_id not in pinned
         ),
-        confident=bool(confident),
+        has_confidence=bool(saved),
     )
 
 

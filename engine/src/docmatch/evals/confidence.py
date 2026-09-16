@@ -136,7 +136,9 @@ def judge_cells(
     """Each predicted cell's distinct normalized values, judged on its paired row.
 
     An unpaired predicted row was scored against nothing, so none of its cells
-    is matched.
+    is matched. A cell holding several values, which Azure never returns, counts
+    each distinct one at the cell's single confidence, the unit per-cell
+    accuracy counts.
     """
     judged: list[Judged] = []
     for row in line_items.rows:
@@ -190,12 +192,24 @@ class SweepLine:
     confidence_false_alarms: int
 
 
+COUNTS = (
+    "gate_only",
+    "confidence_only",
+    "both",
+    "neither",
+    "gate_false_alarms",
+    "confidence_false_alarms",
+)
+"""The counts of a sweep line, by the name of the field each fills."""
+
+
 @dataclass(frozen=True)
 class Sweep:
     """One line per fixed edge, and the readings with an unconfident gated value."""
 
     lines: tuple[SweepLine, ...]
     unconfident: int
+    """Checked readings holding a gated value with no confidence, at any edge."""
 
 
 @dataclass(frozen=True)
@@ -212,29 +226,17 @@ def sweep(readings: Sequence[Checked]) -> Sweep:
     """The gate beside a confidence edge, at every edge from 0.1 to 0.9."""
     lines = []
     for edge in EDGES:
-        counts = dict.fromkeys(
-            ("gate", "confidence", "both", "neither", "gate alarm", "alarm"), 0
-        )
+        counts = dict.fromkeys(COUNTS, 0)
         for reading in readings:
             flagged = _flagged(reading.confidence, edge)
             if not reading.wrong:
-                counts["gate alarm"] += reading.failed
-                counts["alarm"] += flagged
+                counts["gate_false_alarms"] += reading.failed
+                counts["confidence_false_alarms"] += flagged
             elif reading.failed:
-                counts["both" if flagged else "gate"] += 1
+                counts["both" if flagged else "gate_only"] += 1
             else:
-                counts["confidence" if flagged else "neither"] += 1
-        lines.append(
-            SweepLine(
-                edge=edge,
-                gate_only=counts["gate"],
-                confidence_only=counts["confidence"],
-                both=counts["both"],
-                neither=counts["neither"],
-                gate_false_alarms=counts["gate alarm"],
-                confidence_false_alarms=counts["alarm"],
-            )
-        )
+                counts["confidence_only" if flagged else "neither"] += 1
+        lines.append(SweepLine(edge=edge, **counts))
     return Sweep(
         lines=tuple(lines),
         unconfident=sum(None in reading.confidence for reading in readings),
