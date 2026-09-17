@@ -245,12 +245,20 @@ row carries that premium.
 Header F1 sits between the other two rows at 0.588 (precision 0.601, recall
 0.576), with `vendor_tax_id` at 0.868 and `currency_code_amount_due` at 0.912
 with derived values, 0.693 as read. Line-item F1 is the lowest of the three at
-0.159. The counts point at the amount columns: `line_item_amount_gross` is
-right in 96 of 259 labeled cells and `line_item_amount_net` carries 162
-spurious values, so row totals the labels call gross were largely read as net,
-and a row with one wrong cell scores zero. That is a count, not a diagnosis,
-and the fix, if any, is its own measured change. Latency is the slowest of the
-three rows.
+0.159, and the cause is the column, not the table. The model finds rows better
+than Gemini does, 352 predicted against 353 labeled and the exact count on 79
+documents, but it writes a row's total as `line_item_amount_net`: 199 rows
+carry a net amount and no gross, and 148 of its 216 net values equal a value
+the labels call gross. A row with one wrong cell scores zero. Moving the net
+value into gross on rows with no gross, measured on a throwaway copy of the
+predictions and not applied, gives 0.329, so the column choice is about half
+the gap to Gemini's 0.374; a fix is its own measured change. Latency is the
+slowest of the three rows.
+
+One difference from the Gemini row is the provider's and not a choice: strict
+structured output requires every field of the schema in the answer, so the
+model writes an empty list or a null for each field it does not fill, where
+Gemini may leave the field out. Both read into the same `Invoice`.
 
 **The gate.** Two rules, each checked on a reading plus its derived values:
 dates sane (`date_issue` on or before `date_due`) and totals agree
