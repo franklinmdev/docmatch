@@ -24,9 +24,9 @@ All read 2026-09-16, against `openai` 3.14.1:
   parts of `input_tokens`.
 - The model page, https://developers.openai.com/api/docs/models/gpt-5.6-luna,
   lists one snapshot, `gpt-5.6-luna` itself, and reasoning effort `medium` by
-  default. With no dated snapshot to point at, whether a response's `model`
-  ever names something other than the alias is unverified until a run shows
-  one; it is recorded as the response names it either way.
+  default. On the row's run, 2026-09-16, every one of the 100 responses named
+  `gpt-5.6-luna` as its `model`, the alias and not a dated snapshot; it is
+  recorded as the response names it either way.
 - `client.responses.create` with `text.format` of type `json_schema` and
   `strict`, `input_text` and `input_image` parts, from
   https://developers.openai.com/api/docs/guides/structured-outputs and
