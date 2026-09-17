@@ -2,7 +2,7 @@
 
 import pytest
 
-from docmatch.extraction import azure, backends, gemini
+from docmatch.extraction import azure, backends, gemini, openai
 from docmatch.extraction.extractor import ExtractionError
 from docmatch.extraction.test_run import READING, FakeExtractor
 
@@ -39,9 +39,35 @@ def test_a_model_given_by_name_is_the_one_asked_for(
     assert built == ["gemini-3.5-flash-lite"]
 
 
-def test_a_backend_not_wired_yet_is_refused_by_name() -> None:
-    with pytest.raises(ExtractionError, match="the openai backend is not wired"):
-        backends.extractor("openai", None, long_edge=1600)
+def test_an_unknown_backend_is_refused_by_name() -> None:
+    with pytest.raises(ExtractionError, match="no backend named anthropic"):
+        backends.extractor("anthropic", None, long_edge=1600)
+
+
+def test_openai_reads_with_its_own_default_when_no_model_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built: dict[str, object] = {}
+    fake = FakeExtractor(answers=[READING])
+
+    def backend(model: str, long_edge: int) -> FakeExtractor:
+        built.update(model=model, long_edge=long_edge)
+        return fake
+
+    monkeypatch.setattr(openai, "extractor", backend)
+
+    assert backends.extractor("openai", None, long_edge=1200) is fake
+    assert built == {"model": "gpt-5.6-luna", "long_edge": 1200}
+
+
+def test_an_unpriced_openai_model_is_refused_before_a_client_is_made(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No key in the environment, so reaching the client would say so instead."""
+    monkeypatch.delenv(openai.KEY_VARIABLE, raising=False)
+
+    with pytest.raises(ExtractionError, match="no price is written down"):
+        backends.extractor("openai", "gpt-7-imaginary", long_edge=1600)
 
 
 def test_azure_reads_with_its_own_default_when_no_model_is_given(

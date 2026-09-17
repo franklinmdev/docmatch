@@ -1145,6 +1145,23 @@ def test_extract_reports_the_pages_a_per_page_backend_billed(tmp_path: Path) -> 
     assert "pages billed   3" in render_extract(tmp_path, run)
 
 
+def test_extract_reports_the_cached_input_tokens_a_backend_reported(
+    tmp_path: Path,
+) -> None:
+    run = a_run(
+        replace(
+            a_document("syn0001"),
+            usage=Usage(
+                input_tokens=1300, cached_input_tokens=1024, cache_write_tokens=276
+            ),
+        )
+    )
+
+    report = render_extract(tmp_path, run)
+    assert "cached input   1,024" in report
+    assert "cache writes   276" in report
+
+
 def test_extract_says_a_backend_that_reads_the_pdf_rendered_nothing(
     tmp_path: Path,
 ) -> None:
@@ -1172,14 +1189,12 @@ def test_extract_says_when_no_served_model_was_reported(tmp_path: Path) -> None:
     assert "served      none reported" in render_extract(tmp_path, run)
 
 
-@pytest.mark.parametrize("backend", ["openai"])
-def test_extract_refuses_a_backend_not_wired_yet_before_making_the_run_directory(
-    backend: str,
+def test_extract_on_openai_names_the_missing_key_before_making_the_run_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "not-a-real-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     out = tmp_path / "run"
 
     exit_code = main(
@@ -1190,12 +1205,12 @@ def test_extract_refuses_a_backend_not_wired_yet_before_making_the_run_directory
             "--data-dir",
             str(tmp_path),
             "--backend",
-            backend,
+            "openai",
         ]
     )
 
     assert exit_code == 1
-    assert f"the {backend} backend is not wired yet" in capsys.readouterr().err
+    assert "no $OPENAI_API_KEY in the environment" in capsys.readouterr().err
     assert not out.exists()
 
 

@@ -871,6 +871,8 @@ def render_extract(where: Path, extracted: Run) -> str:
             ("total", f"${extracted.cost:.4f}"),
             ("per document", f"${extracted.cost_per_document:.6f}"),
             ("input tokens", f"{tokens.input_tokens:,}"),
+            ("cached input", f"{tokens.cached_input_tokens:,}"),
+            ("cache writes", f"{tokens.cache_write_tokens:,}"),
             ("output tokens", f"{tokens.output_tokens:,}"),
             ("pages billed", f"{tokens.pages:,}"),
         ),

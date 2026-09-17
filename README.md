@@ -2,7 +2,7 @@
 
 **Document reconciliation engine.** docmatch extracts invoices and receipts with vision language models, validates them with deterministic gates, matches them against purchase orders and receiving records, routes exceptions to human review, and measures every change against a labeled benchmark in CI.
 
-> **Status:** phase 0 is done: its number is in the Benchmarks section with the commit that produced it. Phase 1, extraction, is next. The remaining tables fill in as phases complete, and a phase is not done until its number is here.
+> **Status:** phases 0 and 1 are done: their numbers are in the Benchmarks section with the commits that produced them, three extraction rows, the calibration table and the gate ablation. Phase 2, matching, is next. The remaining tables fill in as phases complete, and a phase is not done until its number is here.
 
 ## Why
 
@@ -57,7 +57,7 @@ Measurement before modeling.
 ### Phase 1. Extraction
 
 - Pydantic schemas where absence is explicit rather than guessed. A confidence rides beside each value only where a backend returns one natively; no model is asked to grade itself.
-- An `Extractor` interface with several backends: a cheap vision model, a second provider, a commercial prebuilt invoice model, an OCR-then-LLM path, and a local open-weight document model. See Extraction backends.
+- An `Extractor` interface with three benchmarked backends: `gemini-3.1-flash-lite`, Azure Document Intelligence `prebuilt-invoice`, and `gpt-5.6-luna`. Google Document AI, Claude, a Cloud Vision OCR-then-LLM path, and local Docling stay candidates. See Extraction backends.
 - Image preprocessing: orientation from metadata, downscale to a fixed long edge, no grayscale.
 - Deterministic validation gate: totals agree and dates are sane. Only rules the labels themselves pass belong in it; line-total reconciliation, tax arithmetic, and identifier checksums fail too often on the labels or apply to almost no documents. Confidence never gates acceptance on its own.
 - Bounded retries with per-document cost accounting.
@@ -134,6 +134,7 @@ Filled in as phases complete. Every row names the commit that produced it.
 |---|---|---|---|---|---|---|
 | `gemini-3.1-flash-lite`, pages at 1600 px | 0.615 | 0.374 | 0.915 of 47, eval at [`a125b0b`](https://github.com/franklinmdev/docmatch/commit/a125b0b) | $0.00203 | 5.2 s / 9.3 s | [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
 | Azure Document Intelligence `prebuilt-invoice`, API 2024-11-30, the PDF | 0.556 | 0.396 | 0.942 of 52 | $0.0112 | 7.9 s / 18.0 s | [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
+| `gpt-5.6-luna`, pages at 1600 px | 0.588 | 0.159 | 0.860 of 43 | $0.00344 | 16.7 s / 38.6 s | [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) |
 
 The two commands that produced the row, with DocILE's labels in `data/docile`
 and the pinned public copies in `data/ucsf`:
@@ -223,6 +224,45 @@ totals; `currency_code_amount_due`, which Azure has no field for, scores 0.902
 with derived values, and the same without the saved symbols, because the
 amounts Azure printed already carry them.
 
+**The `gpt-5.6-luna` row.** Produced at [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) by
+
+```bash
+uv run --env-file .env docmatch extract --backend openai --out data/runs/openai
+uv run docmatch eval --predictions data/runs/openai/predictions.json
+```
+
+All 100 documents were read, every one on its first attempt, over the
+Responses API with the Gemini row's renders, instruction and `Invoice` schema,
+sent as strict structured output, and reasoning effort left at the vendor's
+default. Every response named `gpt-5.6-luna` itself as its model, the alias and
+not a dated snapshot. The run cost $0.34 for 528,782 input and 178,424 output
+tokens, reasoning included in output. OpenAI caches prompts on its own and
+bills a token written to the cache at $0.25 per million, above the $0.20 input
+rate, and it reported 518,352 of the input tokens as cache writes and only
+10,130 as cache reads; cost is list price times those reported units, so the
+row carries that premium. The vendor's own usage page agrees: for this run and
+the two-document check before it, 102 requests and 538,918 input tokens, it
+billed $0.35 against the $0.3505 computed here, where the input rate alone
+would have come to $0.32.
+
+Header F1 sits between the other two rows at 0.588 (precision 0.601, recall
+0.576), with `vendor_tax_id` at 0.868 and `currency_code_amount_due` at 0.912
+with derived values, 0.693 as read. Line-item F1 is the lowest of the three at
+0.159, and the cause is the column, not the table. The model finds rows better
+than Gemini does, 352 predicted against 353 labeled and the exact count on 79
+documents, but it writes a row's total as `line_item_amount_net`: 199 rows
+carry a net amount and no gross, and 148 of its 216 net values equal a value
+the labels call gross. A row with one wrong cell scores zero. Moving the net
+value into gross on rows with no gross, measured on a throwaway copy of the
+predictions and not applied, gives 0.329, so the column choice is about half
+the gap to Gemini's 0.374; a fix is its own measured change. Latency is the
+slowest of the three rows.
+
+One difference from the Gemini row is the provider's and not a choice: strict
+structured output requires every field of the schema in the answer, so the
+model writes an empty list or a null for each field it does not fill, where
+Gemini may leave the field out. Both read into the same `Invoice`.
+
 **The gate.** Two rules, each checked on a reading plus its derived values:
 dates sane (`date_issue` on or before `date_due`) and totals agree
 (`amount_total_gross` within 0.01 of `amount_due`, not checked when the reading
@@ -246,14 +286,18 @@ returns one natively.
 |---|---|---|---|---|---|---|
 | `gemini-3.1-flash-lite` | 47 | 2 | 1 | 2 | no signal | [`a125b0b`](https://github.com/franklinmdev/docmatch/commit/a125b0b) |
 | Azure `prebuilt-invoice` | 52 | 1 | 3 | 2 | sweep below, eval at [`e0e0808`](https://github.com/franklinmdev/docmatch/commit/e0e0808) | [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
+| `gpt-5.6-luna` | 43 | 2 | 2 | 4 | no signal | [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) |
 
 Measured with the same eval command over the saved run above. Of the 4
 readings the gate failed, half were right: the labels themselves break totals
 agree on 6.5% of the UCSF documents it can check, and a correct reading of
 such a document fails it too. Only 3 of the 47 checked readings are wrong,
-so this row says little yet about what the gate is worth; the other two
-backends decide that. Azure's row points the same way: 4 of its 52 checked
-readings are wrong, and the gate caught 1 of them.
+so this row says little yet about what the gate is worth. Azure's row points
+the same way: 4 of its 52 checked readings are wrong, and the gate caught 1 of
+them. `gpt-5.6-luna` has 4 wrong of 43 checked, and the gate caught half of them, at
+4 false alarms. Over the three rows the gate caught 5 of 11 wrong readings and
+failed 8 right ones: it finds errors, and on these documents it fails more
+right readings than the wrong ones it catches.
 
 **The confidence sweep, Azure.** The same 52 checked readings, re-scored from
 the saved run by the eval at [`e0e0808`](https://github.com/franklinmdev/docmatch/commit/e0e0808). At each edge a reading is flagged by
@@ -309,8 +353,8 @@ Azure `prebuilt-invoice`, from the saved run above, eval at [`e0e0808`](https://
 | [0.9, 1.0] | 464 | 0.761 | 627 | 0.730 |
 | no confidence | 0 | | 0 | |
 
-`gemini-3.1-flash-lite`: no signal, since no vision LLM is asked for a
-confidence.
+`gemini-3.1-flash-lite` and `gpt-5.6-luna`: no signal, since no vision LLM is
+asked for a confidence.
 
 Azure's header confidence is not calibrated. A value at 0.8 to 0.9 is right a
 third of the time, less often than one at 0.3 to 0.4, and that bucket holds 280
@@ -558,14 +602,15 @@ uv run --env-file .env docmatch extract --out data/runs/gemini
 uv run docmatch eval --predictions data/runs/gemini/predictions.json
 ```
 
-`--backend` chooses the vendor, `gemini` by default; `openai` is named and
-refused until its backend is wired. `azure` sends each public PDF unchanged to
+`--backend` chooses the vendor, `gemini` by default. `openai` renders pages like
+`gemini` and needs `OPENAI_API_KEY` in `.env`. `azure` sends each public PDF unchanged to
 Document Intelligence and needs `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` and
 `AZURE_DOCUMENT_INTELLIGENCE_KEY` in `.env` for an S0 resource; the free F0 tier
 processes only the first two pages, and a document Azure processed fewer pages
 of than were sent fails at once. `--model` chooses the
 **requested model**, and each backend has its own default
-(`gemini-3.1-flash-lite` for Gemini, `prebuilt-invoice` for Azure) and its own
+(`gemini-3.1-flash-lite` for Gemini, `prebuilt-invoice` for Azure,
+`gpt-5.6-luna` for OpenAI) and its own
 price table in code, so a model
 with no written price is refused before any request. `run.json` records the
 requested model once and, on every document, the **served model** the vendor
@@ -642,7 +687,7 @@ The `Extractor` interface is the seam. Backends are compared, not chosen up fron
 |---|---|---|---|---|
 | `gemini-3.1-flash-lite` with structured output | vision LLM | $0.25 input, $1.50 output per million tokens, free tier available | cheap default, the baseline row | 2026-09-14 |
 | `gemini-2.5-flash-lite` with structured output | vision LLM | $0.10 input, $0.40 output per million tokens, free tier available | cheaper, and unusable here: see below | 2026-09-14 |
-| `gpt-5-nano` or `gpt-4o-mini` with structured output | vision LLM | $0.05 and $0.15 input, $0.40 and $0.60 output per million tokens | second provider | 2026-09-14 |
+| `gpt-5.6-luna` with strict structured output | vision LLM | $0.20 input, $0.02 cached input, $0.25 cache writes, $1.20 output per million tokens | second provider, the third row | 2026-09-16 |
 | Claude Haiku 4.5 or Sonnet 5 with structured output | vision LLM | $1 and $2 input, $5 and $10 output per million tokens | second provider | 2026-09-08 |
 | Azure Document Intelligence prebuilt-invoice | specialized document model | $10 per 1,000 pages on S0, pay as you go | commercial baseline, the second row | 2026-09-16 |
 | Google Document AI invoice parser | specialized document model | $0.10 per document of up to 10 pages, so $100 per 1,000 one-page invoices | commercial baseline, optional | 2026-09-14 |

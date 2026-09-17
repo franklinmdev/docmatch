@@ -6,13 +6,12 @@ never in an environment variable (#36), so swapping the model a row is measured
 on is a change to that default and a price entry beside it, and nothing here.
 A model with no written price is refused by the backend before any request.
 
-Gemini and Azure's prebuilt invoice model are wired. The OpenAI row is named so
-the command offers the three rows the benchmark will carry, and refused until
-its own module exists. Azure reads the PDF itself, so `long_edge` means nothing
-to it.
+Gemini, Azure's prebuilt invoice model and OpenAI are the three rows the
+benchmark carries. Azure reads the PDF itself, so `long_edge` means nothing to
+it.
 """
 
-from docmatch.extraction import azure, gemini
+from docmatch.extraction import azure, gemini, openai
 from docmatch.extraction.extractor import ExtractionError, Extractor
 
 BACKENDS = ("gemini", "azure", "openai")
@@ -27,8 +26,9 @@ def extractor(backend: str, model: str | None, *, long_edge: int) -> Extractor:
         return gemini.extractor(model or gemini.MODEL, long_edge=long_edge)
     if backend == "azure":
         return azure.extractor(model or azure.MODEL)
+    if backend == "openai":
+        return openai.extractor(model or openai.MODEL, long_edge=long_edge)
     raise ExtractionError(
-        f"the {backend} backend is not wired yet; gemini and azure are the "
-        "backends that read so far",
+        f"no backend named {backend}; the backends are {', '.join(BACKENDS)}",
         retryable=False,
     )

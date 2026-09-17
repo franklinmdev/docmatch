@@ -546,6 +546,30 @@ def test_records_the_pages_billed_per_document_and_for_the_run(
     assert [each["pages_billed"] for each in record["documents"]] == [2, 2]
 
 
+def test_records_cached_and_cache_write_tokens_per_document_and_for_the_run(
+    subset: Subset, tmp_path: Path
+) -> None:
+    """Cached input and cache writes have their own rates, so their own counts."""
+    extractor = FakeExtractor(
+        answers=[READING],
+        usage=Usage(
+            input_tokens=100,
+            cached_input_tokens=40,
+            cache_write_tokens=30,
+            output_tokens=50,
+        ),
+    )
+    path = tmp_path / "run.json"
+
+    write_record(done(extractor, subset), path)
+
+    record = json.loads(path.read_text())
+    assert record["cached_input_tokens"] == 80
+    assert [each["cached_input_tokens"] for each in record["documents"]] == [40, 40]
+    assert record["cache_write_tokens"] == 60
+    assert [each["cache_write_tokens"] for each in record["documents"]] == [30, 30]
+
+
 CONFIDENT = Confidence(
     fields={"vendor_name": (0.93,)},
     line_items=({"line_item_description": 0.71, "line_item_quantity": None},),
