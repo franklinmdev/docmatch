@@ -240,7 +240,10 @@ tokens, reasoning included in output. OpenAI caches prompts on its own and
 bills a token written to the cache at $0.25 per million, above the $0.20 input
 rate, and it reported 518,352 of the input tokens as cache writes and only
 10,130 as cache reads; cost is list price times those reported units, so the
-row carries that premium.
+row carries that premium. The vendor's own usage page agrees: for this run and
+the two-document check before it, 102 requests and 538,918 input tokens, it
+billed $0.35 against the $0.3505 computed here, where the input rate alone
+would have come to $0.32.
 
 Header F1 sits between the other two rows at 0.588 (precision 0.601, recall
 0.576), with `vendor_tax_id` at 0.868 and `currency_code_amount_due` at 0.912
