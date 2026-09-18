@@ -63,3 +63,11 @@ _Avoid_: billed cost, spend, price per document
 **Seed**:
 A labeled invoice that a purchase order and a receiving record are derived from, before any discrepancy is injected. The derived records copy each line as labeled; nothing missing from a line is filled in. A document with no labeled lines is never a seed.
 _Avoid_: base invoice, template, source invoice
+
+**Pairing**:
+Deciding which invoice line answers which purchase-order line, one to one, by how closely their codes and descriptions agree, with quantities and prices only breaking ties. Receiving-record lines name their purchase-order line, so they need no pairing.
+_Avoid_: line matching, alignment, reconciliation (on its own)
+
+**Unpaired line**:
+An invoice line or purchase-order line that pairing left without a partner. It is reported, never dropped.
+_Avoid_: orphan, unmatched line
