@@ -57,3 +57,9 @@ _Avoid_: degradation
 **Cost per document**:
 What reading one document costs at the vendor's list price for the units the vendor reported processing, tokens or pages, including attempts that failed. When a vendor that charges per page accepts an attempt but reports no pages, the pages sent are counted. Free tiers and what was actually billed play no part, so every backend's cost means the same thing.
 _Avoid_: billed cost, spend, price per document
+
+### Matching
+
+**Seed**:
+A labeled invoice that a purchase order and a receiving record are derived from, before any discrepancy is injected. The derived records copy each line as labeled; nothing missing from a line is filled in. A document with no labeled lines is never a seed.
+_Avoid_: base invoice, template, source invoice
