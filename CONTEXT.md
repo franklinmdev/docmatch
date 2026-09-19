@@ -87,3 +87,15 @@ _Avoid_: warning, info
 **Rounding drift**:
 A difference of a cent or so between an invoice amount and its purchase order, within the tolerance. It is never a discrepancy; reporting one counts against the matcher as a false positive.
 _Avoid_: small difference, penny variance
+
+**Case**:
+One seed with the purchase order, receiving record and invoice derived from it, either clean or carrying one to three injected discrepancies, never two on the same line. Cases are rebuilt from the labels on every run and never saved.
+_Avoid_: sample, example, test case
+
+**Finding**:
+A discrepancy type at a place: an invoice line, a purchase-order line for a missing line, or the header for a tax mismatch. A finding is right only when both its type and its place are; the right type on the wrong line is a miss and a false alarm.
+_Avoid_: detection, flag, alert
+
+**Hard negative**:
+A clean line built to tempt the matcher: rounding drift, a variance just inside the tolerance, or a price or quantity below the purchase order. Any finding on it is a false alarm.
+_Avoid_: near miss, decoy
