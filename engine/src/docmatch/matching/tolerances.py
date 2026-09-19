@@ -19,7 +19,8 @@ The worked example: purchase order 35.30, so the margin is 0.353. An invoice
 at 35.31 or 35.65 passes; 35.66 is a price variance.
 
 Quantities are exact, since 17,477 of 17,975 labeled quantities are whole
-numbers and seeds copy quantities rather than compute them (#70).
+numbers and seeds copy quantities rather than compute them (#70): the
+quantity tolerance is a percent and a cent of zero.
 
 Bands
 -----
@@ -29,6 +30,9 @@ most 2 percent of the purchase order's value (35.66 to 36.00 in the example),
 and far when it is past 2 percent and at most 50 percent (up to 52.95). The
 generator draws each half and half, so a headline recall is that mix and the
 report splits it (#66, #70).
+
+On quantities, which have no percent to scale with, near is exactly one unit
+over and far is two units or more, up to double (#70).
 
 Pairing floors
 --------------
@@ -53,6 +57,11 @@ class Tolerance:
     cent: Decimal
     """The overage must clear this too, whatever the percent comes to."""
 
+    @property
+    def exact(self) -> bool:
+        """Whether any overage at all exceeds it."""
+        return not self.percent and not self.cent
+
     def margin(self, po_value: Decimal) -> Decimal:
         """The percent of this purchase-order value, in money."""
         return self.percent * po_value
@@ -65,6 +74,10 @@ class Tolerance:
 
 PRICE = Tolerance(percent=Decimal("0.01"), cent=Decimal("0.01"))
 """On a line's unit price, else its amount."""
+
+QUANTITY = Tolerance(percent=Decimal(0), cent=Decimal(0))
+"""On a line's quantity, against the receipt and the purchase order: exact,
+so any overage at all is over."""
 
 TAX = Tolerance(percent=Decimal("0.01"), cent=Decimal("0.01"))
 """On the header's total tax: the same shape as price, a constant of its own so
@@ -90,6 +103,25 @@ def band(
     if overage <= NEAR_PERCENT * po_value:
         return "near"
     if overage <= FAR_PERCENT * po_value:
+        return "far"
+    return None
+
+
+NEAR_UNITS = Decimal(1)
+"""A quantity overage of exactly this many units is near the edge."""
+
+FAR_UNITS = Decimal(2)
+"""A quantity overage of at least this many units is far, up to double."""
+
+
+def quantity_band(invoice_value: Decimal, lowered_value: Decimal) -> Band | None:
+    """Which band a quantity overage falls in, or None when there is none or
+    it is in neither band: a fraction of a unit, or past double, where nothing
+    is generated."""
+    overage = invoice_value - lowered_value
+    if overage == NEAR_UNITS:
+        return "near"
+    if overage >= FAR_UNITS and invoice_value <= 2 * lowered_value:
         return "far"
     return None
 
