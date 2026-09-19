@@ -508,7 +508,8 @@ def test_a_quantity_the_receipt_lacks_is_not_compared() -> None:
 
     assert result.findings == ()
     assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
-        ("quantity", ("12",), "absent")
+        ("quantity", ("12",), "absent"),
+        ("quantity", ("10",), "absent"),
     ]
 
 
@@ -520,6 +521,25 @@ def test_a_short_ship_needs_no_po_quantity_and_the_over_ship_is_not_compared() -
     assert [each.type for each in result.findings] == ["short-ship"]
     assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
         ("quantity", ("12",), "absent")
+    ]
+
+
+def test_a_po_quantity_left_without_its_partners_is_listed_absent() -> None:
+    """The over-ship needed it, and neither the invoice nor the receipt carries
+    one to compare it with."""
+    result = shipped((), "5", ())
+
+    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+        ("quantity", ("5",), "absent")
+    ]
+
+
+def test_every_quantity_an_invoice_without_one_leaves_is_listed_absent() -> None:
+    result = shipped((), "5", "5")
+
+    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+        ("quantity", ("5",), "absent"),
+        ("quantity", ("5",), "absent"),
     ]
 
 

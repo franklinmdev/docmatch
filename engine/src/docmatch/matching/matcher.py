@@ -481,6 +481,7 @@ def _quantity_findings(
     place = Place("po line", pairing.po_line)
     compared = _comparable(place, "quantity", (invoice, received), not_compared)
     if compared is None:
+        _po_quantity_not_compared(place, invoice, po, received, not_compared)
         return []
     invoice_cell, receipt_cell = compared
 
@@ -513,6 +514,26 @@ def _quantity_findings(
         ):
             findings.append(found("over-ship", ordered))
     return findings
+
+
+def _po_quantity_not_compared(
+    place: Place,
+    invoice: FieldValues,
+    po: FieldValues,
+    received: FieldValues,
+    not_compared: list[NotCompared],
+) -> None:
+    """List the purchase order's quantity when the over-ship could not reach
+    it, the way `_comparable` lists a side: absent when the invoice or the
+    receipt lacks one, unreadable when only its own text is at fault."""
+    po_cell = read_cell(po, "quantity")
+    if po_cell is None:
+        return
+    partners = (read_cell(invoice, "quantity"), read_cell(received, "quantity"))
+    if None in partners:
+        not_compared.append(NotCompared(place, "quantity", po_cell.texts, "absent"))
+    elif po_cell.numbers is None:
+        not_compared.append(NotCompared(place, "quantity", po_cell.texts, "unreadable"))
 
 
 @dataclass(frozen=True)
