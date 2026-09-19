@@ -10,10 +10,16 @@ from decimal import Decimal
 
 import pytest
 
-from docmatch.matching.generator import Case, GeneratorError, Seed, generate
-from docmatch.matching.matcher import Place
+from docmatch.matching.generator import (
+    Case,
+    GeneratorError,
+    Seed,
+    documents_carrying,
+    generate,
+)
+from docmatch.matching.matcher import DiscrepancyType, Place
 from docmatch.matching.records import Cell, Record, cell_values
-from docmatch.matching.tolerances import PRICE, band
+from docmatch.matching.tolerances import PRICE, TAX, band
 from docmatch.metrics.normalization import read_number
 
 FieldValuesDict = dict[str, tuple[str, ...]]
@@ -52,14 +58,16 @@ NO_LINES = seed("no-lines", vendor_name="Pinefield Catering")
 POOL = (PRICED, AMOUNTS, NO_MONEY, NO_LINES)
 
 
-def injected(cases: Sequence[Case]) -> list[Case]:
-    return [case for case in cases if case.truth]
+def injected(
+    cases: Sequence[Case], type_: DiscrepancyType = "price variance"
+) -> list[Case]:
+    return [case for case in cases if any(each.type == type_ for each in case.truth)]
 
 
 def test_the_invoice_is_the_seed_in_every_case() -> None:
     cases = generate(POOL, seed=1, clean=4, per_type=4)
 
-    assert len(cases) == 8
+    assert len(cases) == 12  # 4 clean, 4 price variance, 4 tax mismatch
     by_id = {each.document_id: each.invoice for each in POOL}
     assert all(case.invoice == by_id[case.document_id] for case in cases)
 
@@ -197,3 +205,55 @@ def test_a_pool_whose_values_cannot_reach_a_band_is_an_error() -> None:
 
     with pytest.raises(GeneratorError, match="near price variance"):
         generate((tiny,), seed=1, clean=0, per_type=1)
+
+
+# Tax mismatch
+
+
+def test_a_tax_mismatch_lowers_the_po_header_tax_and_nothing_else() -> None:
+    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6), "tax mismatch")
+
+    assert len(cases) == 6
+    for case in cases:
+        (truth,) = case.truth
+        assert truth.place == Place("header")
+        assert case.purchase_order.lines == PRICED.invoice.lines
+        header = dict(case.purchase_order.header)
+        lowered = read_number(header.pop("amount_total_tax")[0])
+        seeded = dict(PRICED.invoice.header)
+        assert lowered is not None
+        assert band(TAX, Decimal(seeded.pop("amount_total_tax")[0]), lowered) == (
+            truth.band
+        )
+        assert header == seeded
+
+
+def test_tax_mismatches_draw_near_and_far_half_and_half() -> None:
+    cases = injected(generate(POOL, seed=1, clean=0, per_type=10), "tax mismatch")
+
+    assert Counter(truth.band for case in cases for truth in case.truth) == {
+        "near": 5,
+        "far": 5,
+    }
+
+
+def test_only_seeds_labeling_a_header_tax_carry_a_tax_mismatch() -> None:
+    cases = injected(generate(POOL, seed=1, clean=0, per_type=4), "tax mismatch")
+
+    assert {case.document_id for case in cases} == {"priced"}
+    assert documents_carrying(POOL, "tax mismatch") == 1
+
+
+@pytest.mark.parametrize("tax", ["0.00", "n/a"])
+def test_a_header_tax_that_is_zero_or_unreadable_is_not_eligible(tax: str) -> None:
+    untaxed = seed(
+        "untaxed",
+        line(description="Hex key set", amount_gross="45.00"),
+        amount_total_tax=tax,
+    )
+
+    assert documents_carrying((untaxed,), "tax mismatch") == 0
+    assert (
+        injected(generate((untaxed,), seed=1, clean=0, per_type=2), "tax mismatch")
+        == []
+    )

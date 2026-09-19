@@ -66,6 +66,10 @@ class Tolerance:
 PRICE = Tolerance(percent=Decimal("0.01"), cent=Decimal("0.01"))
 """On a line's unit price, else its amount."""
 
+TAX = Tolerance(percent=Decimal("0.01"), cent=Decimal("0.01"))
+"""On the header's total tax: the same shape as price, a constant of its own so
+a finding names which one it applied (#65, #70)."""
+
 NEAR_PERCENT = Decimal("0.02")
 """An overage past the tolerance and at most this share of the PO value is near."""
 

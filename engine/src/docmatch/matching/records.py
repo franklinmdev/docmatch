@@ -11,6 +11,9 @@ needs pairing (#63).
 Cells
 -----
 
+The header has one cell, the tax: header `amount_total_tax` only, since no
+fixed-subset row labels a line tax (#65).
+
 A rule compares one cell per line, and a cell may be labeled under two
 fieldtypes: unit price is `line_item_unit_price_gross`, else `_net`; amount is
 `line_item_amount_gross`, else `_net`. Gross-else-net is the basis the
@@ -62,8 +65,9 @@ def labeled_record(annotation: Annotation) -> Record:
     )
 
 
-Cell = Literal["unit price", "amount", "quantity", "unit", "code", "description"]
-"""The cells a line is compared or paired on, named apart from their fieldtypes."""
+Cell = Literal["unit price", "amount", "quantity", "unit", "code", "description", "tax"]
+"""The cells a line is compared or paired on, and the header's tax, named apart
+from their fieldtypes."""
 
 CELL_FIELDTYPES: dict[Cell, tuple[str, ...]] = {
     "unit price": ("line_item_unit_price_gross", "line_item_unit_price_net"),
@@ -72,6 +76,7 @@ CELL_FIELDTYPES: dict[Cell, tuple[str, ...]] = {
     "unit": ("line_item_units_of_measure",),
     "code": ("line_item_code",),
     "description": ("line_item_description",),
+    "tax": ("amount_total_tax",),
 }
 """Each cell's fieldtypes, first one carried wins."""
 

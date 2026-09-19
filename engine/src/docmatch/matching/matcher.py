@@ -47,6 +47,10 @@ combination least favourable to the buyer being clean, the highest invoice
 value against the lowest purchase-order value, so a reading that disagrees
 with itself cannot hide an overage.
 
+Tax mismatch: the invoice's header `amount_total_tax` is above the purchase
+order's by more than its tolerance, the same shape as price, and is placed
+on the header (#65, #70, #76). There is no line tax.
+
 A cell one side carries and the other does not, or one the normalizer cannot
 read as a number, is not compared: it is listed with its reason, the rule
 falls back the way it does for an absent cell, unit price then amount, and
@@ -82,6 +86,7 @@ from docmatch.matching.tolerances import (
     CODE_FLOOR,
     DESCRIPTION_FLOOR,
     PRICE,
+    TAX,
     Tolerance,
 )
 from docmatch.metrics.fields import FieldValues
@@ -234,6 +239,9 @@ def match(
         )
         if finding is not None:
             findings.append(finding)
+    tax = _tax_mismatch(invoice.header, purchase_order.header, not_compared)
+    if tax is not None:
+        findings.append(tax)
     return MatchResult(
         pairings=paired.pairings,
         unpaired_invoice=paired.unpaired_invoice,
@@ -424,6 +432,29 @@ def _price_variance(
             )
         return None
     return None
+
+
+def _tax_mismatch(
+    invoice: FieldValues, po: FieldValues, not_compared: list[NotCompared]
+) -> Finding | None:
+    """Overbilled on the header's total tax; None when clean or not comparable."""
+    place = Place("header")
+    compared = _comparable(place, "tax", invoice, po, not_compared)
+    if compared is None:
+        return None
+    invoice_cell, po_cell = compared
+    highest, lowest = max(invoice_cell.numbers), min(po_cell.numbers)
+    if not TAX.exceeded(highest, lowest):
+        return None
+    return Finding(
+        type="tax mismatch",
+        place=place,
+        cell="tax",
+        invoice=invoice_cell.texts,
+        purchase_order=po_cell.texts,
+        margin=TAX.margin(lowest),
+        tolerance=TAX,
+    )
 
 
 @dataclass(frozen=True)

@@ -21,7 +21,7 @@ from docmatch.matching.matcher import (
     match,
 )
 from docmatch.matching.records import ReceivingRecord, Record
-from docmatch.matching.tolerances import PRICE
+from docmatch.matching.tolerances import PRICE, TAX
 
 FieldValuesDict = dict[str, tuple[str, ...]]
 
@@ -195,6 +195,101 @@ def test_listed_values_fire_on_the_combination_least_favourable_to_the_buyer() -
     po_disagrees = one_line("35.66", ["36.00", "35.30"])
     assert [each.purchase_order for each in po_disagrees.findings] == [
         ("36.00", "35.30")
+    ]
+
+
+# Tax mismatch
+
+
+def taxed(invoice_tax: str | None, po_tax: str | None) -> MatchResult:
+    """One line alike on both sides, so only the header can differ."""
+    item = line(description="Torque wrench", unit_price_gross="35.30")
+    return matched(
+        record(
+            item, **({} if invoice_tax is None else {"amount_total_tax": invoice_tax})
+        ),
+        record(item, **({} if po_tax is None else {"amount_total_tax": po_tax})),
+    )
+
+
+@pytest.mark.parametrize("invoice_tax", ["35.31", "35.65", "35.30", "20.00"])
+def test_a_header_tax_within_the_tolerance_or_below_is_not_a_finding(
+    invoice_tax: str,
+) -> None:
+    assert taxed(invoice_tax, "35.30").findings == ()
+
+
+def test_a_header_tax_past_the_tolerance_is_a_tax_mismatch_on_the_header() -> None:
+    result = taxed("35.66", "35.30")
+
+    assert result.findings == (
+        Finding(
+            type="tax mismatch",
+            place=Place("header"),
+            cell="tax",
+            invoice=("35.66",),
+            purchase_order=("35.30",),
+            margin=Decimal("0.353"),
+            tolerance=TAX,
+        ),
+    )
+    assert result.verdict == "held"
+
+
+def test_a_tax_mismatch_explains_itself_on_the_header() -> None:
+    (finding,) = taxed("35.66", "35.30").findings
+
+    assert explain(finding) == (
+        'tax mismatch, header, tax, invoice "35.66" vs PO "35.30", '
+        "margin 0.353 (1 percent of 35.30, above 0.01)"
+    )
+
+
+def test_the_cent_floor_holds_on_a_small_tax() -> None:
+    assert taxed("0.51", "0.50").findings == ()
+    assert [each.type for each in taxed("0.52", "0.50").findings] == ["tax mismatch"]
+
+
+def test_a_tax_one_side_lacks_is_listed_on_the_header_as_absent() -> None:
+    result = taxed("35.66", None)
+
+    assert result.findings == ()
+    assert [
+        (each.place, each.cell, each.text, each.reason) for each in result.not_compared
+    ] == [(Place("header"), "tax", ("35.66",), "absent")]
+
+
+def test_an_unreadable_tax_is_listed_and_not_compared() -> None:
+    result = taxed("n/a", "35.30")
+
+    assert result.findings == ()
+    assert [(each.place, each.reason) for each in result.not_compared] == [
+        (Place("header"), "unreadable")
+    ]
+
+
+def test_no_tax_on_either_side_lists_nothing() -> None:
+    result = taxed(None, None)
+
+    assert result.findings == ()
+    assert result.not_compared == ()
+
+
+def test_a_tax_mismatch_is_found_beside_a_price_variance() -> None:
+    result = matched(
+        record(
+            line(description="Torque wrench", unit_price_gross="35.66"),
+            amount_total_tax="35.66",
+        ),
+        record(
+            line(description="Torque wrench", unit_price_gross="35.30"),
+            amount_total_tax="35.30",
+        ),
+    )
+
+    assert [(each.type, each.place) for each in result.findings] == [
+        ("price variance", Place("po line", 0)),
+        ("tax mismatch", Place("header")),
     ]
 
 
