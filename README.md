@@ -879,6 +879,7 @@ docmatch/
   apps/review/         Next.js review inbox, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
   docs/                decision records
+  scripts/             the markdown-location check CI runs
   .github/workflows/   CI: ruff, mypy and pytest on every push
 ```
 
@@ -889,7 +890,7 @@ of its own, since the command is the test.
 
 ## Contributing
 
-Early days. Open an issue before a pull request so the phase plan stays intact.
+Early days. Open an issue before a pull request so the phase plan stays intact. See [CONTRIBUTING.md](CONTRIBUTING.md) for where markdown goes.
 
 ## License
 
