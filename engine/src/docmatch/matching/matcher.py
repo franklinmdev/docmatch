@@ -33,6 +33,17 @@ that identity decides and values only break ties (#63):
   nothing to say they are the same item.
 - A pair worth nothing is no pair, and both lines are reported unpaired with
   their best candidate and why it was not taken.
+- A line that carries none of the cells pairing reads, a row labeled with
+  only a date or a position, is not an item: it takes no part in pairing,
+  is nobody's candidate, and is listed as not compared rather than reported
+  unpaired, the way a rule with nothing comparable finds nothing (#76).
+
+Every unpaired line is a finding, never dropped (#63): an unpaired invoice
+line is an extra line, billed and never ordered, placed on the invoice line;
+an unpaired purchase-order line is a missing line, ordered and not billed,
+placed on the purchase-order line (#65, #76). Each carries its closest
+candidate on the other side, that candidate's scores per cell and the reason
+it was not taken, and no full score matrix.
 
 Receipt lines name their purchase-order line, so they need no pairing: a
 paired invoice line is compared with the receipt line that names its
@@ -77,7 +88,7 @@ approving belongs to the Phase 4 state machine.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Literal, get_args
 
@@ -117,6 +128,12 @@ TYPES: tuple[DiscrepancyType, ...] = get_args(DiscrepancyType)
 
 VALUE_CELLS: tuple[Cell, ...] = ("quantity", "unit price", "amount")
 """The cells pairing counts agreement on, one each, to break identity ties."""
+
+IDENTITY_CELLS: tuple[Cell, ...] = ("code", "description")
+"""The cells identity is graded on, each against its floor."""
+
+PAIRING_CELLS: tuple[Cell, ...] = (*IDENTITY_CELLS, *VALUE_CELLS)
+"""Every cell pairing reads: identity, then the values that break its ties."""
 
 Severity = Literal["hold", "note"]
 SEVERITY: dict[DiscrepancyType, Severity] = {
@@ -208,7 +225,25 @@ class Finding:
         return SEVERITY[self.type]
 
 
-NotComparedReason = Literal["unreadable", "absent"]
+NotComparedReason = Literal["unreadable", "absent", "nothing to pair on"]
+
+
+UnpairedType = Literal["extra line", "missing line"]
+
+
+@dataclass(frozen=True)
+class UnpairedFinding:
+    """A line pairing left without a partner, as a finding: an extra line on
+    the invoice line, a missing line on the purchase-order line."""
+
+    type: UnpairedType
+    place: Place
+    candidate: Candidate | None
+    """The closest line on the other side, or None when it has no lines."""
+
+    @property
+    def severity(self) -> Severity:
+        return SEVERITY[self.type]
 
 
 @dataclass(frozen=True)
@@ -216,7 +251,8 @@ class NotCompared:
     """A cell a rule could not compare, and why; outside score and verdict."""
 
     place: Place
-    cell: Cell
+    cell: Cell | None
+    """None when the whole line was not compared, having nothing to pair on."""
     text: tuple[str, ...]
     """The texts of the side that carried it, or that could not be read."""
     reason: NotComparedReason
@@ -227,10 +263,28 @@ class MatchResult:
     """What matching says about one case."""
 
     pairings: tuple[Pairing, ...]
-    unpaired_invoice: tuple[Unpaired, ...]
-    unpaired_po: tuple[Unpaired, ...]
-    findings: tuple[Finding, ...]
+    findings: tuple[Finding | UnpairedFinding, ...]
+    """Value findings on paired lines, then extra lines, then missing lines."""
     not_compared: tuple[NotCompared, ...]
+
+    @property
+    def unpaired_invoice(self) -> tuple[Unpaired, ...]:
+        """The invoice lines pairing left without a partner."""
+        return self._unpaired("extra line")
+
+    @property
+    def unpaired_po(self) -> tuple[Unpaired, ...]:
+        """The purchase-order lines pairing left without a partner."""
+        return self._unpaired("missing line")
+
+    def _unpaired(self, type_: UnpairedType) -> tuple[Unpaired, ...]:
+        return tuple(
+            Unpaired(each.place.line, each.candidate)
+            for each in self.findings
+            if isinstance(each, UnpairedFinding)
+            and each.type == type_
+            and each.place.line is not None
+        )
 
     @property
     def verdict(self) -> Verdict:
@@ -244,8 +298,11 @@ def match(
 ) -> MatchResult:
     """One case matched: pairings, findings, what was not compared, verdict."""
     paired = _pair(invoice.lines, purchase_order.lines)
-    findings: list[Finding] = []
-    not_compared: list[NotCompared] = []
+    findings: list[Finding | UnpairedFinding] = []
+    not_compared = [
+        *_nothing_to_pair_on("invoice line", invoice.lines),
+        *_nothing_to_pair_on("po line", purchase_order.lines),
+    ]
     for pairing in paired.pairings:
         invoice_line = invoice.lines[pairing.invoice_line]
         po_line = purchase_order.lines[pairing.po_line]
@@ -259,19 +316,27 @@ def match(
             receipt.against(pairing.po_line),
             not_compared,
         )
+    findings += [
+        UnpairedFinding("extra line", Place("invoice line", each.line), each.candidate)
+        for each in paired.unpaired_invoice
+    ]
+    findings += [
+        UnpairedFinding("missing line", Place("po line", each.line), each.candidate)
+        for each in paired.unpaired_po
+    ]
     return MatchResult(
         pairings=paired.pairings,
-        unpaired_invoice=paired.unpaired_invoice,
-        unpaired_po=paired.unpaired_po,
         findings=tuple(findings),
         not_compared=tuple(not_compared),
     )
 
 
-def explain(finding: Finding) -> str:
-    """One finding as a reader sees it, quoting the values and the constant."""
-    kind = finding.place.kind.replace("po", "PO")
-    place = kind if finding.place.line is None else f"{kind} {finding.place.line}"
+def explain(finding: Finding | UnpairedFinding) -> str:
+    """One finding as a reader sees it: the values and the constant it
+    applied, or for an unpaired line, its closest candidate and why not."""
+    place = _place(finding.place)
+    if isinstance(finding, UnpairedFinding):
+        return f"{finding.type}, {place}, {_why_unpaired(finding)}"
     billed = [f"invoice {_quoted(finding.invoice)}"]
     if finding.purchase_order:
         if finding.receipt:
@@ -280,8 +345,7 @@ def explain(finding: Finding) -> str:
     else:
         against = f"receipt {_quoted(finding.receipt)}"
     compared = (
-        f"{finding.type}, {place}, {finding.cell}, "
-        f"{' and '.join(billed)} vs {against}"
+        f"{finding.type}, {place}, {finding.cell}, {' and '.join(billed)} vs {against}"
     )
     if finding.tolerance.exact:
         return f"{compared}, compared exactly"
@@ -295,6 +359,26 @@ def explain(finding: Finding) -> str:
 
 def _quoted(texts: Sequence[str]) -> str:
     return ", ".join(f'"{text}"' for text in texts)
+
+
+def _place(place: Place) -> str:
+    kind = place.kind.replace("po", "PO")
+    return kind if place.line is None else f"{kind} {place.line}"
+
+
+def _why_unpaired(finding: UnpairedFinding) -> str:
+    other = "PO" if finding.type == "extra line" else "invoice"
+    candidate = finding.candidate
+    if candidate is None:
+        return f"the {other} has no lines"
+    scores = ", ".join(
+        f"{cell}: no {cell}" if score is None else f"{cell} {score:.3f}"
+        for cell, score in (
+            ("code", candidate.code),
+            ("description", candidate.description),
+        )
+    )
+    return f"closest {other} line {candidate.line}, {scores}, {candidate.reason}"
 
 
 # Pairing
@@ -346,7 +430,56 @@ class _Paired:
     unpaired_po: tuple[Unpaired, ...]
 
 
+def _nothing_to_pair_on(
+    kind: Literal["invoice line", "po line"], lines: Sequence[FieldValues]
+) -> list[NotCompared]:
+    """The lines pairing leaves out, as not compared."""
+    return [
+        NotCompared(Place(kind, position), None, (), "nothing to pair on")
+        for position, line in enumerate(lines)
+        if not pairable(line)
+    ]
+
+
+def pairable(line: FieldValues) -> bool:
+    """Whether the line carries any cell pairing reads; one that does not is
+    left out of pairing."""
+    return any(cell_values(line, cell) is not None for cell in PAIRING_CELLS)
+
+
 def _pair(invoice: Sequence[FieldValues], po: Sequence[FieldValues]) -> _Paired:
+    """Pair the lines that carry a pairing cell, and name them by their
+    position in the whole record."""
+    rows = [position for position, line in enumerate(invoice) if pairable(line)]
+    columns = [position for position, line in enumerate(po) if pairable(line)]
+    paired = _pair_items(
+        [invoice[each] for each in rows], [po[each] for each in columns]
+    )
+    return _Paired(
+        tuple(
+            replace(
+                each,
+                invoice_line=rows[each.invoice_line],
+                po_line=columns[each.po_line],
+            )
+            for each in paired.pairings
+        ),
+        tuple(_renamed(each, rows, columns) for each in paired.unpaired_invoice),
+        tuple(_renamed(each, columns, rows) for each in paired.unpaired_po),
+    )
+
+
+def _renamed(unpaired: Unpaired, own: list[int], other: list[int]) -> Unpaired:
+    """An unpaired line and its candidate named by their positions in the
+    whole records, `own` and `other` mapping the pairable lines back."""
+    candidate = unpaired.candidate
+    return Unpaired(
+        own[unpaired.line],
+        None if candidate is None else replace(candidate, line=other[candidate.line]),
+    )
+
+
+def _pair_items(invoice: Sequence[FieldValues], po: Sequence[FieldValues]) -> _Paired:
     compared = [[_compare(one, other) for other in po] for one in invoice]
     # Larger than every value in the table, so no amount of value agreement
     # buys a thousandth of identity.

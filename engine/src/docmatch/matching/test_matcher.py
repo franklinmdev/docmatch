@@ -14,9 +14,11 @@ from docmatch.matching.matcher import (
     Candidate,
     Finding,
     MatchResult,
+    NotCompared,
     Pairing,
     Place,
     Unpaired,
+    UnpairedFinding,
     explain,
     match,
 )
@@ -45,6 +47,11 @@ NO_RECEIPT = ReceivingRecord(lines=())
 
 def matched(invoice: Record, purchase_order: Record) -> MatchResult:
     return match(invoice, purchase_order, NO_RECEIPT)
+
+
+def compared(result: MatchResult) -> list[Finding]:
+    """The findings that compared a value, leaving out unpaired lines."""
+    return [each for each in result.findings if isinstance(each, Finding)]
 
 
 def one_line(
@@ -99,7 +106,7 @@ def test_billing_below_the_purchase_order_never_fires() -> None:
 def test_the_cent_floor_holds_on_values_under_one() -> None:
     """1 percent of 0.50 is half a cent, so the cent is what the overage must clear."""
     assert one_line("0.51", "0.50").findings == ()
-    assert [each.cell for each in one_line("0.52", "0.50").findings] == ["unit price"]
+    assert [each.cell for each in compared(one_line("0.52", "0.50"))] == ["unit price"]
 
 
 def test_price_variance_falls_to_the_amount_when_either_side_lacks_a_unit_price() -> (
@@ -117,7 +124,7 @@ def test_price_variance_falls_to_the_amount_when_either_side_lacks_a_unit_price(
     )
 
     assert [
-        (each.cell, each.invoice, each.purchase_order) for each in result.findings
+        (each.cell, each.invoice, each.purchase_order) for each in compared(result)
     ] == [("amount", ("46.00",), ("45.00",))]
     assert [(each.cell, each.reason) for each in result.not_compared] == [
         ("unit price", "absent")
@@ -140,7 +147,7 @@ def test_price_variance_falls_to_the_amount_when_a_unit_price_is_unreadable() ->
         ),
     )
 
-    assert [each.cell for each in result.findings] == ["amount"]
+    assert [each.cell for each in compared(result)] == ["amount"]
     assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
         ("unit price", ("n/a",), "unreadable")
     ]
@@ -160,7 +167,7 @@ def test_a_cell_one_side_lacks_is_listed_once_whatever_the_other_side_says() -> 
     assert [(each.cell, each.reason) for each in result.not_compared] == [
         ("unit price", "absent")
     ]
-    assert [each.cell for each in result.findings] == ["amount"]
+    assert [each.cell for each in compared(result)] == ["amount"]
 
 
 def test_a_net_column_is_compared_when_there_is_no_gross_one() -> None:
@@ -169,7 +176,7 @@ def test_a_net_column_is_compared_when_there_is_no_gross_one() -> None:
         record(line(description="Hex key set", unit_price_gross="45.00")),
     )
 
-    assert [each.cell for each in result.findings] == ["unit price"]
+    assert [each.cell for each in compared(result)] == ["unit price"]
 
 
 def test_no_finding_when_nothing_on_the_line_is_comparable() -> None:
@@ -190,10 +197,12 @@ def test_a_comparison_within_the_tolerance_lists_nothing_as_not_compared() -> No
 def test_listed_values_fire_on_the_combination_least_favourable_to_the_buyer() -> None:
     """The highest invoice value against the lowest PO value, as the gate does."""
     invoice_disagrees = one_line(["35.30", "35.66"], "35.30")
-    assert [each.invoice for each in invoice_disagrees.findings] == [("35.30", "35.66")]
+    assert [each.invoice for each in compared(invoice_disagrees)] == [
+        ("35.30", "35.66")
+    ]
 
     po_disagrees = one_line("35.66", ["36.00", "35.30"])
-    assert [each.purchase_order for each in po_disagrees.findings] == [
+    assert [each.purchase_order for each in compared(po_disagrees)] == [
         ("36.00", "35.30")
     ]
 
@@ -431,12 +440,8 @@ def test_quantities_are_compared_exactly() -> None:
     ]
 
 
-def test_billing_above_the_receipt_alone_is_a_short_ship_and_not_an_over_ship() -> (
-    None
-):
-    assert [each.type for each in shipped("12", "10", "10").findings] == [
-        "short-ship"
-    ]
+def test_billing_above_the_receipt_alone_is_a_short_ship_and_not_an_over_ship() -> None:
+    assert [each.type for each in shipped("12", "10", "10").findings] == ["short-ship"]
 
 
 def test_listed_quantities_fire_on_the_combination_least_favourable_to_the_buyer() -> (
@@ -459,9 +464,7 @@ def test_sides_listing_the_same_quantities_agree() -> None:
     assert shipped(["10", "8"], ["8", "10.0"], ["10", "8"]).findings == ()
 
 
-def test_listed_quantities_on_one_side_fire_against_a_single_one_below_them() -> (
-    None
-):
+def test_listed_quantities_on_one_side_fire_against_a_single_one_below_them() -> None:
     assert [each.type for each in shipped(["10", "8"], ["10", "8"], "9").findings] == [
         "short-ship"
     ]
@@ -513,9 +516,7 @@ def test_a_quantity_the_receipt_lacks_is_not_compared() -> None:
     ]
 
 
-def test_a_short_ship_needs_no_po_quantity_and_the_over_ship_is_not_compared() -> (
-    None
-):
+def test_a_short_ship_needs_no_po_quantity_and_the_over_ship_is_not_compared() -> None:
     result = shipped("12", (), "10")
 
     assert [each.type for each in result.findings] == ["short-ship"]
@@ -581,6 +582,168 @@ def test_a_receiving_record_names_each_po_line_at_most_once() -> None:
                 ReceiptLine(line(quantity="3"), po_line=0),
             )
         )
+
+
+# Unpaired lines as findings
+
+
+def test_an_unpaired_invoice_line_is_an_extra_line_held_on_the_invoice_line() -> None:
+    result = matched(
+        record(
+            line(description="Torque wrench", quantity="1"),
+            line(description="Work gloves", quantity="4"),
+        ),
+        record(line(description="Torque wrench", quantity="1")),
+    )
+
+    assert result.findings == (
+        UnpairedFinding(
+            type="extra line",
+            place=Place("invoice line", 1),
+            candidate=Candidate(
+                line=0,
+                code=None,
+                description=1 - 10 / 13,
+                reason="below the floor",
+            ),
+        ),
+    )
+    assert result.findings[0].severity == "hold"
+    assert result.verdict == "held"
+
+
+def test_an_unpaired_po_line_is_a_missing_line_noted_on_the_po_line() -> None:
+    result = matched(
+        record(line(description="Torque wrench", quantity="1")),
+        record(
+            line(description="Work gloves", quantity="4"),
+            line(description="Torque wrench", quantity="1"),
+        ),
+    )
+
+    (finding,) = result.findings
+    assert (finding.type, finding.place) == ("missing line", Place("po line", 0))
+    assert finding.severity == "note"
+
+
+def test_a_case_whose_only_finding_is_a_missing_line_is_approvable() -> None:
+    """Partial invoicing is normal, so a PO line not billed never holds."""
+    result = matched(
+        record(line(description="Torque wrench", quantity="1")),
+        record(
+            line(description="Torque wrench", quantity="1"),
+            line(description="Work gloves", quantity="4"),
+        ),
+    )
+
+    assert [each.type for each in result.findings] == ["missing line"]
+    assert result.verdict == "approvable"
+
+
+def test_every_unpaired_line_is_a_finding_and_names_its_candidate() -> None:
+    result = matched(
+        record(line(description="Torque wrench", quantity="1")),
+        record(line(description="Work gloves", quantity="4")),
+    )
+
+    assert [(each.type, each.place) for each in result.findings] == [
+        ("extra line", Place("invoice line", 0)),
+        ("missing line", Place("po line", 0)),
+    ]
+    extra, missing = result.findings
+    assert isinstance(extra, UnpairedFinding) and isinstance(missing, UnpairedFinding)
+    assert result.unpaired_invoice == (Unpaired(line=0, candidate=extra.candidate),)
+    assert result.unpaired_po == (Unpaired(line=0, candidate=missing.candidate),)
+
+
+def test_an_extra_line_leaves_a_price_variance_on_its_own_po_line() -> None:
+    """The PO dropped the invoice's second line, so its third line is PO line
+    1, and pairing holds: the overbilled line is still found where it is."""
+    result = matched(
+        record(
+            line(description="Hex key set", unit_price_gross="15.00"),
+            line(description="Work gloves", unit_price_gross="4.00"),
+            line(description="Torque wrench", unit_price_gross="35.66"),
+        ),
+        record(
+            line(description="Hex key set", unit_price_gross="15.00"),
+            line(description="Torque wrench", unit_price_gross="35.30"),
+        ),
+    )
+
+    assert [(each.type, each.place) for each in result.findings] == [
+        ("price variance", Place("po line", 1)),
+        ("extra line", Place("invoice line", 1)),
+    ]
+
+
+def test_an_unpaired_finding_explains_its_closest_candidate() -> None:
+    result = matched(
+        record(line(description="Torque wrench", quantity="1")),
+        record(line(description="Work gloves", quantity="4")),
+    )
+
+    assert [explain(each) for each in result.findings] == [
+        "extra line, invoice line 0, closest PO line 0, code: no code, "
+        "description 0.231, below the floor",
+        "missing line, PO line 0, closest invoice line 0, code: no code, "
+        "description 0.231, below the floor",
+    ]
+
+
+def test_an_unpaired_line_with_nothing_on_the_other_side_explains_so() -> None:
+    (finding,) = matched(record(line(description="Torque wrench")), record()).findings
+
+    assert explain(finding) == "extra line, invoice line 0, the PO has no lines"
+
+
+def test_a_nameless_line_whose_only_price_disagrees_is_extra_plus_missing() -> None:
+    """With no code or description, values are all that pair a line; lower
+    its one price on the PO and nothing is left to agree on (#82)."""
+    result = matched(
+        record(line(amount_gross="40.00")), record(line(amount_gross="30.00"))
+    )
+
+    assert result.pairings == ()
+    assert [(each.type, each.place) for each in result.findings] == [
+        ("extra line", Place("invoice line", 0)),
+        ("missing line", Place("po line", 0)),
+    ]
+    assert explain(result.findings[0]) == (
+        "extra line, invoice line 0, closest PO line 0, code: no code, "
+        "description: no description, no agreement"
+    )
+
+
+def test_a_line_with_nothing_to_pair_on_is_not_compared_and_not_a_finding() -> None:
+    """A row labeled with only a date carries no code, description, quantity,
+    price or amount: it is not an item, so it pairs with nothing and holds
+    nothing, on either side."""
+    dated = line(date="2026-03-01")
+    result = matched(
+        record(line(description="Torque wrench", quantity="1"), dated),
+        record(dated, line(description="Torque wrench", quantity="1")),
+    )
+
+    assert [(each.invoice_line, each.po_line) for each in result.pairings] == [(0, 1)]
+    assert result.findings == ()
+    assert result.not_compared == (
+        NotCompared(Place("invoice line", 1), None, (), "nothing to pair on"),
+        NotCompared(Place("po line", 0), None, (), "nothing to pair on"),
+    )
+    assert result.verdict == "approvable"
+
+
+def test_a_line_with_nothing_to_pair_on_is_never_a_candidate() -> None:
+    result = matched(
+        record(line(description="Torque wrench", quantity="1")),
+        record(line(position="1"), line(description="Work gloves", quantity="4")),
+    )
+
+    extra, missing = result.findings
+    assert isinstance(extra, UnpairedFinding) and extra.candidate is not None
+    assert extra.candidate.line == 1
+    assert missing.place == Place("po line", 1)
 
 
 # The verdict
