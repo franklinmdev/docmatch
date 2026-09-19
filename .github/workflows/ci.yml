@@ -40,7 +40,7 @@ jobs:
       - name: Test
         run: uv run pytest
 
-      # The eval on the committed synthetic subset: seven documents in DocILE's
+      # The eval on the committed synthetic subset: six documents in DocILE's
       # shape with predictions to match, so the whole path from manifest to
       # report runs on every push while the real dataset never leaves the
       # machine it was downloaded on. The numbers this prints are the

@@ -13,9 +13,9 @@ the way pairing grades it.
 
 A pair is drawn the way the generator draws a missing line's donor: a
 document, then one of its lines, so a document with many lines weighs no more
-than one with few. Each cell draws from the documents that carry it, on its
-own stream from the pinned seed, so one cell's draw does not move with the
-other's.
+than one with few. Each cell draws from the documents that carry it, on a
+fresh stream from the pinned seed, so how many draws one cell takes does not
+move the other's.
 
 Never measured on the fixed subset: its readings are the end-to-end row's
 test set, and a floor tuned on them would inflate that row (#77). `docmatch

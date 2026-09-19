@@ -1710,6 +1710,33 @@ def test_match_reports_a_cell_no_step_keeps_under_its_share_as_none(
     assert "  description       0.4       none  10000\n" in out
 
 
+def test_match_refuses_a_manifest_that_pins_a_train_document(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The floors are measured on train and never on the fixed subset, so the
+    two may not share a document."""
+    manifest = tmp_path / "subset.json"
+    write(
+        Manifest(
+            split="train",
+            seed=1,
+            source="synthetic",
+            size=1,
+            document_ids=("eval0001",),
+        ),
+        manifest,
+    )
+
+    exit_code = main(
+        ["match", "--data-dir", str(synthetic_subset), "--manifest", str(manifest)]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "eval0001" in captured.err
+
+
 def test_match_writes_nothing(synthetic_subset: Path, tmp_path: Path) -> None:
     before = sorted(each.name for each in synthetic_subset.iterdir())
 

@@ -734,15 +734,23 @@ def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
     rebuilt on one pinned draw.
 
     Nothing is written: cases exist in memory and the report is counts. A bad
-    number is still a report, so it exits 0 whenever the report prints.
+    number is still a report, so it exits 0 whenever the report prints. A
+    manifest pinning a document the floors are measured on is refused: they
+    are never measured on the fixed subset (#77).
     """
     pool = load_pool(dataset, SPLITS)
+    pinned = manifest.load(arguments.manifest)
     measured_on = set(dataset.document_ids(floors.SPLIT))
-    measured = floors.measure(
+    shared = sorted(measured_on.intersection(pinned.document_ids))
+    if shared:
+        raise ManifestError(
+            f"{arguments.manifest} pins {floors.SPLIT} document {shared[0]}, "
+            "which the pairing floors are measured on"
+        )
+    pairing_floors = floors.measure(
         [each for each in pool.seeds if each.document_id in measured_on]
     )
     table = score_matched(generate(pool.seeds))
-    pinned = manifest.load(arguments.manifest)
     control_pool = pool_from(
         "fixed subset",
         (
@@ -752,7 +760,9 @@ def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
     )
     control = score_matched(generate(control_pool.seeds))
     return (
-        render_match(arguments.manifest, pool, measured, table, control_pool, control),
+        render_match(
+            arguments.manifest, pool, pairing_floors, table, control_pool, control
+        ),
         0,
     )
 
@@ -760,7 +770,7 @@ def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
 def render_match(
     path: Path,
     pool: SeedPool,
-    measured: Sequence[floors.Floor],
+    pairing_floors: Sequence[floors.Floor],
     table: Table,
     control_pool: SeedPool,
     control: Table,
@@ -791,7 +801,7 @@ def render_match(
                     "none" if each.measured is None else f"{each.measured:.1f}",
                     str(each.pairs),
                 )
-                for each in measured
+                for each in pairing_floors
             ],
         ),
         "",
