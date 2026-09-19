@@ -67,7 +67,7 @@ Measurement before modeling.
 
 ### Phase 2. Matching
 
-- Generator that derives purchase orders and receiving records from the labeled invoices and injects labeled discrepancies: price variance, quantity short-ship and over-ship, missing line, extra line, unit-of-measure variant, tax mismatch, duplicate invoice, rounding drift.
+- Generator that derives purchase orders and receiving records from the labeled invoices and injects labeled discrepancies: price variance, quantity short-ship and over-ship, missing line, extra line, unit-of-measure variant, tax mismatch. Clean cases carry rounding drift inside the tolerance, which must not fire. Duplicate invoice detection is a separate control and stays out of this phase.
 - Rules engine with configurable tolerances and a discrepancy taxonomy with severities.
 - Explainable results: which rule fired, on which numbers, with the tolerance applied.
 

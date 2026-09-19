@@ -63,3 +63,55 @@ _Avoid_: billed cost, spend, price per document
 **Seed**:
 A labeled invoice that a purchase order and a receiving record are derived from, before any discrepancy is injected. The derived records copy each line as labeled; nothing missing from a line is filled in. A document with no labeled lines is never a seed.
 _Avoid_: base invoice, template, source invoice
+
+**Pairing**:
+Deciding which invoice line answers which purchase-order line, one to one, by how closely their codes and descriptions agree, with quantities and prices only breaking ties. Receiving-record lines name their purchase-order line, so they need no pairing.
+_Avoid_: line matching, alignment, reconciliation (on its own)
+
+**Unpaired line**:
+An invoice line or purchase-order line that pairing left without a partner. It is reported, never dropped.
+_Avoid_: orphan, unmatched line
+
+**Pairing floor**:
+The lowest similarity at which a code, or a description, counts as agreement in pairing; below it the two lines are no evidence of being the same item. Codes and descriptions each have their own. It is set from lines known to be unrelated, never from the readings the benchmark scores.
+_Avoid_: threshold (on its own), cutoff, match score
+
+**Discrepancy type**:
+One way an invoice can disagree with its purchase order and receiving record: price variance, short-ship, over-ship, extra line, missing line, unit-of-measure variant, or tax mismatch. Only disagreement against docmatch's interest counts: billing less than was ordered or received is not a discrepancy. An invoice that repeats another invoice is not a discrepancy type; that is a separate control.
+_Avoid_: exception, error, mismatch (on its own)
+
+**Hold**:
+The severity that stops an invoice from being approved automatically and sends it to review. Every discrepancy type holds except missing line.
+_Avoid_: block, reject, fail
+
+**Note**:
+The severity that reports a discrepancy and leaves approval open. Only missing line is a note, since billing part of an order is normal.
+_Avoid_: warning, info
+
+**Tolerance**:
+How far an invoice may go above its purchase order or receiving record before the matcher reports a discrepancy. A price or a tax amount may go over by a percentage of the purchase order's value, and always by a cent; a quantity may not go over at all. Only one set of tolerances exists at a time, and a finding's explanation quotes the one applied.
+_Avoid_: threshold, allowance, variance limit
+
+**Rounding drift**:
+A difference of one cent between an invoice amount and its purchase order, always within the tolerance. It is never a discrepancy; reporting one counts against the matcher as a false positive.
+_Avoid_: small difference, penny variance
+
+**Case**:
+One seed with the purchase order, receiving record and invoice derived from it, either clean or carrying one to three injected discrepancies, never two on the same line. Discrepancies are injected into the purchase order and receiving record; the invoice is never altered, so it stays the seed's labels or a backend's reading of the same document. Cases are rebuilt from the labels on every run and never saved.
+_Avoid_: sample, example, test case
+
+**Finding**:
+A discrepancy type at a place: the purchase-order line it concerns, the invoice line for an extra line, or the header for a tax mismatch. A finding is right only when both its type and its place are; the right type on the wrong line is a miss and a false alarm.
+_Avoid_: detection, flag, alert
+
+**Match result**:
+What matching returns for one case: its pairings with their scores, its findings each with the values compared and the tolerance applied, its unpaired lines with the closest candidate and why it was not taken, and the comparisons it could not make with the reason. It is held when any finding is a hold, and approvable otherwise; approving is not matching's decision.
+_Avoid_: match report, reconciliation, outcome
+
+**Hard negative**:
+A clean line built to tempt the matcher: rounding drift, a variance just inside the tolerance, or a price or quantity below the purchase order. Any finding on it is a false alarm.
+_Avoid_: near miss, decoy
+
+**End-to-end row**:
+Matching measured with a backend's reading as the invoice, against the purchase order and receiving record derived from the same document's labels. Truth is always the generator's: a finding caused by a misread value is a false alarm, and an injected discrepancy the reading hides is a miss. A control row takes the labels as the invoice on the same cases, so the gap to it is what extraction costs.
+_Avoid_: pipeline score, compound score
