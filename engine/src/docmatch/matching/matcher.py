@@ -45,7 +45,9 @@ placed on the purchase-order line (#65, #76). Each carries its closest
 candidate on the other side, that candidate's scores per cell and the reason
 it was not taken, and no full score matrix.
 
-Receipt lines name their purchase-order line, so they need no pairing.
+Receipt lines name their purchase-order line, so they need no pairing: a
+paired invoice line is compared with the receipt line that names its
+purchase-order line.
 
 Rules
 -----
@@ -56,7 +58,20 @@ carry one, else on the line amount (#65, #70). A cell with several texts is
 compared like the gate compares listed values: the rule fires on the
 combination least favourable to the buyer being clean, the highest invoice
 value against the lowest purchase-order value, so a reading that disagrees
-with itself cannot hide an overage.
+with itself cannot hide an overage. Two sides that list the same numbers
+agree, though: an invoice with ordered and shipped columns under one
+fieldtype, copied as labeled, disagrees with itself the same way on both
+sides, and hides nothing. 1,382 train and val lines list quantities that
+differ, so without this every clean copy of one would be a finding.
+
+Short-ship: the invoice's quantity is above the receipt's, so goods are billed
+that were not received. Over-ship: the invoice's and the receipt's quantities
+are both above the purchase order's, so more was shipped and billed than was
+ordered. Quantities are compared exactly (#65, #70), listed values the same
+way as prices, and on the purchase-order line, like price variance, so that
+a rule suppressing both on one line reaches them in one place. A
+purchase-order line the receiving record does not cover compares no
+quantity: there is nothing received to be short of.
 
 A cell one side carries and the other does not, or one the normalizer cannot
 read as a number, is not compared: it is listed with its reason, the rule
@@ -93,6 +108,7 @@ from docmatch.matching.tolerances import (
     CODE_FLOOR,
     DESCRIPTION_FLOOR,
     PRICE,
+    QUANTITY,
     Tolerance,
 )
 from docmatch.metrics.fields import FieldValues
@@ -195,9 +211,14 @@ class Finding:
     invoice: tuple[str, ...]
     """The invoice's texts for the cell, exactly as it has them."""
     purchase_order: tuple[str, ...]
+    """Empty when the rule does not compare against the purchase order, as
+    short-ship does not."""
     margin: Decimal
-    """The percent of the purchase-order value, in money."""
+    """The percent of the value compared against, in money: the purchase
+    order's, or the receipt's for a short-ship; 0 when exact."""
     tolerance: Tolerance
+    receipt: tuple[str, ...] = ()
+    """The receipt's texts for the cell, for the rules that compare it."""
 
     @property
     def severity(self) -> Severity:
@@ -283,14 +304,18 @@ def match(
         *_nothing_to_pair_on("po line", purchase_order.lines),
     ]
     for pairing in paired.pairings:
-        finding = _price_variance(
-            pairing,
-            invoice.lines[pairing.invoice_line],
-            purchase_order.lines[pairing.po_line],
-            not_compared,
-        )
+        invoice_line = invoice.lines[pairing.invoice_line]
+        po_line = purchase_order.lines[pairing.po_line]
+        finding = _price_variance(pairing, invoice_line, po_line, not_compared)
         if finding is not None:
             findings.append(finding)
+        findings += _quantity_findings(
+            pairing,
+            invoice_line,
+            po_line,
+            receipt.against(pairing.po_line),
+            not_compared,
+        )
     findings += [
         UnpairedFinding("extra line", Place("invoice line", each.line), each.candidate)
         for each in paired.unpaired_invoice
@@ -312,15 +337,28 @@ def explain(finding: Finding | UnpairedFinding) -> str:
     place = _place(finding.place)
     if isinstance(finding, UnpairedFinding):
         return f"{finding.type}, {place}, {_why_unpaired(finding)}"
-    invoice = ", ".join(f'"{text}"' for text in finding.invoice)
-    po = ", ".join(f'"{text}"' for text in finding.purchase_order)
+    billed = [f"invoice {_quoted(finding.invoice)}"]
+    if finding.purchase_order:
+        if finding.receipt:
+            billed.append(f"receipt {_quoted(finding.receipt)}")
+        against = f"PO {_quoted(finding.purchase_order)}"
+    else:
+        against = f"receipt {_quoted(finding.receipt)}"
+    compared = (
+        f"{finding.type}, {place}, {finding.cell}, {' and '.join(billed)} vs {against}"
+    )
+    if finding.tolerance.exact:
+        return f"{compared}, compared exactly"
     percent = f"{(finding.tolerance.percent * 100).normalize():f}"
     lowest = min(_numbers(finding.purchase_order))
     return (
-        f"{finding.type}, {place}, {finding.cell}, invoice {invoice} vs PO {po}, "
-        f"margin {finding.margin.normalize():f} ({percent} percent of {lowest:f}, "
-        f"above {finding.tolerance.cent})"
+        f"{compared}, margin {finding.margin.normalize():f} "
+        f"({percent} percent of {lowest:f}, above {finding.tolerance.cent})"
     )
+
+
+def _quoted(texts: Sequence[str]) -> str:
+    return ", ".join(f'"{text}"' for text in texts)
 
 
 def _place(place: Place) -> str:
@@ -541,12 +579,12 @@ def _price_variance(
     when nothing is comparable."""
     place = Place("po line", pairing.po_line)
     for cell in PRICE_CELLS:
-        compared = _comparable(place, cell, invoice, po, not_compared)
+        compared = _comparable(place, cell, (invoice, po), not_compared)
         if compared is None:
             continue
         invoice_cell, po_cell = compared
-        highest, lowest = max(invoice_cell.numbers), min(po_cell.numbers)
-        if PRICE.exceeded(highest, lowest):
+        lowest = min(po_cell.numbers)
+        if _above(invoice_cell, po_cell, PRICE):
             return Finding(
                 type="price variance",
                 place=place,
@@ -560,6 +598,76 @@ def _price_variance(
     return None
 
 
+def _quantity_findings(
+    pairing: Pairing,
+    invoice: FieldValues,
+    po: FieldValues,
+    received: FieldValues | None,
+    not_compared: list[NotCompared],
+) -> list[Finding]:
+    """Short-ship against the receipt and over-ship against the purchase
+    order, compared exactly; none when the receiving record does not cover the
+    line. A short-ship needs no purchase-order quantity, so one that is
+    absent or unreadable leaves only the over-ship not compared."""
+    if received is None:
+        return []
+    place = Place("po line", pairing.po_line)
+    compared = _comparable(place, "quantity", (invoice, received), not_compared)
+    if compared is None:
+        _po_quantity_not_compared(place, invoice, po, received, not_compared)
+        return []
+    invoice_cell, receipt_cell = compared
+
+    def found(type_: DiscrepancyType, against: _Readable) -> Finding:
+        return Finding(
+            type=type_,
+            place=place,
+            cell="quantity",
+            invoice=invoice_cell.texts,
+            purchase_order=() if against is receipt_cell else against.texts,
+            receipt=receipt_cell.texts,
+            margin=QUANTITY.margin(min(against.numbers)),
+            tolerance=QUANTITY,
+        )
+
+    findings: list[Finding] = []
+    if _above(invoice_cell, receipt_cell, QUANTITY):
+        findings.append(found("short-ship", receipt_cell))
+    po_cell = read_cell(po, "quantity")
+    if po_cell is None:
+        for carried in (invoice_cell, receipt_cell):
+            not_compared.append(NotCompared(place, "quantity", carried.texts, "absent"))
+    elif po_cell.numbers is None:
+        not_compared.append(NotCompared(place, "quantity", po_cell.texts, "unreadable"))
+    else:
+        ordered = _Readable(po_cell.texts, po_cell.numbers)
+        if _above(invoice_cell, ordered, QUANTITY) and _above(
+            receipt_cell, ordered, QUANTITY
+        ):
+            findings.append(found("over-ship", ordered))
+    return findings
+
+
+def _po_quantity_not_compared(
+    place: Place,
+    invoice: FieldValues,
+    po: FieldValues,
+    received: FieldValues,
+    not_compared: list[NotCompared],
+) -> None:
+    """List the purchase order's quantity when the over-ship could not reach
+    it, the way `_comparable` lists a side: absent when the invoice or the
+    receipt lacks one, unreadable when only its own text is at fault."""
+    po_cell = read_cell(po, "quantity")
+    if po_cell is None:
+        return
+    partners = (read_cell(invoice, "quantity"), read_cell(received, "quantity"))
+    if None in partners:
+        not_compared.append(NotCompared(place, "quantity", po_cell.texts, "absent"))
+    elif po_cell.numbers is None:
+        not_compared.append(NotCompared(place, "quantity", po_cell.texts, "unreadable"))
+
+
 @dataclass(frozen=True)
 class _Readable:
     """A cell one side carries and the normalizer read in full."""
@@ -568,38 +676,46 @@ class _Readable:
     numbers: tuple[Decimal, ...]
 
 
+def _above(side: _Readable, against: _Readable, tolerance: Tolerance) -> bool:
+    """Whether the side's highest value exceeds the other's lowest, unless the
+    two list the same numbers, which is agreement."""
+    if set(side.numbers) == set(against.numbers):
+        return False
+    return tolerance.exceeded(max(side.numbers), min(against.numbers))
+
+
 def _comparable(
     place: Place,
     cell: Cell,
-    invoice: FieldValues,
-    po: FieldValues,
+    sides: Sequence[FieldValues],
     not_compared: list[NotCompared],
-) -> tuple[_Readable, _Readable] | None:
-    """Both sides of the cell read as numbers, or None with the reason listed.
+) -> tuple[_Readable, ...] | None:
+    """Every side's cell read as numbers, in the order given, or None with
+    the reason listed.
 
-    One entry per cell and side, with one reason. Nothing is listed when
-    neither side carries the cell: there is no comparison to have missed.
-    When one side carries it and the other does not, the carried side is
-    listed as absent, whatever the normalizer makes of it, since the
-    comparison it lacks is a partner and not a number.
+    One entry per cell and side, with one reason. Nothing is listed when no
+    side carries the cell: there is no comparison to have missed. When some
+    sides carry it and another does not, each carried side is listed as
+    absent, whatever the normalizer makes of it, since the comparison it
+    lacks is a partner and not a number.
     """
-    invoice_cell, po_cell = read_cell(invoice, cell), read_cell(po, cell)
-    if invoice_cell is None and po_cell is None:
+    cells = [read_cell(side, cell) for side in sides]
+    carried = [each for each in cells if each is not None]
+    if not carried:
         return None
-    if invoice_cell is None or po_cell is None:
-        for carried in (invoice_cell, po_cell):
-            if carried is not None:
-                not_compared.append(NotCompared(place, cell, carried.texts, "absent"))
+    if len(carried) < len(cells):
+        for each in carried:
+            not_compared.append(NotCompared(place, cell, each.texts, "absent"))
         return None
     readable: list[_Readable] = []
-    for side in (invoice_cell, po_cell):
-        if side.numbers is None:
-            not_compared.append(NotCompared(place, cell, side.texts, "unreadable"))
+    for each in carried:
+        if each.numbers is None:
+            not_compared.append(NotCompared(place, cell, each.texts, "unreadable"))
         else:
-            readable.append(_Readable(side.texts, side.numbers))
-    if len(readable) < 2:
+            readable.append(_Readable(each.texts, each.numbers))
+    if len(readable) < len(cells):
         return None
-    return readable[0], readable[1]
+    return tuple(readable)
 
 
 def _numbers(texts: Sequence[str]) -> list[Decimal]:

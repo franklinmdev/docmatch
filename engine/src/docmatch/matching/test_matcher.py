@@ -22,8 +22,8 @@ from docmatch.matching.matcher import (
     explain,
     match,
 )
-from docmatch.matching.records import ReceivingRecord, Record
-from docmatch.matching.tolerances import PRICE
+from docmatch.matching.records import ReceiptLine, ReceivingRecord, Record
+from docmatch.matching.tolerances import PRICE, QUANTITY
 
 FieldValuesDict = dict[str, tuple[str, ...]]
 
@@ -207,6 +207,10 @@ def test_listed_values_fire_on_the_combination_least_favourable_to_the_buyer() -
     ]
 
 
+def test_listed_prices_both_sides_carry_alike_agree() -> None:
+    assert one_line(["35.30", "40.00"], ["40.00", "35.30"]).findings == ()
+
+
 # Pairing
 
 
@@ -356,6 +360,229 @@ def test_a_line_with_nothing_to_compare_against_has_no_candidate() -> None:
     result = matched(record(line(description="Torque wrench")), record())
 
     assert result.unpaired_invoice == (Unpaired(line=0, candidate=None),)
+
+
+# Quantities
+
+
+def shipped(
+    invoice_quantity: str | Sequence[str],
+    po_quantity: str | Sequence[str],
+    received: str | Sequence[str],
+) -> MatchResult:
+    """One line billed, ordered and received in the quantities given."""
+    return match(
+        record(line(description="Work gloves", quantity=invoice_quantity)),
+        record(line(description="Work gloves", quantity=po_quantity)),
+        ReceivingRecord(
+            (ReceiptLine(line(description="Work gloves", quantity=received), 0),)
+        ),
+    )
+
+
+def test_billing_one_unit_above_the_receipt_is_a_short_ship() -> None:
+    result = shipped("12", "12", "11")
+
+    assert result.findings == (
+        Finding(
+            type="short-ship",
+            place=Place("po line", 0),
+            cell="quantity",
+            invoice=("12",),
+            purchase_order=(),
+            receipt=("11",),
+            margin=Decimal(0),
+            tolerance=QUANTITY,
+        ),
+    )
+    assert result.verdict == "held"
+
+
+def test_ordering_below_both_the_invoice_and_the_receipt_is_an_over_ship() -> None:
+    result = shipped("12", "10", "12")
+
+    assert result.findings == (
+        Finding(
+            type="over-ship",
+            place=Place("po line", 0),
+            cell="quantity",
+            invoice=("12",),
+            purchase_order=("10",),
+            receipt=("12",),
+            margin=Decimal(0),
+            tolerance=QUANTITY,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("invoice_quantity", "po_quantity", "received"),
+    [
+        ("12", "12", "12"),
+        ("10", "12", "12"),  # billed below the receipt and the order
+        ("10", "10", "12"),  # received more than billed or ordered
+        ("12.0", "12", "12,00"),  # the same number, spelled apart
+    ],
+)
+def test_quantities_that_do_not_bill_above_the_buyer_are_not_a_finding(
+    invoice_quantity: str, po_quantity: str, received: str
+) -> None:
+    assert shipped(invoice_quantity, po_quantity, received).findings == ()
+
+
+def test_quantities_are_compared_exactly() -> None:
+    """No percent and no unit of slack: a tenth over is over."""
+    assert [each.type for each in shipped("12.1", "12", "12").findings] == [
+        "short-ship"
+    ]
+    assert [each.type for each in shipped("12.1", "12", "12.1").findings] == [
+        "over-ship"
+    ]
+
+
+def test_billing_above_the_receipt_alone_is_a_short_ship_and_not_an_over_ship() -> None:
+    assert [each.type for each in shipped("12", "10", "10").findings] == ["short-ship"]
+
+
+def test_listed_quantities_fire_on_the_combination_least_favourable_to_the_buyer() -> (
+    None
+):
+    """The highest invoice value against the lowest received, and both highest
+    against the lowest ordered."""
+    assert [each.type for each in shipped(["10", "12"], "12", "11").findings] == [
+        "short-ship"
+    ]
+    assert [each.type for each in shipped("12", ["12", "10"], "12").findings] == [
+        "over-ship"
+    ]
+
+
+def test_sides_listing_the_same_quantities_agree() -> None:
+    """An invoice listing ordered and shipped columns, copied as labeled into
+    the purchase order and the receipt, is clean: nothing is hidden when both
+    sides disagree with themselves the same way."""
+    assert shipped(["10", "8"], ["8", "10.0"], ["10", "8"]).findings == ()
+
+
+def test_listed_quantities_on_one_side_fire_against_a_single_one_below_them() -> None:
+    assert [each.type for each in shipped(["10", "8"], ["10", "8"], "9").findings] == [
+        "short-ship"
+    ]
+
+
+def test_a_finding_on_quantities_explains_itself_with_the_values() -> None:
+    short, over = shipped("12", "10", "11").findings
+
+    assert explain(short) == (
+        'short-ship, PO line 0, quantity, invoice "12" vs receipt "11", '
+        "compared exactly"
+    )
+    assert explain(over) == (
+        'over-ship, PO line 0, quantity, invoice "12" and receipt "11" vs PO "10", '
+        "compared exactly"
+    )
+
+
+def test_a_receipt_line_follows_the_po_line_it_names_not_its_own_order() -> None:
+    result = match(
+        record(
+            line(description="Hex key set", quantity="3"),
+            line(description="Work gloves", quantity="5"),
+        ),
+        record(
+            line(description="Work gloves", quantity="5"),
+            line(description="Hex key set", quantity="3"),
+        ),
+        ReceivingRecord(
+            (
+                ReceiptLine(line(description="Hex key set", quantity="3"), po_line=1),
+                ReceiptLine(line(description="Work gloves", quantity="4"), po_line=0),
+            )
+        ),
+    )
+
+    assert [(each.type, each.place) for each in result.findings] == [
+        ("short-ship", Place("po line", 0))
+    ]
+
+
+def test_a_quantity_the_receipt_lacks_is_not_compared() -> None:
+    result = shipped("12", "10", ())
+
+    assert result.findings == ()
+    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+        ("quantity", ("12",), "absent"),
+        ("quantity", ("10",), "absent"),
+    ]
+
+
+def test_a_short_ship_needs_no_po_quantity_and_the_over_ship_is_not_compared() -> None:
+    result = shipped("12", (), "10")
+
+    assert [each.type for each in result.findings] == ["short-ship"]
+    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+        ("quantity", ("12",), "absent"),
+        ("quantity", ("10",), "absent"),
+    ]
+
+
+def test_a_po_quantity_left_without_its_partners_is_listed_absent() -> None:
+    """The over-ship needed it, and neither the invoice nor the receipt carries
+    one to compare it with."""
+    result = shipped((), "5", ())
+
+    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+        ("quantity", ("5",), "absent")
+    ]
+
+
+def test_every_quantity_an_invoice_without_one_leaves_is_listed_absent() -> None:
+    result = shipped((), "5", "5")
+
+    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+        ("quantity", ("5",), "absent"),
+        ("quantity", ("5",), "absent"),
+    ]
+
+
+def test_an_unreadable_po_quantity_leaves_the_short_ship_compared() -> None:
+    result = shipped("12", "ten", "10")
+
+    assert [each.type for each in result.findings] == ["short-ship"]
+    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+        ("quantity", ("ten",), "unreadable")
+    ]
+
+
+def test_an_unreadable_quantity_is_not_compared() -> None:
+    result = shipped("twelve", "10", "12")
+
+    assert result.findings == ()
+    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+        ("quantity", ("twelve",), "unreadable")
+    ]
+
+
+def test_a_po_line_nothing_was_received_against_compares_no_quantity() -> None:
+    """The receiving record does not cover the line: there is no receipt
+    quantity to be short of, and the over-ship needs one too."""
+    result = matched(
+        record(line(description="Work gloves", quantity="12")),
+        record(line(description="Work gloves", quantity="10")),
+    )
+
+    assert result.findings == ()
+    assert result.not_compared == ()
+
+
+def test_a_receiving_record_names_each_po_line_at_most_once() -> None:
+    with pytest.raises(ValueError, match="po line 0"):
+        ReceivingRecord(
+            (
+                ReceiptLine(line(quantity="2"), po_line=0),
+                ReceiptLine(line(quantity="3"), po_line=0),
+            )
+        )
 
 
 # Unpaired lines as findings
