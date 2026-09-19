@@ -10,10 +10,12 @@
     {"bbox": [0.60, 0.80, 0.69, 0.83], "fieldtype": "currency_code_amount_due", "page": 0, "text": "USD"}
   ],
   "line_item_extractions": [
+    {"bbox": [0.04, 0.50, 0.09, 0.53], "fieldtype": "line_item_code", "line_item_id": 1, "page": 0, "text": "CP-500"},
     {"bbox": [0.10, 0.50, 0.16, 0.53], "fieldtype": "line_item_quantity", "line_item_id": 1, "page": 0, "text": "2"},
     {"bbox": [0.17, 0.50, 0.19, 0.53], "fieldtype": "line_item_units_of_measure", "line_item_id": 1, "page": 0, "text": "BOX"},
     {"bbox": [0.20, 0.50, 0.55, 0.53], "fieldtype": "line_item_description", "line_item_id": 1, "page": 0, "text": "A4 copier paper, 500 sheets"},
     {"bbox": [0.78, 0.50, 0.92, 0.53], "fieldtype": "line_item_amount_gross", "line_item_id": 1, "page": 0, "text": "60.00"},
+    {"bbox": [0.04, 0.55, 0.09, 0.58], "fieldtype": "line_item_code", "line_item_id": 2, "page": 0, "text": "ST-120"},
     {"bbox": [0.10, 0.55, 0.16, 0.58], "fieldtype": "line_item_quantity", "line_item_id": 2, "page": 0, "text": "1"},
     {"bbox": [0.17, 0.55, 0.19, 0.58], "fieldtype": "line_item_units_of_measure", "line_item_id": 2, "page": 0, "text": "EA"},
     {"bbox": [0.20, 0.55, 0.55, 0.58], "fieldtype": "line_item_description", "line_item_id": 2, "page": 0, "text": "Stapler, heavy duty"},

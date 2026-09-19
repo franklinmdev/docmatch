@@ -41,9 +41,12 @@ Pairing floors
 --------------
 
 The lowest similarity at which a code, or a description, counts as agreement
-in pairing. Provisional, from a 500-document train sample: at 0.5, 0.7
-percent of cross-document code pairs clear; at 0.4, 0.6 percent of description
-pairs. The procedure in #77 fixes them from the whole of train.
+in pairing. Each is what the procedure in `floors` gives on the whole of
+train, 10,000 pairs of lines from different documents per cell (#77): at 0.5,
+0.76 percent of code pairs clear, against 1.69 percent at 0.4; at 0.4, 0.49
+percent of description pairs clear, against 1.59 percent at 0.3. `docmatch
+match` prints the procedure's value beside each, so a floor that no longer
+follows its rule shows in every report.
 """
 
 from dataclasses import dataclass
