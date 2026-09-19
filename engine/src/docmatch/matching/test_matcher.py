@@ -471,6 +471,24 @@ def test_an_unpaired_line_with_nothing_on_the_other_side_explains_so() -> None:
     assert explain(finding) == "extra line, invoice line 0, the PO has no lines"
 
 
+def test_a_nameless_line_whose_only_price_disagrees_is_extra_plus_missing() -> None:
+    """With no code or description, values are all that pair a line; lower
+    its one price on the PO and nothing is left to agree on (#82)."""
+    result = matched(
+        record(line(amount_gross="40.00")), record(line(amount_gross="30.00"))
+    )
+
+    assert result.pairings == ()
+    assert [(each.type, each.place) for each in result.findings] == [
+        ("extra line", Place("invoice line", 0)),
+        ("missing line", Place("po line", 0)),
+    ]
+    assert explain(result.findings[0]) == (
+        "extra line, invoice line 0, closest PO line 0, code: no code, "
+        "description: no description, no agreement"
+    )
+
+
 def test_a_line_with_nothing_to_pair_on_is_not_compared_and_not_a_finding() -> None:
     """A row labeled with only a date carries no code, description, quantity,
     price or amount: it is not an item, so it pairs with nothing and holds

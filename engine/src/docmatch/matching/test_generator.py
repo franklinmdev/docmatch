@@ -11,7 +11,7 @@ from decimal import Decimal
 import pytest
 
 from docmatch.matching.generator import Case, GeneratorError, Seed, generate
-from docmatch.matching.matcher import Place
+from docmatch.matching.matcher import DiscrepancyType, Place
 from docmatch.matching.records import Cell, Record, cell_values
 from docmatch.matching.tolerances import PRICE, band
 from docmatch.metrics.normalization import read_number
@@ -52,7 +52,9 @@ NO_LINES = seed("no-lines", vendor_name="Pinefield Catering")
 POOL = (PRICED, AMOUNTS, NO_MONEY, NO_LINES)
 
 
-def injected(cases: Sequence[Case], type_: str = "price variance") -> list[Case]:
+def injected(
+    cases: Sequence[Case], type_: DiscrepancyType = "price variance"
+) -> list[Case]:
     return [case for case in cases if case.truth and case.truth[0].type == type_]
 
 

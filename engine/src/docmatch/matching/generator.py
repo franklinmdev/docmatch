@@ -63,7 +63,12 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
-from docmatch.matching.matcher import PAIRING_CELLS, DiscrepancyType, Place
+from docmatch.matching.matcher import (
+    PAIRING_CELLS,
+    DiscrepancyType,
+    Place,
+    pairable,
+)
 from docmatch.matching.records import (
     CELL_FIELDTYPES,
     PRICE_CELLS,
@@ -163,18 +168,19 @@ def eligible(
     seed: Seed, type_: DiscrepancyType, pool: Sequence[Seed]
 ) -> tuple[int, ...]:
     """The positions of the seed's lines a type can be injected on; for a
-    missing line, every seed line when another seed in the pool can give one."""
+    missing line, every position the added line can go in, when another seed
+    in the pool can give one."""
     lines = seed.invoice.lines
     if type_ == "extra line":
         keys = [_pairing_key(line) for line in lines]
         return tuple(
             position
             for position, key in enumerate(keys)
-            if any(key) and keys.count(key) == 1
+            if pairable(lines[position]) and keys.count(key) == 1
         )
     if type_ == "missing line":
         has_donor = any(_lines_to_give(seed, each) for each in pool)
-        return tuple(range(len(lines))) if has_donor else ()
+        return tuple(range(len(lines) + 1)) if has_donor else ()
     carries = ELIGIBLE[type_]
     return tuple(position for position, line in enumerate(lines) if carries(line))
 
@@ -317,7 +323,7 @@ def _lines_to_give(seed: Seed, donor: Seed) -> list[FieldValues]:
     return [
         line
         for line in donor.invoice.lines
-        if any(key := _pairing_key(line)) and key not in seed_keys
+        if pairable(line) and _pairing_key(line) not in seed_keys
     ]
 
 
@@ -326,8 +332,7 @@ PairingKey = tuple[frozenset[str] | None, ...]
 
 def _pairing_key(line: FieldValues) -> PairingKey:
     """The line as pairing sees it: each pairing cell's normalized texts, or
-    None where the line lacks the cell, so a line with nothing to pair on is
-    all None."""
+    None where the line lacks the cell."""
     key: list[frozenset[str] | None] = []
     for cell in PAIRING_CELLS:
         values = cell_values(line, cell)

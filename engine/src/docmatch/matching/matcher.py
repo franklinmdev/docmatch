@@ -396,20 +396,21 @@ def _nothing_to_pair_on(
     return [
         NotCompared(Place(kind, position), None, (), "nothing to pair on")
         for position, line in enumerate(lines)
-        if not _pairable(line)
+        if not pairable(line)
     ]
 
 
-def _pairable(line: FieldValues) -> bool:
-    """Whether the line carries any cell pairing reads."""
+def pairable(line: FieldValues) -> bool:
+    """Whether the line carries any cell pairing reads; one that does not is
+    left out of pairing."""
     return any(cell_values(line, cell) is not None for cell in PAIRING_CELLS)
 
 
 def _pair(invoice: Sequence[FieldValues], po: Sequence[FieldValues]) -> _Paired:
     """Pair the lines that carry a pairing cell, and name them by their
     position in the whole record."""
-    rows = [position for position, line in enumerate(invoice) if _pairable(line)]
-    columns = [position for position, line in enumerate(po) if _pairable(line)]
+    rows = [position for position, line in enumerate(invoice) if pairable(line)]
+    columns = [position for position, line in enumerate(po) if pairable(line)]
     paired = _pair_items(
         [invoice[each] for each in rows], [po[each] for each in columns]
     )
@@ -428,6 +429,8 @@ def _pair(invoice: Sequence[FieldValues], po: Sequence[FieldValues]) -> _Paired:
 
 
 def _renamed(unpaired: Unpaired, own: list[int], other: list[int]) -> Unpaired:
+    """An unpaired line and its candidate named by their positions in the
+    whole records, `own` and `other` mapping the pairable lines back."""
     candidate = unpaired.candidate
     return Unpaired(
         own[unpaired.line],
