@@ -93,7 +93,7 @@ A difference of one cent between an invoice amount and its purchase order, alway
 _Avoid_: small difference, penny variance
 
 **Case**:
-One seed with the purchase order, receiving record and invoice derived from it, either clean or carrying one to three injected discrepancies, never two on the same line. Cases are rebuilt from the labels on every run and never saved.
+One seed with the purchase order, receiving record and invoice derived from it, either clean or carrying one to three injected discrepancies, never two on the same line. Discrepancies are injected into the purchase order and receiving record; the invoice is never altered, so it stays the seed's labels or a backend's reading of the same document. Cases are rebuilt from the labels on every run and never saved.
 _Avoid_: sample, example, test case
 
 **Finding**:
@@ -103,3 +103,7 @@ _Avoid_: detection, flag, alert
 **Hard negative**:
 A clean line built to tempt the matcher: rounding drift, a variance just inside the tolerance, or a price or quantity below the purchase order. Any finding on it is a false alarm.
 _Avoid_: near miss, decoy
+
+**End-to-end row**:
+Matching measured with a backend's reading as the invoice, against the purchase order and receiving record derived from the same document's labels. Truth is always the generator's: a finding caused by a misread value is a false alarm, and an injected discrepancy the reading hides is a miss. A control row takes the labels as the invoice on the same cases, so the gap to it is what extraction costs.
+_Avoid_: pipeline score, compound score
