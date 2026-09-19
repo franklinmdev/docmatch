@@ -21,7 +21,8 @@ from docmatch.matching.generator import (
 from docmatch.matching.matcher import DiscrepancyType, Place
 from docmatch.matching.records import Cell, Record, cell_values
 from docmatch.matching.tolerances import PRICE, TAX, band, quantity_band
-from docmatch.metrics.normalization import read_number
+from docmatch.metrics.fields import FieldValues
+from docmatch.metrics.normalization import normalize_text, read_number
 
 FieldValuesDict = dict[str, tuple[str, ...]]
 
@@ -45,7 +46,12 @@ def seed(document_id: str, *lines: FieldValuesDict, **header: str) -> Seed:
 
 PRICED = seed(
     "priced",
-    line(description="Hex key set", quantity="6", unit_price_gross="15.00"),
+    line(
+        description="Hex key set",
+        quantity="6",
+        units_of_measure="SET",
+        unit_price_gross="15.00",
+    ),
     line(description="Torque wrench", quantity="1", amount_gross="317.50"),
     amount_total_tax="18.00",
 )
@@ -89,7 +95,7 @@ def test_the_receiving_record_carries_quantities_and_never_prices() -> None:
     (case,) = generate((PRICED,), seed=1, clean=1, per_type=0)
 
     assert [dict(each.cells) for each in case.receipt.lines] == [
-        line(description="Hex key set", quantity="6"),
+        line(description="Hex key set", quantity="6", units_of_measure="SET"),
         line(description="Torque wrench", quantity="1"),
     ]
 
@@ -443,6 +449,122 @@ def test_a_line_with_nothing_to_pair_on_is_never_removed_or_added() -> None:
         added = case.truth[0].place.line
         assert added is not None
         assert "line_item_amount_gross" in case.purchase_order.lines[added]
+
+
+# Unit variant
+
+COUNTED = seed(
+    "counted",
+    line(
+        description="Copier paper",
+        units_of_measure="BOX",
+        quantity="4",
+        unit_price_gross="30.00",
+        amount_gross="120.00",
+    ),
+    line(description="Stapler", units_of_measure=["ea", "Box"], quantity="1,5"),
+    line(description="Freight", quantity="1", amount_gross="12.00"),
+)
+
+
+RECOUNTED = (
+    "line_item_units_of_measure",
+    "line_item_quantity",
+    "line_item_unit_price_gross",
+)
+"""What a unit variant changes on a purchase-order line."""
+
+
+def units(cells: FieldValues) -> set[str]:
+    return {normalize_text(text) for text in cells["line_item_units_of_measure"]}
+
+
+def number(cells: FieldValues, fieldtype: str) -> Decimal:
+    (text,) = cells[fieldtype]
+    value = read_number(text)
+    assert value is not None
+    return value
+
+
+def but_recounted(cells: FieldValues) -> FieldValuesDict:
+    return {
+        fieldtype: tuple(texts)
+        for fieldtype, texts in cells.items()
+        if fieldtype not in RECOUNTED
+    }
+
+
+def test_a_unit_variant_counts_the_po_line_in_another_unit_and_keeps_the_amount() -> (
+    None
+):
+    cases = injected(generate((COUNTED,), seed=1, clean=0, per_type=10), "unit variant")
+
+    assert len(cases) == 10
+    for case in cases:
+        (truth,) = case.truth
+        assert truth.place.kind == "po line"
+        assert truth.band is None
+        position = truth.place.line
+        assert position in (0, 1)
+        assert case.invoice == COUNTED.invoice
+        seeded = COUNTED.invoice.lines[position]
+        po_line = case.purchase_order.lines[position]
+        assert not units(po_line) & units(seeded)
+        factor = number(po_line, "line_item_quantity") / number(
+            seeded, "line_item_quantity"
+        )
+        assert factor == int(factor) and factor >= 2
+        if position == 0:
+            # 30.00 over the factor, to four places: the amount still agrees.
+            unit_price = number(po_line, "line_item_unit_price_gross")
+            assert abs(unit_price * factor - Decimal("30.00")) <= factor / 20000
+        assert but_recounted(po_line) == but_recounted(seeded)
+        assert [
+            each
+            for other, each in enumerate(case.purchase_order.lines)
+            if other != position
+        ] == [
+            each
+            for other, each in enumerate(COUNTED.invoice.lines)
+            if other != position
+        ]
+        (receipt_line,) = [
+            each.cells for each in case.receipt.lines if each.po_line == position
+        ]
+        assert units(receipt_line) == units(po_line)
+        assert receipt_line["line_item_quantity"] == po_line["line_item_quantity"]
+
+
+@pytest.mark.parametrize(
+    "unreadable",
+    [
+        {"quantity": "two"},
+        {"quantity": "2", "unit_price_gross": "30.00", "unit_price_net": "n/a"},
+    ],
+)
+def test_a_line_that_cannot_be_recounted_carries_no_unit_variant(
+    unreadable: dict[str, str],
+) -> None:
+    """A quantity or unit price the normalizer cannot read could not be
+    scaled, and the purchase order's amount would stop agreeing with them."""
+    garbled = seed(
+        "garbled",
+        line(
+            description="Copier paper",
+            units_of_measure="BOX",
+            amount_gross="60.00",
+            **unreadable,
+        ),
+    )
+
+    assert documents_carrying((garbled,), "unit variant") == 0
+
+
+def test_only_lines_labeling_a_unit_carry_a_unit_variant() -> None:
+    cases = generate((COUNTED, NO_MONEY), seed=1, clean=0, per_type=6)
+
+    assert {case.document_id for case in injected(cases, "unit variant")} == {"counted"}
+    assert documents_carrying((COUNTED, NO_MONEY), "unit variant") == 1
 
 
 # Tax mismatch

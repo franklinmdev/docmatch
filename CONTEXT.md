@@ -89,7 +89,7 @@ The severity that reports a discrepancy and leaves approval open. Only missing l
 _Avoid_: warning, info
 
 **Tolerance**:
-How far an invoice may go above its purchase order or receiving record before the matcher reports a discrepancy. A price or a tax amount may go over by a percentage of the purchase order's value, and always by a cent; a quantity may not go over at all. Only one set of tolerances exists at a time, and a finding's explanation quotes the one applied.
+How far an invoice may go above its purchase order or receiving record before the matcher reports a discrepancy. A price or a tax amount may go over by a percentage of the purchase order's value, and always by a cent; a quantity may not go over at all; a unit of measure must read the same after the text normalization, since there is no conversion table. Only one set of tolerances exists at a time, and a finding's explanation quotes the one applied.
 _Avoid_: threshold, allowance, variance limit
 
 **Rounding drift**:
