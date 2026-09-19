@@ -635,9 +635,8 @@ def _quantity_findings(
         findings.append(found("short-ship", receipt_cell))
     po_cell = read_cell(po, "quantity")
     if po_cell is None:
-        not_compared.append(
-            NotCompared(place, "quantity", invoice_cell.texts, "absent")
-        )
+        for carried in (invoice_cell, receipt_cell):
+            not_compared.append(NotCompared(place, "quantity", carried.texts, "absent"))
     elif po_cell.numbers is None:
         not_compared.append(NotCompared(place, "quantity", po_cell.texts, "unreadable"))
     else:

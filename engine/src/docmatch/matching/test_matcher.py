@@ -521,7 +521,8 @@ def test_a_short_ship_needs_no_po_quantity_and_the_over_ship_is_not_compared() -
 
     assert [each.type for each in result.findings] == ["short-ship"]
     assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
-        ("quantity", ("12",), "absent")
+        ("quantity", ("12",), "absent"),
+        ("quantity", ("10",), "absent"),
     ]
 
 
