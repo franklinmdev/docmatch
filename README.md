@@ -752,7 +752,8 @@ docmatch/
     pyproject.toml     the docmatch package and its `docmatch` command
     src/docmatch/      extraction, validation, resolution, matching, metrics
       evals/           the pinned subset, the run that scores it, the corpus survey
-    tests/evals/       the synthetic corpus CI runs the eval on
+      matching/        records, pairing, the rules, the case generator, the scorer
+    tests/evals/       the synthetic corpus CI runs the eval and the match on
   apps/review/         Next.js review inbox, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
   docs/                decision records
