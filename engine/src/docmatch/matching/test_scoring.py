@@ -26,8 +26,6 @@ def injected(line: int) -> Injected:
 def result(*lines: int) -> MatchResult:
     return MatchResult(
         pairings=(),
-        unpaired_invoice=(),
-        unpaired_po=(),
         findings=tuple(
             Finding(
                 type="price variance",
