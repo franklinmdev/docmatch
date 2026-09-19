@@ -4,13 +4,14 @@ Cases and results are built by hand, so what is pinned is how findings are
 counted, not what the matcher does with the case's records.
 """
 
+from dataclasses import replace
 from decimal import Decimal
 
 from docmatch.matching.generator import Case, Injected
-from docmatch.matching.matcher import Finding, MatchResult, Place
+from docmatch.matching.matcher import Finding, MatchResult, NotCompared, Place
 from docmatch.matching.records import ReceivingRecord, Record
 from docmatch.matching.scoring import TypeScore, score
-from docmatch.matching.tolerances import PRICE
+from docmatch.matching.tolerances import PRICE, UNIT
 
 EMPTY = Record(header={}, lines=())
 
@@ -84,6 +85,41 @@ def test_a_type_nothing_was_injected_for_reads_with_n_zero() -> None:
         0
     ] * 6
     assert table.overall.recall == 1.0
+
+
+def test_any_other_finding_on_a_unit_variant_line_is_a_false_alarm() -> None:
+    """The line's price and quantity are suppressed, so a price variance on it
+    is wrong whatever its values say (#66)."""
+    unit_variant = Finding(
+        type="unit variant",
+        place=Place("po line", 0),
+        cell="unit",
+        invoice=("BOX",),
+        purchase_order=("EA",),
+        margin=Decimal(0),
+        tolerance=UNIT,
+    )
+    found = replace(result(0), findings=(unit_variant, *result(0).findings))
+
+    table = score([case(Injected("unit variant", Place("po line", 0), None))], [found])
+
+    rows = {each.type: each for each in table.per_type}
+    assert (rows["unit variant"].hits, rows["unit variant"].false_alarms) == (1, 0)
+    assert rows["price variance"].false_alarms == 1
+
+
+def test_what_was_not_compared_counts_in_no_score() -> None:
+    listed = replace(
+        result(),
+        not_compared=(
+            NotCompared(Place("po line", 0), "unit price", ("n/a",), "unreadable"),
+        ),
+    )
+
+    table = score([case()], [listed])
+
+    assert table.clean_false_positives == 0
+    assert all(each.false_alarms == 0 for each in table.per_type)
 
 
 def test_the_rate_is_zero_when_there_is_no_clean_case() -> None:

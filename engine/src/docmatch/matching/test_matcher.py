@@ -23,7 +23,7 @@ from docmatch.matching.matcher import (
     match,
 )
 from docmatch.matching.records import ReceiptLine, ReceivingRecord, Record
-from docmatch.matching.tolerances import PRICE, QUANTITY, TAX
+from docmatch.matching.tolerances import PRICE, QUANTITY, TAX, UNIT
 
 FieldValuesDict = dict[str, tuple[str, ...]]
 
@@ -319,6 +319,127 @@ def test_a_tax_mismatch_is_found_beside_a_price_variance() -> None:
         ("price variance", Place("po line", 0)),
         ("tax mismatch", Place("header")),
     ]
+
+
+# Unit variant
+
+
+def counted(
+    invoice_unit: str | Sequence[str], po_unit: str | Sequence[str]
+) -> MatchResult:
+    """One line alike on both sides but for its unit."""
+    return matched(
+        record(line(description="Copier paper", units_of_measure=invoice_unit)),
+        record(line(description="Copier paper", units_of_measure=po_unit)),
+    )
+
+
+def test_a_unit_differing_from_the_po_lines_is_a_unit_variant_on_the_po_line() -> None:
+    result = counted("BOX", "EA")
+
+    assert result.findings == (
+        Finding(
+            type="unit variant",
+            place=Place("po line", 0),
+            cell="unit",
+            invoice=("BOX",),
+            purchase_order=("EA",),
+            margin=Decimal(0),
+            tolerance=UNIT,
+        ),
+    )
+    assert result.verdict == "held"
+
+
+def test_a_unit_variant_suppresses_price_and_quantity_on_its_line() -> None:
+    """Every value here would fire on its own; counted in another unit, none
+    is comparable without a conversion table (#66)."""
+    result = match(
+        record(
+            line(
+                description="Copier paper",
+                units_of_measure="BOX",
+                quantity="24",
+                unit_price_gross="30.00",
+                amount_gross="720.00",
+            )
+        ),
+        record(
+            line(
+                description="Copier paper",
+                units_of_measure="EA",
+                quantity="2",
+                unit_price_gross="2.50",
+                amount_gross="5.00",
+            )
+        ),
+        ReceivingRecord(
+            (ReceiptLine(line(units_of_measure="EA", quantity="2"), po_line=0),)
+        ),
+    )
+
+    assert [(each.type, each.place) for each in result.findings] == [
+        ("unit variant", Place("po line", 0))
+    ]
+    assert result.not_compared == (
+        NotCompared(Place("po line", 0), "unit price", ("30.00",), "unit variant"),
+        NotCompared(Place("po line", 0), "amount", ("720.00",), "unit variant"),
+        NotCompared(Place("po line", 0), "quantity", ("24",), "unit variant"),
+    )
+
+
+def test_a_unit_one_side_lacks_is_listed_absent_and_the_line_compared_as_usual() -> (
+    None
+):
+    result = matched(
+        record(
+            line(
+                description="Copier paper",
+                units_of_measure="BOX",
+                unit_price_gross="35.66",
+            )
+        ),
+        record(line(description="Copier paper", unit_price_gross="35.30")),
+    )
+
+    assert [(each.type, each.place) for each in result.findings] == [
+        ("price variance", Place("po line", 0))
+    ]
+    assert result.not_compared == (
+        NotCompared(Place("po line", 0), "unit", ("BOX",), "absent"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("invoice_unit", "po_unit"),
+    [
+        ("EA", " ea "),
+        (["BOX", "EA"], ["ea", "Box"]),  # sides listing the same units agree
+    ],
+)
+def test_units_alike_after_text_normalization_are_not_a_finding(
+    invoice_unit: str | Sequence[str], po_unit: str | Sequence[str]
+) -> None:
+    result = counted(invoice_unit, po_unit)
+
+    assert result.findings == ()
+    assert result.not_compared == ()
+
+
+def test_a_unit_listed_on_one_side_only_is_a_unit_variant() -> None:
+    """As with listed values: a reading that disagrees with itself cannot
+    hide a unit the purchase order was not counted in."""
+    assert [each.type for each in counted(["BOX", "EA"], "EA").findings] == [
+        "unit variant"
+    ]
+
+
+def test_a_unit_variant_explains_itself_with_the_units() -> None:
+    (finding,) = counted("BOX", "EA").findings
+
+    assert explain(finding) == (
+        'unit variant, PO line 0, unit, invoice "BOX" vs PO "EA", compared exactly'
+    )
 
 
 # Pairing
@@ -866,3 +987,11 @@ def test_held_when_any_finding_is_a_hold() -> None:
 
 def test_approvable_when_there_is_no_finding() -> None:
     assert one_line("35.30", "35.30").verdict == "approvable"
+
+
+def test_what_was_not_compared_never_holds() -> None:
+    """A misread number is listed, never an eighth type or a forced hold (#76)."""
+    result = taxed("n/a", "35.30")
+
+    assert result.not_compared
+    assert result.verdict == "approvable"
