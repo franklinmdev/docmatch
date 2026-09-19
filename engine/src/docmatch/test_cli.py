@@ -5,6 +5,7 @@ directory, so the suite runs in CI with no dataset present.
 """
 
 import json
+import shutil
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -1561,3 +1562,98 @@ def test_extract_reads_a_limited_prefix_end_to_end(
     assert record["long_edge"] == 1200
     assert [each["pages"] for each in record["documents"]] == [1]
     assert [each["served_model"] for each in record["documents"]] == ["fake-002"]
+
+
+def matching(synthetic_subset: Path, *arguments: str) -> list[str]:
+    return [
+        "match",
+        "--data-dir",
+        str(synthetic_subset),
+        "--manifest",
+        str(synthetic_subset / "subset.json"),
+        *arguments,
+    ]
+
+
+EXPECTED_MATCH_OUTPUT = "\n".join(
+    [
+        # The fixture's train split is its one document with a unit and a
+        # header tax; its val split is the five the manifest pins, one of
+        # which has no lines and seeds nothing.
+        "Seed pool",
+        "  pool   documents  lines  without lines",
+        "  train          1      2              0",
+        "  val            5      7              1",
+        "",
+        "Pairing floors",
+        "  code         0.5",
+        "  description  0.4",
+        "",
+        # Every fixture row carries an amount and none a unit price, so every
+        # price variance falls to the amount; all are found on labels.
+        "Per-type table, over cases from train and val",
+        "  type            precision  recall    n  documents",
+        "  price variance      1.000   1.000  500          5",
+        "  clean-case false-positive rate  0.000 of 1000 cases",
+        "",
+        "Labels control, over cases from the fixed subset",
+        "  manifest   {manifest}",
+        "  documents  4 of 5 with lines",
+        "  precision  1.000",
+        "  recall     1.000",
+        "",
+        "  type            precision  recall    n  documents",
+        "  price variance      1.000   1.000  500          4",
+        "  clean-case false-positive rate  0.000 of 1000 cases",
+        "",
+    ]
+)
+
+
+def test_match_reports_the_per_type_table_and_the_labels_control(
+    synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = main(matching(synthetic_subset))
+
+    assert capsys.readouterr().out == EXPECTED_MATCH_OUTPUT.format(
+        manifest=synthetic_subset / "subset.json"
+    )
+    assert exit_code == 0
+
+
+def test_match_prints_no_label_text(
+    synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rule 6: cases are built from labels, and the report carries counts only."""
+    main(matching(synthetic_subset))
+
+    out = capsys.readouterr().out
+    assert "Junction box" not in out
+    assert "Beacon" not in out
+    assert "317.50" not in out
+
+
+def test_match_reports_a_missing_split_without_a_traceback(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The seed pool is fixed in code, so a partial download is an error, not a
+    smaller table."""
+    partial = tmp_path / "docile"
+    shutil.copytree(synthetic_subset, partial)
+    (partial / "train.json").unlink()
+
+    exit_code = main(matching(partial))
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "train.json" in captured.err
+
+
+def test_match_writes_nothing(synthetic_subset: Path, tmp_path: Path) -> None:
+    before = sorted(each.name for each in synthetic_subset.iterdir())
+
+    main(matching(synthetic_subset))
+
+    assert sorted(each.name for each in synthetic_subset.iterdir()) == before
+    assert list(tmp_path.iterdir()) == []

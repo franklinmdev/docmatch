@@ -21,6 +21,10 @@ by, which is how a reader checks the numbers the docstrings there assert.
 the predictions file the eval scores, which is the half of a benchmark row that
 costs money.
 
+`docmatch match` builds cases from every DocILE label, matches each and scores
+the findings against the generator's truth, which is where the matching table
+comes from. It prints and writes nothing.
+
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
 """
@@ -66,6 +70,15 @@ from docmatch.extraction.run import (
     write_predictions,
     write_record,
 )
+from docmatch.matching.generator import (
+    INJECTED_TYPES,
+    GeneratorError,
+    documents_carrying,
+    generate,
+)
+from docmatch.matching.pool import SPLITS, SeedPool, load_pool, pool_from
+from docmatch.matching.scoring import Table, score_matched
+from docmatch.matching.tolerances import CODE_FLOOR, DESCRIPTION_FLOOR
 from docmatch.metrics.fields import (
     FieldScore,
     PredictionError,
@@ -340,6 +353,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=manifest.MANIFEST,
         help=f"the subset to score over (default: {manifest.MANIFEST.name})",
     )
+    matching = subcommands.add_parser(
+        "match",
+        parents=[dataset],
+        help="generate cases from the labels, match them, and score the findings",
+    )
+    matching.add_argument(
+        "--manifest",
+        type=Path,
+        default=manifest.MANIFEST,
+        help=(
+            "the fixed subset the labels control seeds from "
+            f"(default: {manifest.MANIFEST.name})"
+        ),
+    )
     counts = subcommands.add_parser(
         "corpus",
         parents=[dataset],
@@ -494,6 +521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ManifestError,
         ExtractionError,
         PublicCopyError,
+        GeneratorError,
     ) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
@@ -518,6 +546,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
         return _corpus(arguments, dataset)
     if arguments.command == "extract":
         return _extract(arguments, dataset)
+    if arguments.command == "match":
+        return _match(arguments, dataset)
     if arguments.command == "eval":
         run = score_subset(
             dataset,
@@ -696,6 +726,97 @@ def _write(extracted: Run, out: Path) -> None:
         write_currency_symbols(extracted, out / RUN_FILES[4])
     except OSError as error:
         raise ExtractionError(f"cannot write the run to {out}: {error}") from error
+
+
+def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
+    """The per-type table over train and val, and the labels control over the
+    fixed subset, each from cases rebuilt on one pinned draw.
+
+    Nothing is written: cases exist in memory and the report is counts. A bad
+    number is still a report, so it exits 0 whenever the report prints.
+    """
+    pool = load_pool(dataset, SPLITS)
+    table = score_matched(generate(pool.seeds))
+    pinned = manifest.load(arguments.manifest)
+    control_pool = pool_from(
+        "fixed subset",
+        (
+            (document_id, dataset.annotation(document_id))
+            for document_id in pinned.document_ids
+        ),
+    )
+    control = score_matched(generate(control_pool.seeds))
+    return render_match(arguments.manifest, pool, table, control_pool, control), 0
+
+
+def render_match(
+    path: Path, pool: SeedPool, table: Table, control_pool: SeedPool, control: Table
+) -> str:
+    """The matching report as a block a human can paste anywhere: counts only."""
+    lines = [
+        "Seed pool",
+        *_table(
+            ("pool", "documents", "lines", "without lines"),
+            [
+                (
+                    each.name,
+                    str(each.documents),
+                    str(each.lines),
+                    str(each.without_lines),
+                )
+                for each in pool.counts
+            ],
+        ),
+        "",
+        "Pairing floors",
+        *_rows(
+            ("code", f"{CODE_FLOOR:.1f}"), ("description", f"{DESCRIPTION_FLOOR:.1f}")
+        ),
+        "",
+        f"Per-type table, over cases from {' and '.join(SPLITS)}",
+        *_per_type(table, pool),
+        "",
+        "Labels control, over cases from the fixed subset",
+        *_rows(
+            ("manifest", str(path)),
+            (
+                "documents",
+                f"{control_pool.documents - control_pool.without_lines} of "
+                f"{control_pool.documents} with lines",
+            ),
+            ("precision", f"{control.overall.precision:.3f}"),
+            ("recall", f"{control.overall.recall:.3f}"),
+        ),
+        "",
+        *_per_type(control, control_pool),
+    ]
+    return "\n".join([*lines, ""])
+
+
+def _per_type(table: Table, pool: SeedPool) -> list[str]:
+    """Precision, recall and n per injected type, with the documents carrying
+    it, then the clean-case rate."""
+    rows = [each for each in table.per_type if each.type in INJECTED_TYPES]
+    return [
+        *_table(
+            ("type", "precision", "recall", "n", "documents"),
+            [
+                (
+                    each.type,
+                    f"{each.precision:.3f}",
+                    f"{each.recall:.3f}",
+                    str(each.n),
+                    str(documents_carrying(pool.seeds, each.type)),
+                )
+                for each in rows
+            ],
+        ),
+        *_rows(("clean-case false-positive rate", _clean_rate(table))),
+    ]
+
+
+def _clean_rate(table: Table) -> str:
+    return f"{table.clean_false_positive_rate:.3f} of {table.clean_cases} cases"
 
 
 def _corpus(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:

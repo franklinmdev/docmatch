@@ -155,9 +155,9 @@ def documents_carrying(seeds: Iterable[Seed], type_: DiscrepancyType) -> int:
 def _cycle(pool: Sequence[Seed], rng: random.Random, count: int) -> list[Seed]:
     """`count` seeds in a shuffled order, going round again when the pool is
     smaller than the count."""
-    if count and not pool:
-        raise GeneratorError("no seed carries a line, so no case can be built")
     drawn: list[Seed] = []
+    if not pool:
+        return drawn
     while len(drawn) < count:
         order = list(pool)
         rng.shuffle(order)
@@ -196,13 +196,15 @@ def _injected(
 ) -> list[Case]:
     """`count` cases each carrying one finding of the type, bands alternating.
 
-    Each pass goes round the eligible seeds once in a fresh order; a pass that
-    builds nothing means no seed can draw the band wanted.
+    Each pass goes round the eligible seeds once in a fresh order. A pool with
+    no eligible seed yields no case, so the type reads with n 0 rather than
+    failing the report; a pass that builds nothing from eligible seeds means
+    no seed can draw the band wanted, which is an error.
     """
     eligible_pool = [each for each in pool if eligible(each, type_)]
-    if count and not eligible_pool:
-        raise GeneratorError(f"no seed carries a line {type_} can be injected on")
     cases: list[Case] = []
+    if not eligible_pool:
+        return cases
     while len(cases) < count:
         built = 0
         for seed in _cycle(eligible_pool, rng, len(eligible_pool)):

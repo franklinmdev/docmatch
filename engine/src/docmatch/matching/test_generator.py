@@ -184,6 +184,16 @@ def test_a_type_is_injected_only_on_lines_carrying_its_cells() -> None:
     )
 
 
-def test_a_pool_with_no_eligible_seed_is_an_error() -> None:
-    with pytest.raises(GeneratorError, match="price variance"):
-        generate((NO_MONEY, NO_LINES), seed=1, clean=0, per_type=1)
+def test_a_pool_with_no_eligible_seed_injects_nothing() -> None:
+    """The type then reads with n 0 in the report rather than failing it."""
+    cases = generate((NO_MONEY, NO_LINES), seed=1, clean=2, per_type=1)
+
+    assert [case.truth for case in cases] == [(), ()]
+
+
+def test_a_pool_whose_values_cannot_reach_a_band_is_an_error() -> None:
+    """A cent-sized value has no near band: the cent floor swallows it."""
+    tiny = seed("tiny", line(description="Washer", amount_gross="0.03"))
+
+    with pytest.raises(GeneratorError, match="near price variance"):
+        generate((tiny,), seed=1, clean=0, per_type=1)
