@@ -312,6 +312,20 @@ def test_a_candidate_taken_by_another_line_is_the_reason_a_line_is_unpaired() ->
     )
 
 
+def test_values_do_not_pair_lines_when_only_one_side_names_the_item() -> None:
+    """A description on one side and a code on the other say nothing about
+    being the same item, and values alone do not either."""
+    result = matched(
+        record(line(description="Blue widget", quantity="2", amount_gross="100.00")),
+        record(line(code="BW-1", quantity="2", amount_gross="100.00")),
+    )
+
+    assert result.pairings == ()
+    (unpaired,) = result.unpaired_invoice
+    assert unpaired.candidate is not None
+    assert unpaired.candidate.reason == "no agreement"
+
+
 def test_a_line_with_nothing_to_compare_against_has_no_candidate() -> None:
     result = matched(record(line(description="Torque wrench")), record())
 

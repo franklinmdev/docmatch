@@ -20,12 +20,13 @@ which matters for the OpenAI row's known net/gross split (#49).
 """
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Literal
 
 from docmatch.docile.annotation import Annotation
 from docmatch.metrics.fields import FieldValues, labeled_fields
 from docmatch.metrics.line_items import labeled_line_items
-from docmatch.metrics.normalization import normalize_text
+from docmatch.metrics.normalization import normalize_text, read_number
 
 
 @dataclass(frozen=True)
@@ -97,5 +98,33 @@ def cell_values(line: FieldValues, cell: Cell) -> CellValues | None:
     return None
 
 
-def carries(line: FieldValues, cell: Cell) -> bool:
-    return cell_values(line, cell) is not None
+PRICE_CELLS: tuple[Cell, ...] = ("unit price", "amount")
+"""The cells price variance falls through: the unit price where both lines
+carry one the normalizer reads, else the amount (#65, #76). The generator
+injects on the same cell the matcher will compare, by the same rule."""
+
+
+@dataclass(frozen=True)
+class ReadCell(CellValues):
+    """A cell as one line carries it, with its texts read as numbers."""
+
+    numbers: tuple[Decimal, ...] | None
+    """Every text as a number, or None when the normalizer could not read one
+    of them, which makes the cell unreadable rather than partly read."""
+
+
+def read_cell(line: FieldValues, cell: Cell) -> ReadCell | None:
+    """The cell as this line carries it, read as numbers, or None when absent."""
+    values = cell_values(line, cell)
+    if values is None:
+        return None
+    numbers = tuple(read_number(text) for text in values.texts)
+    return ReadCell(
+        values.fieldtype,
+        values.texts,
+        None if any(number is None for number in numbers) else _present(numbers),
+    )
+
+
+def _present(numbers: tuple[Decimal | None, ...]) -> tuple[Decimal, ...]:
+    return tuple(number for number in numbers if number is not None)

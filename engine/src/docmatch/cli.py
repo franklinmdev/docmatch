@@ -775,6 +775,7 @@ def render_match(
         "",
         f"Per-type table, over cases from {' and '.join(SPLITS)}",
         *_per_type(table, pool),
+        *_rows(("clean-case false-positive rate", _clean_rate(table))),
         "",
         "Labels control, over cases from the fixed subset",
         *_rows(
@@ -786,6 +787,7 @@ def render_match(
             ),
             ("precision", f"{control.overall.precision:.3f}"),
             ("recall", f"{control.overall.recall:.3f}"),
+            ("clean-case false-positive rate", _clean_rate(control)),
         ),
         "",
         *_per_type(control, control_pool),
@@ -794,25 +796,21 @@ def render_match(
 
 
 def _per_type(table: Table, pool: SeedPool) -> list[str]:
-    """Precision, recall and n per injected type, with the documents carrying
-    it, then the clean-case rate."""
+    """Precision, recall and n per injected type, with the documents carrying it."""
     rows = [each for each in table.per_type if each.type in INJECTED_TYPES]
-    return [
-        *_table(
-            ("type", "precision", "recall", "n", "documents"),
-            [
-                (
-                    each.type,
-                    f"{each.precision:.3f}",
-                    f"{each.recall:.3f}",
-                    str(each.n),
-                    str(documents_carrying(pool.seeds, each.type)),
-                )
-                for each in rows
-            ],
-        ),
-        *_rows(("clean-case false-positive rate", _clean_rate(table))),
-    ]
+    return _table(
+        ("type", "precision", "recall", "n", "documents"),
+        [
+            (
+                each.type,
+                f"{each.precision:.3f}",
+                f"{each.recall:.3f}",
+                str(each.n),
+                str(documents_carrying(pool.seeds, each.type)),
+            )
+            for each in rows
+        ],
+    )
 
 
 def _clean_rate(table: Table) -> str:

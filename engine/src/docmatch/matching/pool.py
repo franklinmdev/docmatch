@@ -49,8 +49,11 @@ class SeedPool:
         return sum(each.without_lines for each in self.counts)
 
 
-def load_pool(dataset: DocileDataset, splits: Iterable[str] = SPLITS) -> SeedPool:
-    """Every document of every split named, as seeds; a missing split raises."""
+def load_pool(dataset: DocileDataset, splits: Iterable[str]) -> SeedPool:
+    """Every document of every split named, as seeds; a missing split raises.
+
+    Ids are sorted within a split: a split file's order carries no meaning,
+    and the draw has to rebuild the same cases from the same labels."""
     counts: list[PoolCount] = []
     seeds: list[Seed] = []
     for split in splits:
@@ -58,7 +61,7 @@ def load_pool(dataset: DocileDataset, splits: Iterable[str] = SPLITS) -> SeedPoo
             split,
             (
                 (document_id, dataset.annotation(document_id))
-                for document_id in dataset.document_ids(split)
+                for document_id in sorted(dataset.document_ids(split))
             ),
         )
         counts += part.counts

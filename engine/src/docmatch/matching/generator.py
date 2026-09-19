@@ -48,18 +48,19 @@ with.
 """
 
 import random
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 from docmatch.matching.matcher import DiscrepancyType, Place
 from docmatch.matching.records import (
     CELL_FIELDTYPES,
+    PRICE_CELLS,
     Cell,
     ReceiptLine,
     ReceivingRecord,
     Record,
-    cell_values,
+    read_cell,
 )
 from docmatch.matching.tolerances import (
     FAR_PERCENT,
@@ -70,7 +71,6 @@ from docmatch.matching.tolerances import (
     band,
 )
 from docmatch.metrics.fields import FieldValues
-from docmatch.metrics.normalization import read_number
 
 SEED = 20260919
 """The random seed every case is rebuilt from. Changing it draws new cases."""
@@ -83,6 +83,9 @@ INJECTED_TYPES: tuple[DiscrepancyType, ...] = ("price variance",)
 
 RECEIPT_CELLS: tuple[Cell, ...] = ("quantity", "unit", "code", "description")
 """What a receiving record copies from a purchase-order line: never prices."""
+
+DRAWS = 100
+"""How many values are drawn for a band before the line is given up on."""
 
 
 class GeneratorError(Exception):
@@ -140,10 +143,9 @@ def generate(
 
 def eligible(seed: Seed, type_: DiscrepancyType) -> tuple[int, ...]:
     """The positions of the seed's lines a type can be injected on."""
+    carries = ELIGIBLE[type_]
     return tuple(
-        position
-        for position, line in enumerate(seed.invoice.lines)
-        if _priced(line) is not None
+        position for position, line in enumerate(seed.invoice.lines) if carries(line)
     )
 
 
@@ -225,43 +227,42 @@ def _injected(
 def _price_variance(seed: Seed, wanted: Band, rng: random.Random) -> Case | None:
     """The seed with one purchase-order line's price lowered into the band, or
     None when no line of it can be."""
-    positions = list(eligible(seed, "price variance"))
-    rng.shuffle(positions)
-    for position in positions:
-        line = seed.invoice.lines[position]
-        priced = _priced(line)
-        assert priced is not None
-        cell, fieldtype, value = priced
+    lines = [
+        (position, priced)
+        for position, line in enumerate(seed.invoice.lines)
+        if (priced := _priced(line)) is not None
+    ]
+    rng.shuffle(lines)
+    for position, (fieldtype, value) in lines:
         lowered = _lowered(PRICE, value, wanted, rng)
         if lowered is None:
             continue
         po_lines = list(seed.invoice.lines)
-        po_lines[position] = {**line, fieldtype: (lowered,)}
+        po_lines[position] = {**seed.invoice.lines[position], fieldtype: (lowered,)}
         place = Place("po line", position)
         return _case(seed, po_lines, (Injected("price variance", place, wanted),))
     return None
 
 
-def _priced(line: FieldValues) -> tuple[Cell, str, Decimal] | None:
-    """The cell a price variance touches on this line, with the fieldtype it
-    is under and the value the matcher will compare, the highest listed.
-
-    The unit price where the line carries a readable one, else the amount,
-    which is the matcher's own fallback: an unreadable unit price is skipped
-    on both sides, a readable one is the cell compared, so a line whose
-    readable unit price is not positive is not eligible at all.
-    """
-    for cell in ("unit price", "amount"):
-        values = cell_values(line, cell)
-        if values is None:
+def _priced(line: FieldValues) -> tuple[str, Decimal] | None:
+    """The fieldtype a price variance lowers on this line, and the value the
+    matcher will compare, the highest listed: the first of `PRICE_CELLS` the
+    line carries and the normalizer reads, which is the cell the matcher
+    compares, since the purchase order copies the line. A line whose readable
+    price is not positive is not eligible: lowering it would not overbill."""
+    for cell in PRICE_CELLS:
+        read = read_cell(line, cell)
+        if read is None or read.numbers is None:
             continue
-        numbers = [read_number(text) for text in values.texts]
-        readable = [value for value in numbers if value is not None]
-        if len(readable) < len(numbers):
-            continue
-        highest = max(readable)
-        return (cell, values.fieldtype, highest) if highest > 0 else None
+        highest = max(read.numbers)
+        return (read.fieldtype, highest) if highest > 0 else None
     return None
+
+
+ELIGIBLE: dict[DiscrepancyType, Callable[[FieldValues], bool]] = {
+    "price variance": lambda line: _priced(line) is not None,
+}
+"""Whether a line carries what a type touches, per injected type."""
 
 
 DRAWS = 100
