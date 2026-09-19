@@ -453,9 +453,9 @@ precision and 0.17 to 0.19 of recall, and a clean invoice is held on 37 to 51
 percent of cases. Most of the false alarms are pairing: a reading line the
 matcher cannot pair is a false extra line, and the purchase-order line it
 should have taken a false missing line, so extra line and missing line sit
-between 0.38 and 0.49 precision on every row. The full per-type table of each row is in the report; unit
-variant and tax mismatch are marked indicative there, since only 8 and 2 of
-the 93 documents carry them.
+between 0.38 and 0.49 precision on every row. The full per-type table of each
+row is in the report; unit variant and tax mismatch are marked indicative
+there, since only 8 and 2 of the 93 documents carry them.
 
 **Against the pivot trigger.** `docs/alternatives.md` opens a pivot discussion
 when matching precision and recall are above 0.99 on every type at first
