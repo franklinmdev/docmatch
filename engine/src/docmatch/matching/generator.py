@@ -36,7 +36,8 @@ Extra line removes a line from the purchase order and the receiving record,
 so the invoice bills a line nobody ordered. Missing line adds to the purchase
 order a labeled line from another seed in the same pool, with its code and
 description, at a random position, so the unrelated line the pairing floor
-was set on is the one it meets (#65, #77). Neither has a band. A line alike
+was set on is the one it meets (#65, #77); a donor line with neither is not
+given, since it would meet no floor. Neither has a band. A line alike
 on every cell pairing reads, once normalized, to another line of the records
 it would join or leave is never the one removed or added: the matcher could
 not say which of the two was injected, so the truth could not be scored.
@@ -64,6 +65,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 from docmatch.matching.matcher import (
+    IDENTITY_CELLS,
     PAIRING_CELLS,
     DiscrepancyType,
     Place,
@@ -315,16 +317,23 @@ def _missing_line(
 
 
 def _lines_to_give(seed: Seed, donor: Seed) -> list[FieldValues]:
-    """The donor's lines unlike every line of the seed; none when it is the
-    seed."""
+    """The donor's lines that carry a code or a description and are unlike
+    every line of the seed; none when it is the seed. A line with values only
+    would meet no floor, only the value tiebreak, so it is not given (#77)."""
     if donor.document_id == seed.document_id:
         return []
     seed_keys = {_pairing_key(line) for line in seed.invoice.lines}
     return [
         line
         for line in donor.invoice.lines
-        if pairable(line) and _pairing_key(line) not in seed_keys
+        if _named(line) and _pairing_key(line) not in seed_keys
     ]
+
+
+def _named(line: FieldValues) -> bool:
+    """Whether the line carries a code or a description, the cells the
+    pairing floor was set on."""
+    return any(cell_values(line, cell) is not None for cell in IDENTITY_CELLS)
 
 
 PairingKey = tuple[frozenset[str] | None, ...]

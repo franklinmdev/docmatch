@@ -113,7 +113,10 @@ TYPES: tuple[DiscrepancyType, ...] = get_args(DiscrepancyType)
 VALUE_CELLS: tuple[Cell, ...] = ("quantity", "unit price", "amount")
 """The cells pairing counts agreement on, one each, to break identity ties."""
 
-PAIRING_CELLS: tuple[Cell, ...] = ("code", "description", *VALUE_CELLS)
+IDENTITY_CELLS: tuple[Cell, ...] = ("code", "description")
+"""The cells identity is graded on, each against its floor."""
+
+PAIRING_CELLS: tuple[Cell, ...] = (*IDENTITY_CELLS, *VALUE_CELLS)
 """Every cell pairing reads: identity, then the values that break its ties."""
 
 Severity = Literal["hold", "note"]

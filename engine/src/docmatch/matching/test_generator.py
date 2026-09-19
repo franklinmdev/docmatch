@@ -248,6 +248,25 @@ def test_a_missing_line_adds_a_labeled_line_from_another_seed_to_the_po() -> Non
         )
 
 
+def test_a_missing_line_is_never_a_donor_line_with_values_only() -> None:
+    """A donor line with no code and no description meets no floor, only the
+    value tiebreak, so it is not the line added (#77)."""
+    nameless = seed("nameless", line(amount_gross="12.00", quantity="1"))
+    named = seed("named", line(description="Crate", amount_gross="40.00"))
+
+    cases = generate((PRICED, nameless, named), seed=1, clean=0, per_type=6)
+
+    added = [
+        case.purchase_order.lines[case.truth[0].place.line or 0]
+        for case in injected(cases, "missing line")
+    ]
+    assert added
+    assert nameless.invoice.lines[0] not in added
+    assert all(
+        "line_item_code" in each or "line_item_description" in each for each in added
+    )
+
+
 def test_a_missing_line_needs_another_seed_in_the_pool() -> None:
     """A pool of one seed has no other line to add: n 0, not an error."""
     cases = generate((PRICED,), seed=1, clean=0, per_type=2)
