@@ -392,7 +392,8 @@ uv run docmatch match --run data/runs/gemini --run data/runs/azure --run data/ru
 which prints this table, the diagnostic table, the labels control and the
 three end-to-end rows below in one report; without `--run` it prints all but
 the end-to-end rows. The command builds every case from the labels on one seed
-pinned in code, so rerunning it at that commit reproduces every number here.
+pinned in code, so rerunning it at that commit reproduces this table; the
+end-to-end rows also need the saved runs the extraction rows produced.
 The pairing floors, 0.5 on codes and 0.4 on descriptions, are the values the
 floor procedure measures on train over 10,000 cross-document pairs each.
 
@@ -449,9 +450,9 @@ document. It is reported and not tuned against.
 
 The control's gap to 1.0 is the matcher's, and a backend's gap to the control
 is what extraction costs. On every backend that cost is 0.46 to 0.50 of
-precision and 0.17 to 0.19 of recall, and a clean invoice is held on 37 to 51
-percent of cases. Most of the false alarms are pairing: a reading line the
-matcher cannot pair is a false extra line, and the purchase-order line it
+precision and 0.17 to 0.19 of recall, and a clean invoice draws a finding on
+37 to 51 percent of cases. Most of the false alarms are extra lines and missing
+lines: a reading line the matcher cannot pair is a false extra line, and the purchase-order line it
 should have taken a false missing line, so extra line and missing line sit
 between 0.38 and 0.49 precision on every row. The full per-type table of each
 row is in the report; unit variant and tax mismatch are marked indicative
@@ -464,8 +465,10 @@ line 0.937 and 0.940, short-ship precision 0.971 and over-ship recall 0.984.
 The labels control does clear 0.99 on every type, but it is 93 documents and
 the row the end-to-end rows are read against, while the trigger names the
 per-type table, the one built over every label. The end-to-end rows are near
-0.5 precision. The matching layer has work left in pairing, under both hard
-negatives and misread lines, so no pivot discussion opens.
+0.5 precision. No earlier report met the trigger either: the first with every
+type, at `1fb2234`, had extra line at 0.958 and 0.994. The matching layer has
+work left in pairing, under both hard negatives and misread lines, so no pivot
+discussion opens.
 
 ### Entity resolution
 
