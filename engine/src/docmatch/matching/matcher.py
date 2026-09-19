@@ -113,6 +113,7 @@ from docmatch.matching.records import (
     ReceivingRecord,
     Record,
     cell_values,
+    listed_units,
     read_cell,
 )
 from docmatch.matching.similarity import similarity
@@ -148,6 +149,10 @@ IDENTITY_CELLS: tuple[Cell, ...] = ("code", "description")
 
 PAIRING_CELLS: tuple[Cell, ...] = (*IDENTITY_CELLS, *VALUE_CELLS)
 """Every cell pairing reads: identity, then the values that break its ties."""
+
+SUPPRESSED_CELLS: tuple[Cell, ...] = (*PRICE_CELLS, "quantity")
+"""What a unit variant leaves uncompared on its line: a price or a quantity
+counted in another unit is not comparable without a conversion table (#66)."""
 
 Severity = Literal["hold", "note"]
 SEVERITY: dict[DiscrepancyType, Severity] = {
@@ -604,16 +609,11 @@ def _unit_variant(
     """The invoice line counted in a unit the purchase-order line is not; None
     when the two agree, or when a side carries no unit, listing the other's."""
     place = Place("po line", pairing.po_line)
-    billed, ordered = cell_values(invoice, "unit"), cell_values(po, "unit")
-    if billed is None or ordered is None:
-        for carried in (billed, ordered):
-            if carried is not None:
-                not_compared.append(NotCompared(place, "unit", carried.texts, "absent"))
+    units = [cell_values(invoice, "unit"), cell_values(po, "unit")]
+    carried = _carried(place, "unit", units, not_compared)
+    if carried is None or listed_units(invoice) == listed_units(po):
         return None
-    if {normalize_text(text) for text in billed.texts} == {
-        normalize_text(text) for text in ordered.texts
-    }:
-        return None
+    billed, ordered = carried
     return Finding(
         type="unit variant",
         place=place,
@@ -623,11 +623,6 @@ def _unit_variant(
         margin=Decimal(0),
         tolerance=UNIT,
     )
-
-
-SUPPRESSED_CELLS: tuple[Cell, ...] = (*PRICE_CELLS, "quantity")
-"""What a unit variant leaves uncompared on its line: a price or a quantity
-counted in another unit is not comparable without a conversion table (#66)."""
 
 
 def _suppressed(place: Place, invoice: FieldValues) -> list[NotCompared]:
@@ -783,21 +778,12 @@ def _comparable(
     not_compared: list[NotCompared],
 ) -> tuple[_Readable, ...] | None:
     """Every side's cell read as numbers, in the order given, or None with
-    the reason listed.
-
-    One entry per cell and side, with one reason. Nothing is listed when no
-    side carries the cell: there is no comparison to have missed. When some
-    sides carry it and another does not, each carried side is listed as
-    absent, whatever the normalizer makes of it, since the comparison it
-    lacks is a partner and not a number.
-    """
-    cells = [read_cell(side, cell) for side in sides]
-    carried = [each for each in cells if each is not None]
-    if not carried:
-        return None
-    if len(carried) < len(cells):
-        for each in carried:
-            not_compared.append(NotCompared(place, cell, each.texts, "absent"))
+    the reason listed: absent as `_carried` lists it, else each side the
+    normalizer cannot read in full as unreadable."""
+    carried = _carried(
+        place, cell, [read_cell(side, cell) for side in sides], not_compared
+    )
+    if carried is None:
         return None
     readable: list[_Readable] = []
     for each in carried:
@@ -805,9 +791,32 @@ def _comparable(
             not_compared.append(NotCompared(place, cell, each.texts, "unreadable"))
         else:
             readable.append(_Readable(each.texts, each.numbers))
-    if len(readable) < len(cells):
+    if len(readable) < len(carried):
         return None
     return tuple(readable)
+
+
+def _carried[C: CellValues](
+    place: Place,
+    cell: Cell,
+    cells: Sequence[C | None],
+    not_compared: list[NotCompared],
+) -> list[C] | None:
+    """Every side's cell, in the order given, or None when a side lacks it.
+
+    One entry per cell and side, with one reason. Nothing is listed when no
+    side carries the cell: there is no comparison to have missed. When some
+    sides carry it and another does not, each carried side is listed as
+    absent, whatever its texts say, since the comparison it lacks is a
+    partner and not a value.
+    """
+    carried = [each for each in cells if each is not None]
+    if len(carried) < len(cells):
+        not_compared.extend(
+            NotCompared(place, cell, each.texts, "absent") for each in carried
+        )
+        return None
+    return carried
 
 
 def _numbers(texts: Sequence[str]) -> list[Decimal]:

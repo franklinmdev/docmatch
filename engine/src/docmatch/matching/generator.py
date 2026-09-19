@@ -60,7 +60,9 @@ Unit variant counts one purchase-order line in another unit, on a line that
 labels one (#65). The purchase order's quantity is the invoice's times a
 whole factor, its unit price the invoice's over that factor, and its amount
 the seed's, so only the unit disagrees; with no conversion table the matcher
-cannot tell how many of one unit make the other. The receiving record copies
+cannot tell how many of one unit make the other. A line whose quantity or
+unit price the normalizer cannot read is not eligible, since it could not
+be recounted. The receiving record copies
 the purchase order's unit and quantity, as goods received against it would
 be. It has no band.
 
@@ -99,6 +101,7 @@ from docmatch.matching.records import (
     ReceivingRecord,
     Record,
     cell_values,
+    listed_units,
     read_cell,
 )
 from docmatch.matching.tolerances import (
@@ -148,9 +151,9 @@ PO_UNITS = ("EA", "BOX", "PACK", "CASE")
 unit the seed line lists. Which one does not matter to a matcher that compares
 units as text, with no conversion table (#65)."""
 
-MOST_PER_UNIT = 12
-"""A unit variant's purchase-order unit is 2 to this many to the invoice's, a
-whole number, so a whole quantity stays whole."""
+PO_UNITS_PER_INVOICE_UNIT = range(2, 13)
+"""How many of a unit variant's purchase-order units make one of the
+invoice's: a whole number, so a whole quantity stays whole."""
 
 DRAWS = 100
 """How many values are drawn for a band before the line is given up on."""
@@ -521,65 +524,70 @@ def _unit_variant(
     seed: Seed, wanted: Band, rng: random.Random, pool: Sequence[Seed]
 ) -> Case | None:
     """The seed with one purchase-order line counted in another unit, its
-    quantity times a whole factor and its unit price over it, the amount as
-    seeded, and received in full in that unit."""
+    quantities times a whole factor and its unit prices over it, the amount
+    as seeded, and received in full in that unit."""
     position = rng.choice(eligible(seed, "unit variant", pool))
     line = seed.invoice.lines[position]
-    factor = Decimal(rng.randint(2, MOST_PER_UNIT))
+    counts = _counts(line)
+    if counts is None:
+        return None
+    factor = Decimal(rng.choice(PO_UNITS_PER_INVOICE_UNIT))
     po_lines = list(seed.invoice.lines)
     po_lines[position] = {
         **line,
         UNIT_FIELDTYPE: (rng.choice(_other_units(line)),),
-        **_recounted(line, factor),
+        **{
+            fieldtype: tuple(_recount(fieldtype, each, factor) for each in numbers)
+            for fieldtype, numbers in counts.items()
+        },
     }
     truth = (Injected("unit variant", Place("po line", position), None),)
     return _case(seed, po_lines, truth)
 
 
 def _counted(line: FieldValues) -> bool:
-    """Whether a unit variant can be injected on the line: it labels a unit,
-    and it carries a cell pairing reads, without which the matcher would
-    never compare it."""
+    """Whether a unit variant can be injected on the line: it labels a unit
+    another can replace, it carries a cell pairing reads, without which the
+    matcher would never compare it, and its counts can be recounted."""
     return (
-        cell_values(line, "unit") is not None
-        and pairable(line)
+        bool(listed_units(line))
         and bool(_other_units(line))
+        and pairable(line)
+        and _counts(line) is not None
     )
 
 
 def _other_units(line: FieldValues) -> list[str]:
     """The units a unit variant can give the line: unlike every unit it lists,
-    after the text normalization the matcher compares by."""
-    values = cell_values(line, "unit")
-    listed = set() if values is None else {normalize_text(t) for t in values.texts}
+    by the rule the matcher compares units by."""
+    listed = listed_units(line)
     return [each for each in PO_UNITS if normalize_text(each) not in listed]
 
 
-def _recounted(line: FieldValues, factor: Decimal) -> FieldValues:
-    """The line's quantities times the factor and its unit prices, gross and
-    net, over it: each fieldtype the line carries and the normalizer reads in
-    full. One it cannot read is left as seeded."""
-    recounted: dict[str, tuple[str, ...]] = {}
+def _counts(line: FieldValues) -> dict[str, tuple[Decimal, ...]] | None:
+    """The line's quantity and its unit prices, gross and net, as numbers,
+    each fieldtype it carries; None when the normalizer cannot read one in
+    full, since a unit variant could not recount it and the purchase order's
+    amount would stop agreeing with the rest."""
+    counts: dict[str, tuple[Decimal, ...]] = {}
     for fieldtype in (QUANTITY_FIELDTYPE, *CELL_FIELDTYPES["unit price"]):
         texts = line.get(fieldtype, ())
-        numbers = [each for each in map(read_number, texts) if each is not None]
-        if not texts or len(numbers) < len(texts):
-            continue
-        recounted[fieldtype] = tuple(
-            f"{each * factor:f}"
-            if fieldtype == QUANTITY_FIELDTYPE
-            else f"{_divided(each, factor):f}"
-            for each in numbers
-        )
-    return recounted
+        numbers = tuple(each for each in map(read_number, texts) if each is not None)
+        if len(numbers) < len(texts):
+            return None
+        if numbers:
+            counts[fieldtype] = numbers
+    return counts
 
 
-def _divided(price: Decimal, factor: Decimal) -> Decimal:
-    """A unit price over the factor, with the price's decimal places and at
-    least four, so a small one does not round to nothing."""
-    exponent = price.as_tuple().exponent
-    places = Decimal(10) ** min(-4, exponent if isinstance(exponent, int) else 0)
-    return (price / factor).quantize(places, rounding=ROUND_HALF_UP)
+def _recount(fieldtype: str, value: Decimal, factor: Decimal) -> str:
+    """A quantity times the factor, or a unit price over it, written with the
+    price's decimal places and at least four, so a small one does not round
+    to nothing."""
+    if fieldtype == QUANTITY_FIELDTYPE:
+        return f"{value * factor:f}"
+    divided = (value / factor).quantize(_places(value, 4), rounding=ROUND_HALF_UP)
+    return f"{divided:f}"
 
 
 def _one_tax(header: FieldValues) -> FieldValues:
@@ -610,7 +618,7 @@ ELIGIBLE: dict[DiscrepancyType, Callable[[FieldValues], bool]] = {
     "price variance": lambda line: _priced(line) is not None,
     "short-ship": lambda line: _quantity(line) is not None,
     "over-ship": lambda line: _quantity(line) is not None,
-    "unit variant": lambda line: _counted(line),
+    "unit variant": _counted,
 }
 """Whether a line carries what a type touches, for the line types whose
 eligibility is the line's own."""
@@ -649,11 +657,17 @@ def _lowered(
         if wanted == "near"
         else (NEAR_PERCENT, FAR_PERCENT)
     )
-    exponent = value.as_tuple().exponent
-    places = Decimal(10) ** min(-2, exponent if isinstance(exponent, int) else 0)
+    places = _places(value, 2)
     for _ in range(DRAWS):
         share = Decimal(rng.uniform(float(low), float(high)))
         lowered = (value / (1 + share)).quantize(places, rounding=ROUND_HALF_UP)
         if band(tolerance, value, lowered) == wanted:
             return f"{lowered:f}"
     return None
+
+
+def _places(value: Decimal, fewest: int) -> Decimal:
+    """The quantum that writes a value with its own decimal places, and with
+    at least `fewest`."""
+    exponent = value.as_tuple().exponent
+    return Decimal(10) ** min(-fewest, exponent if isinstance(exponent, int) else 0)

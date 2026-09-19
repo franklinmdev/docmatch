@@ -22,6 +22,9 @@ Quantities are exact, since 17,477 of 17,975 labeled quantities are whole
 numbers and seeds copy quantities rather than compute them (#70): the
 quantity tolerance is a percent and a cent of zero.
 
+Units are exact too, compared as text after the text normalization: with no
+conversion table there is no way for two different units to agree (#65).
+
 Bands
 -----
 

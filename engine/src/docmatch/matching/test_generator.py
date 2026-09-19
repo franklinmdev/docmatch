@@ -528,11 +528,36 @@ def test_a_unit_variant_counts_the_po_line_in_another_unit_and_keeps_the_amount(
             for other, each in enumerate(COUNTED.invoice.lines)
             if other != position
         ]
-        (received_,) = [
+        (receipt_line,) = [
             each.cells for each in case.receipt.lines if each.po_line == position
         ]
-        assert units(received_) == units(po_line)
-        assert received_["line_item_quantity"] == po_line["line_item_quantity"]
+        assert units(receipt_line) == units(po_line)
+        assert receipt_line["line_item_quantity"] == po_line["line_item_quantity"]
+
+
+@pytest.mark.parametrize(
+    "unreadable",
+    [
+        {"quantity": "two"},
+        {"quantity": "2", "unit_price_gross": "30.00", "unit_price_net": "n/a"},
+    ],
+)
+def test_a_line_that_cannot_be_recounted_carries_no_unit_variant(
+    unreadable: dict[str, str],
+) -> None:
+    """A quantity or unit price the normalizer cannot read could not be
+    scaled, and the purchase order's amount would stop agreeing with them."""
+    garbled = seed(
+        "garbled",
+        line(
+            description="Copier paper",
+            units_of_measure="BOX",
+            amount_gross="60.00",
+            **unreadable,
+        ),
+    )
+
+    assert documents_carrying((garbled,), "unit variant") == 0
 
 
 def test_only_lines_labeling_a_unit_carry_a_unit_variant() -> None:

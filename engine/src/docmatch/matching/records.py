@@ -121,6 +121,17 @@ def cell_values(line: FieldValues, cell: Cell) -> CellValues | None:
     return None
 
 
+def listed_units(line: FieldValues) -> frozenset[str]:
+    """The units the line lists, as a unit variant compares them: after the
+    text normalization, so case and spacing never make two units differ;
+    empty when it lists none. The generator picks a unit outside them by the
+    same rule the matcher fires on."""
+    values = cell_values(line, "unit")
+    if values is None:
+        return frozenset()
+    return frozenset(normalize_text(text) for text in values.texts)
+
+
 PRICE_CELLS: tuple[Cell, ...] = ("unit price", "amount")
 """The cells price variance falls through: the unit price where both lines
 carry one the normalizer reads, else the amount (#65, #76). The generator
