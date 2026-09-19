@@ -2,7 +2,7 @@
 
 **Document reconciliation engine.** docmatch extracts invoices and receipts with vision language models, validates them with deterministic gates, matches them against purchase orders and receiving records, routes exceptions to human review, and measures every change against a labeled benchmark in CI.
 
-> **Status:** phases 0 and 1 are done: their numbers are in the Benchmarks section with the commits that produced them, three extraction rows, the calibration table and the gate ablation. Phase 2, matching, is next. The remaining tables fill in as phases complete, and a phase is not done until its number is here.
+> **Status:** phases 0 to 2 are done: their numbers are in the Benchmarks section with the commits that produced them, three extraction rows, the calibration table, the gate ablation, the matching table and its end-to-end rows. Phase 3, entity resolution, is next. The remaining tables fill in as phases complete, and a phase is not done until its number is here.
 
 ## Why
 
@@ -68,7 +68,7 @@ Measurement before modeling.
 ### Phase 2. Matching
 
 - Generator that derives purchase orders and receiving records from the labeled invoices and injects labeled discrepancies: price variance, quantity short-ship and over-ship, missing line, extra line, unit-of-measure variant, tax mismatch. Clean cases carry rounding drift inside the tolerance, which must not fire. Duplicate invoice detection is a separate control and stays out of this phase.
-- Rules engine with configurable tolerances and a discrepancy taxonomy with severities.
+- Rules engine with tolerances written as constants in code, so a tolerance change is a commit that reruns `docmatch match`, and a discrepancy taxonomy with severities.
 - Explainable results: which rule fired, on which numbers, with the tolerance applied.
 
 **The number:** discrepancy detection precision and recall per type, and the false-positive rate on clean cases. An end-to-end row, image to match result, showing compound error.
@@ -365,9 +365,107 @@ carried a confidence.
 
 ### Matching, injected discrepancies
 
-| Discrepancy type | Precision | Recall | Commit |
-|---|---|---|---|
-| | | | |
+Cases from every DocILE label, train and val, with the invoice as labeled.
+Precision and recall are over findings, and a finding is right only when its
+type and its place both agree with the generator's truth. n is the injected
+findings of a type, and documents is how many seeds could carry it.
+
+| Discrepancy type | Precision | Recall | n | Documents | Commit |
+|---|---|---|---|---|---|
+| price variance | 0.867 | 0.998 | 1,165 | 4,956 | [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) |
+| short-ship | 0.971 | 0.998 | 819 | 2,500 | [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) |
+| over-ship | 0.996 | 0.984 | 811 | 2,463 | [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) |
+| extra line | 0.937 | 0.940 | 1,089 | 4,750 | [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) |
+| missing line | 0.997 | 0.999 | 1,930 | 5,325 | [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) |
+| unit-of-measure variant | 0.997 | 0.997 | 576 | 334 | [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) |
+| tax mismatch | 1.000 | 1.000 | 546 | 253 | [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) |
+
+**Clean-case false-positive rate: 0.025**, 25 of 1,000 clean cases with any
+finding at all. The seed pool is 5,180 train and 500 val documents, 38,678
+lines, and the 355 documents with no labeled line seed nothing. Produced at
+[`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) by
+
+```bash
+uv run docmatch match --run data/runs/gemini --run data/runs/azure --run data/runs/openai
+```
+
+which prints this table, the diagnostic table, the labels control and the
+three end-to-end rows below in one report; without `--run` it prints all but
+the end-to-end rows. The command builds every case from the labels on one seed
+pinned in code, so rerunning it at that commit reproduces every number here.
+The pairing floors, 0.5 on codes and 0.4 on descriptions, are the values the
+floor procedure measures on train over 10,000 cross-document pairs each.
+
+| Hard negative on a clean line | Placed | False alarms |
+|---|---|---|
+| rounding drift, one cent | 5,746 | 85 |
+| just inside, 90 to 100 percent of the margin | 5,255 | 76 |
+| billed below the PO or the receipt | 5,972 | 81 |
+| on no hard negative | | 40 |
+
+| Discrepancy type | Near recall | n | Far recall | n |
+|---|---|---|---|---|
+| price variance | 0.998 | 583 | 0.998 | 582 |
+| short-ship | 0.995 | 410 | 1.000 | 409 |
+| over-ship | 0.980 | 406 | 0.988 | 405 |
+| tax mismatch | 1.000 | 273 | 1.000 | 273 |
+
+The headline recall is that half-and-half mix of near the edge and far past
+it; extra line, missing line and unit variant have no band.
+
+**Where the matcher loses.** No hard negative crosses a tolerance on its own,
+so the 242 false alarms on them come from pairing. Price variance loses the most
+precision, and the cause is known: when two lines of one invoice share a code
+and description, or carry neither, #63 breaks the tie by exact agreement on
+quantity, unit price and amount. A copied line always agreed exactly, and a
+one-cent drift removes the only thing that told the two apart. A counts-only
+probe on #87 found about 5,500 lines paired with the wrong partner, most of
+them harmless, with 179 price variances, 24 short-ships and 69 extra lines
+landing on a swapped pair. Breaking the tie by how close the values are
+changes #63, so it is a measured change of its own and is not in this number.
+
+### Matching, end to end
+
+The same matcher over cases built from the fixed subset's labels, with each
+backend's saved reading of the document swapped in as the invoice. Truth is
+still the generator's, so a finding a misread value causes is a false alarm
+and a discrepancy the reading hides is a miss. **Every row rests on 93
+documents**, the fixed subset's documents with labeled lines; the other 7 seed
+nothing. The labels control is the same cases with the labels as the invoice.
+
+| Invoice | Precision | Recall | Clean-case false-positive rate | Left below a floor | Commit |
+|---|---|---|---|---|---|
+| labels control | 0.998 | 0.998 | 0.000 | | [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) |
+| `gemini-3.1-flash-lite` reading | 0.519 | 0.805 | 0.453 | 11 of 297 | [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af), run at [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
+| Azure `prebuilt-invoice` reading | 0.538 | 0.813 | 0.506 | 9 of 306 | [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af), run at [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
+| `gpt-5.6-luna` reading | 0.503 | 0.831 | 0.366 | 18 of 312 | [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af), run at [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) |
+
+Precision and recall are over all findings of every type, the clean-case rate
+over 1,000 clean cases, each run from the extraction command in its own row
+above. Left below a floor is the floor's cost on that run: of its reading
+lines the line-item metric pairs with a labeled line, how many pairing left
+unpaired because they fell below a pairing floor, over one clean case per
+document. It is reported and not tuned against.
+
+The control's gap to 1.0 is the matcher's, and a backend's gap to the control
+is what extraction costs. On every backend that cost is 0.46 to 0.50 of
+precision and 0.17 to 0.19 of recall, and a clean invoice is held on 37 to 51
+percent of cases. Most of the false alarms are pairing: a reading line the
+matcher cannot pair is a false extra line, and the purchase-order line it
+should have taken a false missing line, so extra line and missing line sit
+between 0.38 and 0.49 precision on every row. The full per-type table of each row is in the report; unit
+variant and tax mismatch are marked indicative there, since only 8 and 2 of
+the 93 documents carry them.
+
+**Against the pivot trigger.** `docs/alternatives.md` opens a pivot discussion
+when matching precision and recall are above 0.99 on every type at first
+attempt. The per-type table is not: price variance precision is 0.867, extra
+line 0.937 and 0.940, short-ship precision 0.971 and over-ship recall 0.984.
+The labels control does clear 0.99 on every type, but it is 93 documents and
+the row the end-to-end rows are read against, while the trigger names the
+per-type table, the one built over every label. The end-to-end rows are near
+0.5 precision. The matching layer has work left in pairing, under both hard
+negatives and misread lines, so no pivot discussion opens.
 
 ### Entity resolution
 
