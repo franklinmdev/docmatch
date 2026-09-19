@@ -50,7 +50,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from docmatch.docile.dataset import DocileDataset
 from docmatch.evals.confidence import (
@@ -104,6 +104,33 @@ def read_predictions(path: Path) -> dict[str, Prediction]:
             f"{path} is not a run's predictions: expected a JSON object keyed by "
             f'document id, each holding one document\'s "fields" and "line_items". '
             f"{first_problem(error, within=1)}"
+        ) from error
+
+
+class RunRecord(BaseModel):
+    """What a run's `run.json` names it by: the backend and the model asked for.
+
+    The file carries tokens, cost and latency too, which nothing scoring a
+    run reads, so they are left to the reader of the file."""
+
+    backend: str
+    requested_model: str
+
+    @property
+    def name(self) -> str:
+        return f"{self.backend} {self.requested_model}"
+
+
+def read_run_record(path: Path) -> RunRecord:
+    """A run's record, or a message saying what is wrong with it."""
+    try:
+        return RunRecord.model_validate_json(path.read_bytes())
+    except OSError as error:
+        raise PredictionError(f"cannot read the run record {path}: {error}") from error
+    except ValidationError as error:
+        raise PredictionError(
+            f'{path} is not a run record: expected a JSON object with a "backend" '
+            f'and a "requested_model". {first_problem(error)}'
         ) from error
 
 

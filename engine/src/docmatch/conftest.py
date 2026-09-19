@@ -49,7 +49,8 @@ def synthetic_subset() -> Path:
 
     A dataset in DocILE's shape, a manifest drawn from it, and a predictions
     file covering all but one of the pinned documents plus one the manifest
-    does not pin. No real document content, so it is committed and CI needs no
-    dataset.
+    does not pin. Beside the predictions, a `manifest.json` and a `run.json`,
+    so the directory is also a saved run `docmatch match --run` takes. No
+    real document content, so it is committed and CI needs no dataset.
     """
     return SYNTHETIC_SUBSET

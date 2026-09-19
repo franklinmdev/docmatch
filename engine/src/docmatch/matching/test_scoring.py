@@ -1,7 +1,9 @@
 """Tests for scoring match results against the generator's truth: seam 3.
 
 Cases and results are built by hand, so what is pinned is how findings are
-counted, not what the matcher does with the case's records.
+counted, not what the matcher does with the case's records. The end-to-end
+row's tests match a hand-built reading against a hand-built case, and pin
+where its findings are placed and what a missing reading or the floor costs.
 """
 
 from dataclasses import replace
@@ -15,8 +17,15 @@ from docmatch.matching.matcher import (
     Place,
     UnpairedFinding,
 )
-from docmatch.matching.records import ReceivingRecord, Record
-from docmatch.matching.scoring import TypeScore, score
+from docmatch.matching.records import ReceiptLine, ReceivingRecord, Record
+from docmatch.matching.scoring import (
+    FloorCost,
+    Table,
+    TypeScore,
+    floor_cost,
+    score,
+    score_read,
+)
 from docmatch.matching.tolerances import PRICE, UNIT
 
 EMPTY = Record(header={}, lines=())
@@ -130,6 +139,112 @@ def test_what_was_not_compared_counts_in_no_score() -> None:
 
 def test_the_rate_is_zero_when_there_is_no_clean_case() -> None:
     assert score([case(injected(0))], [result(0)]).clean_false_positive_rate == 0.0
+
+
+def line(description: str, quantity: str, amount: str) -> dict[str, tuple[str, ...]]:
+    return {
+        "line_item_description": (description,),
+        "line_item_quantity": (quantity,),
+        "line_item_amount_gross": (amount,),
+    }
+
+
+HEX_KEYS = line("Hex key set", "3", "45.00")
+WRENCH = line("Torque wrench", "1", "317.50")
+GLOVES = line("Work gloves", "5", "50.00")
+
+
+def labeled(*lines: dict[str, tuple[str, ...]]) -> Record:
+    return Record(header={}, lines=tuple(lines))
+
+
+def received(po: Record) -> ReceivingRecord:
+    return ReceivingRecord(
+        tuple(
+            ReceiptLine(
+                {
+                    "line_item_quantity": each["line_item_quantity"],
+                    "line_item_description": each["line_item_description"],
+                },
+                position,
+            )
+            for position, each in enumerate(po.lines)
+        )
+    )
+
+
+def a_case(invoice: Record, po: Record, *truth: Injected) -> Case:
+    return Case("made-up", invoice, po, received(po), truth)
+
+
+def rows(table: Table) -> dict[str, TypeScore]:
+    return {each.type: each for each in table.per_type}
+
+
+def test_an_extra_line_on_a_reading_is_placed_on_the_labeled_line_it_reads() -> None:
+    """The reading drops the first labeled line, so the extra line it bills
+    sits at reading position 1 and labeled position 2: the line-item
+    metric's own assignment maps it back, and it is a hit (#76)."""
+    extra = a_case(
+        labeled(HEX_KEYS, WRENCH, GLOVES),
+        labeled(HEX_KEYS, WRENCH),
+        Injected("extra line", Place("invoice line", 2), None),
+    )
+
+    table = score_read([extra], {"made-up": labeled(WRENCH, GLOVES)})
+
+    found = rows(table)
+    assert (found["extra line"].hits, found["extra line"].false_alarms) == (1, 0)
+    # The dropped row leaves its purchase-order line unpaired: a false alarm.
+    assert found["missing line"].false_alarms == 1
+
+
+def test_a_reading_line_no_labeled_line_answers_is_a_false_alarm() -> None:
+    """A line the reading made up has no labeled line to be placed on, so it
+    can never be taken for the extra line the generator removed."""
+    extra = a_case(
+        labeled(HEX_KEYS, WRENCH),
+        labeled(HEX_KEYS),
+        Injected("extra line", Place("invoice line", 1), None),
+    )
+    made_up = line("Delivery", "2", "0.00")
+
+    table = score_read([extra], {"made-up": labeled(HEX_KEYS, made_up)})
+
+    found = rows(table)
+    assert (found["extra line"].hits, found["extra line"].misses) == (0, 1)
+    assert found["extra line"].false_alarms == 1
+
+
+def test_a_document_with_no_reading_is_an_invoice_with_no_lines() -> None:
+    """A failed or empty reading pays in misses and false alarms (#67)."""
+    po = labeled(HEX_KEYS, WRENCH)
+    short = a_case(
+        labeled(HEX_KEYS, WRENCH),
+        po,
+        Injected("short-ship", Place("po line", 0), "near"),
+    )
+
+    table = score_read([short, a_case(labeled(HEX_KEYS, WRENCH), po)], {})
+
+    found = rows(table)
+    assert found["short-ship"].misses == 1
+    assert found["missing line"].false_alarms == 4
+    assert table.clean_false_positives == 1
+
+
+def test_the_floor_costs_the_misread_lines_it_leaves_unpaired() -> None:
+    """Over one clean case per document: a line read with its description
+    garbled below the floor is still the line-item metric's pair of its
+    labeled line, so the floor cost it; a line the reading made up is not
+    the floor's cost."""
+    clean = a_case(labeled(HEX_KEYS, WRENCH), labeled(HEX_KEYS, WRENCH))
+    garbled = line("Spanner", "1", "317.50")
+    made_up = line("Delivery", "1", "0.00")
+
+    cost = floor_cost([clean, clean], {"made-up": labeled(HEX_KEYS, garbled, made_up)})
+
+    assert cost == FloorCost(read=2, unpaired=1)
 
 
 # The diagnostic table

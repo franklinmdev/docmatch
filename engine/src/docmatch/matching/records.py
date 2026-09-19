@@ -22,12 +22,14 @@ reading that puts a gross value in the net column still has its value compared,
 which matters for the OpenAI row's known net/gross split (#49).
 """
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
 
 from docmatch.docile.annotation import Annotation
-from docmatch.metrics.fields import FieldValues, labeled_fields
+from docmatch.extraction.derived import derive, with_derived
+from docmatch.metrics.fields import FieldValues, Prediction, labeled_fields
 from docmatch.metrics.line_items import labeled_line_items
 from docmatch.metrics.normalization import normalize_text, read_number
 
@@ -80,6 +82,19 @@ def labeled_record(annotation: Annotation) -> Record:
     """A document's labels as the invoice matching takes."""
     return Record(
         header=labeled_fields(annotation), lines=labeled_line_items(annotation)
+    )
+
+
+def read_record(
+    prediction: Prediction, currency_symbols: Mapping[str, Sequence[str]]
+) -> Record:
+    """A backend's reading as the invoice matching takes, with the derived
+    values `eval` gives it, though no cell matching compares reads the
+    derived currency (#81). Read whether it passes the gate or not: the gate
+    does not filter (#67)."""
+    return Record(
+        header=with_derived(prediction.header, derive(prediction, currency_symbols)),
+        lines=prediction.rows,
     )
 
 
