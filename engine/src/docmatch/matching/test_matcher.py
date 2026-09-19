@@ -146,6 +146,23 @@ def test_price_variance_falls_to_the_amount_when_a_unit_price_is_unreadable() ->
     ]
 
 
+def test_a_cell_one_side_lacks_is_listed_once_whatever_the_other_side_says() -> None:
+    """Absent on one side is the reason, not the other side's unreadable text."""
+    result = matched(
+        record(line(description="Hex key set", amount_gross="46.00")),
+        record(
+            line(
+                description="Hex key set", unit_price_gross="n/a", amount_gross="45.00"
+            )
+        ),
+    )
+
+    assert [(each.cell, each.reason) for each in result.not_compared] == [
+        ("unit price", "absent")
+    ]
+    assert [each.cell for each in result.findings] == ["amount"]
+
+
 def test_a_net_column_is_compared_when_there_is_no_gross_one() -> None:
     result = matched(
         record(line(description="Hex key set", unit_price_net="46.00")),

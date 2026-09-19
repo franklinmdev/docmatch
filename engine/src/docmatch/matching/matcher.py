@@ -443,24 +443,27 @@ def _comparable(
 ) -> tuple[_Readable, _Readable] | None:
     """Both sides of the cell read as numbers, or None with the reason listed.
 
-    Nothing is listed when neither side carries the cell: there is no
-    comparison to have missed.
+    One entry per cell and side, with one reason. Nothing is listed when
+    neither side carries the cell: there is no comparison to have missed.
+    When one side carries it and the other does not, the carried side is
+    listed as absent, whatever the normalizer makes of it, since the
+    comparison it lacks is a partner and not a number.
     """
-    sides = (read_cell(invoice, cell), read_cell(po, cell))
-    if all(side is None for side in sides):
+    invoice_cell, po_cell = read_cell(invoice, cell), read_cell(po, cell)
+    if invoice_cell is None and po_cell is None:
+        return None
+    if invoice_cell is None or po_cell is None:
+        for carried in (invoice_cell, po_cell):
+            if carried is not None:
+                not_compared.append(NotCompared(place, cell, carried.texts, "absent"))
         return None
     readable: list[_Readable] = []
-    for side in sides:
-        if side is None:
-            continue
+    for side in (invoice_cell, po_cell):
         if side.numbers is None:
             not_compared.append(NotCompared(place, cell, side.texts, "unreadable"))
         else:
             readable.append(_Readable(side.texts, side.numbers))
     if len(readable) < 2:
-        if any(side is None for side in sides):
-            carried = next(side for side in sides if side is not None)
-            not_compared.append(NotCompared(place, cell, carried.texts, "absent"))
         return None
     return readable[0], readable[1]
 
