@@ -73,6 +73,14 @@ a rule suppressing both on one line reaches them in one place. A
 purchase-order line the receiving record does not cover compares no
 quantity: there is nothing received to be short of.
 
+Unit variant: the invoice line's unit differs from its purchase-order line's
+after the text normalization, placed on the purchase-order line (#65).
+Listed units agree when both sides list the same ones, as listed values do.
+There is no conversion table, so a line counted in another unit has no
+price or quantity to compare: its price variance, short-ship and over-ship
+are not compared, and the unit price, amount and quantity its invoice line
+carries are listed as not compared with the reason `unit variant` (#66).
+
 Tax mismatch: the invoice's header `amount_total_tax` is above the purchase
 order's by more than its tolerance, the same shape as price, and is placed
 on the header (#65, #70, #76). There is no line tax.
@@ -114,6 +122,7 @@ from docmatch.matching.tolerances import (
     PRICE,
     QUANTITY,
     TAX,
+    UNIT,
     Tolerance,
 )
 from docmatch.metrics.fields import FieldValues
@@ -230,7 +239,9 @@ class Finding:
         return SEVERITY[self.type]
 
 
-NotComparedReason = Literal["unreadable", "absent", "nothing to pair on"]
+NotComparedReason = Literal[
+    "unreadable", "absent", "unit variant", "nothing to pair on"
+]
 
 
 UnpairedType = Literal["extra line", "missing line"]
@@ -259,7 +270,8 @@ class NotCompared:
     cell: Cell | None
     """None when the whole line was not compared, having nothing to pair on."""
     text: tuple[str, ...]
-    """The texts of the side that carried it, or that could not be read."""
+    """The texts of the side that carried it, or that could not be read; for
+    a unit variant, what the invoice billed."""
     reason: NotComparedReason
 
 
@@ -312,6 +324,11 @@ def match(
     for pairing in paired.pairings:
         invoice_line = invoice.lines[pairing.invoice_line]
         po_line = purchase_order.lines[pairing.po_line]
+        unit = _unit_variant(pairing, invoice_line, po_line, not_compared)
+        if unit is not None:
+            findings.append(unit)
+            not_compared += _suppressed(unit.place, invoice_line)
+            continue
         finding = _price_variance(pairing, invoice_line, po_line, not_compared)
         if finding is not None:
             findings.append(finding)
@@ -576,6 +593,50 @@ def _agree(one: FieldValues, other: FieldValues, cell: Cell) -> bool:
 
 
 # Rules
+
+
+def _unit_variant(
+    pairing: Pairing,
+    invoice: FieldValues,
+    po: FieldValues,
+    not_compared: list[NotCompared],
+) -> Finding | None:
+    """The invoice line counted in a unit the purchase-order line is not; None
+    when the two agree, or when a side carries no unit, listing the other's."""
+    place = Place("po line", pairing.po_line)
+    billed, ordered = cell_values(invoice, "unit"), cell_values(po, "unit")
+    if billed is None or ordered is None:
+        for carried in (billed, ordered):
+            if carried is not None:
+                not_compared.append(NotCompared(place, "unit", carried.texts, "absent"))
+        return None
+    if {normalize_text(text) for text in billed.texts} == {
+        normalize_text(text) for text in ordered.texts
+    }:
+        return None
+    return Finding(
+        type="unit variant",
+        place=place,
+        cell="unit",
+        invoice=billed.texts,
+        purchase_order=ordered.texts,
+        margin=Decimal(0),
+        tolerance=UNIT,
+    )
+
+
+SUPPRESSED_CELLS: tuple[Cell, ...] = (*PRICE_CELLS, "quantity")
+"""What a unit variant leaves uncompared on its line: a price or a quantity
+counted in another unit is not comparable without a conversion table (#66)."""
+
+
+def _suppressed(place: Place, invoice: FieldValues) -> list[NotCompared]:
+    """Each suppressed cell the invoice line carries, with the texts it billed."""
+    return [
+        NotCompared(place, cell, values.texts, "unit variant")
+        for cell in SUPPRESSED_CELLS
+        if (values := cell_values(invoice, cell)) is not None
+    ]
 
 
 def _price_variance(

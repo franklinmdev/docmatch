@@ -83,6 +83,11 @@ TAX = Tolerance(percent=Decimal("0.01"), cent=Decimal("0.01"))
 """On the header's total tax: the same shape as price, a constant of its own so
 a finding names which one it applied (#65, #70)."""
 
+UNIT = Tolerance(percent=Decimal(0), cent=Decimal(0))
+"""On a line's unit of measure, compared as text after the text normalization:
+exact, since there is no conversion table to say two units agree (#65). A
+constant of its own, like tax, so a finding names which one it applied."""
+
 NEAR_PERCENT = Decimal("0.02")
 """An overage past the tolerance and at most this share of the PO value is near."""
 

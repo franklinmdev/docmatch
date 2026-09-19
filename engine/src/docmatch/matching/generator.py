@@ -56,6 +56,14 @@ was ordered (#65). Near is exactly one unit fewer, far two units fewer or
 more, down to half (#70). A lowered quantity stays above zero, so a line of
 one unit carries neither type, and one under four units has no far band.
 
+Unit variant counts one purchase-order line in another unit, on a line that
+labels one (#65). The purchase order's quantity is the invoice's times a
+whole factor, its unit price the invoice's over that factor, and its amount
+the seed's, so only the unit disagrees; with no conversion table the matcher
+cannot tell how many of one unit make the other. The receiving record copies
+the purchase order's unit and quantity, as goods received against it would
+be. It has no band.
+
 Sizes and the pinned seed
 -------------------------
 
@@ -106,7 +114,7 @@ from docmatch.matching.tolerances import (
     quantity_band,
 )
 from docmatch.metrics.fields import FieldValues
-from docmatch.metrics.normalization import normalize
+from docmatch.metrics.normalization import normalize, normalize_text, read_number
 
 SEED = 20260919
 """The random seed every case is rebuilt from. Changing it draws new cases."""
@@ -121,14 +129,28 @@ INJECTED_TYPES: tuple[DiscrepancyType, ...] = (
     "short-ship",
     "over-ship",
     "tax mismatch",
+    "unit variant",
 )
-"""The types the generator injects, in the order their cases are built."""
+"""The types the generator injects, in the order their cases are built. A new
+type goes last, so the cases every other type draws stay the same."""
 
 RECEIPT_CELLS: tuple[Cell, ...] = ("quantity", "unit", "code", "description")
 """What a receiving record copies from a purchase-order line: never prices."""
 
 QUANTITY_FIELDTYPE = CELL_FIELDTYPES["quantity"][0]
 """Where a lowered quantity is written, on the purchase order or the receipt."""
+
+UNIT_FIELDTYPE = CELL_FIELDTYPES["unit"][0]
+"""Where a unit variant writes the purchase-order line's unit."""
+
+PO_UNITS = ("EA", "BOX", "PACK", "CASE")
+"""The units a unit variant counts a purchase-order line in, one unlike every
+unit the seed line lists. Which one does not matter to a matcher that compares
+units as text, with no conversion table (#65)."""
+
+MOST_PER_UNIT = 12
+"""A unit variant's purchase-order unit is 2 to this many to the invoice's, a
+whole number, so a whole quantity stays whole."""
 
 DRAWS = 100
 """How many values are drawn for a band before the line is given up on."""
@@ -495,6 +517,71 @@ def _tax_mismatch(
     return _case(seed, seed.invoice.lines, truth, po_header=po_header)
 
 
+def _unit_variant(
+    seed: Seed, wanted: Band, rng: random.Random, pool: Sequence[Seed]
+) -> Case | None:
+    """The seed with one purchase-order line counted in another unit, its
+    quantity times a whole factor and its unit price over it, the amount as
+    seeded, and received in full in that unit."""
+    position = rng.choice(eligible(seed, "unit variant", pool))
+    line = seed.invoice.lines[position]
+    factor = Decimal(rng.randint(2, MOST_PER_UNIT))
+    po_lines = list(seed.invoice.lines)
+    po_lines[position] = {
+        **line,
+        UNIT_FIELDTYPE: (rng.choice(_other_units(line)),),
+        **_recounted(line, factor),
+    }
+    truth = (Injected("unit variant", Place("po line", position), None),)
+    return _case(seed, po_lines, truth)
+
+
+def _counted(line: FieldValues) -> bool:
+    """Whether a unit variant can be injected on the line: it labels a unit,
+    and it carries a cell pairing reads, without which the matcher would
+    never compare it."""
+    return (
+        cell_values(line, "unit") is not None
+        and pairable(line)
+        and bool(_other_units(line))
+    )
+
+
+def _other_units(line: FieldValues) -> list[str]:
+    """The units a unit variant can give the line: unlike every unit it lists,
+    after the text normalization the matcher compares by."""
+    values = cell_values(line, "unit")
+    listed = set() if values is None else {normalize_text(t) for t in values.texts}
+    return [each for each in PO_UNITS if normalize_text(each) not in listed]
+
+
+def _recounted(line: FieldValues, factor: Decimal) -> FieldValues:
+    """The line's quantities times the factor and its unit prices, gross and
+    net, over it: each fieldtype the line carries and the normalizer reads in
+    full. One it cannot read is left as seeded."""
+    recounted: dict[str, tuple[str, ...]] = {}
+    for fieldtype in (QUANTITY_FIELDTYPE, *CELL_FIELDTYPES["unit price"]):
+        texts = line.get(fieldtype, ())
+        numbers = [each for each in map(read_number, texts) if each is not None]
+        if not texts or len(numbers) < len(texts):
+            continue
+        recounted[fieldtype] = tuple(
+            f"{each * factor:f}"
+            if fieldtype == QUANTITY_FIELDTYPE
+            else f"{_divided(each, factor):f}"
+            for each in numbers
+        )
+    return recounted
+
+
+def _divided(price: Decimal, factor: Decimal) -> Decimal:
+    """A unit price over the factor, with the price's decimal places and at
+    least four, so a small one does not round to nothing."""
+    exponent = price.as_tuple().exponent
+    places = Decimal(10) ** min(-4, exponent if isinstance(exponent, int) else 0)
+    return (price / factor).quantize(places, rounding=ROUND_HALF_UP)
+
+
 def _one_tax(header: FieldValues) -> FieldValues:
     """The header as a purchase order carries it: one tax, the highest the seed
     lists. Every seed on train and val that lists two taxes lists a zero beside
@@ -523,6 +610,7 @@ ELIGIBLE: dict[DiscrepancyType, Callable[[FieldValues], bool]] = {
     "price variance": lambda line: _priced(line) is not None,
     "short-ship": lambda line: _quantity(line) is not None,
     "over-ship": lambda line: _quantity(line) is not None,
+    "unit variant": lambda line: _counted(line),
 }
 """Whether a line carries what a type touches, for the line types whose
 eligibility is the line's own."""
@@ -541,6 +629,7 @@ INJECT: dict[DiscrepancyType, Inject] = {
     "short-ship": _short_ship,
     "over-ship": _over_ship,
     "tax mismatch": _tax_mismatch,
+    "unit variant": _unit_variant,
 }
 """How each injected type builds a case from a seed, for the band wanted
 where the type has bands."""
