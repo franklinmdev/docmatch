@@ -65,3 +65,18 @@ jobs:
           --data-dir engine/tests/evals/synthetic
           --manifest engine/tests/evals/synthetic/subset.json
           --run engine/tests/evals/synthetic
+
+  docs-location:
+    name: docs location
+    runs-on: ubuntu-latest
+    # Same events as the checks above.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Markdown lives in docs/, beside the root canonicals; the allowlist in
+      # .claude/docs-allowlist adds this repo's exceptions.
+      - name: Check markdown location
+        run: bash scripts/check-docs-location.sh
