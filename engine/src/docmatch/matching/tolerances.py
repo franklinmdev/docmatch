@@ -37,6 +37,11 @@ report splits it (#66, #70).
 On quantities, which have no percent to scale with, near is exactly one unit
 over and far is two units or more, up to double (#70).
 
+Hard negatives sit on the clean side of the same edges. Rounding drift is
+exactly the cent, over or under. Just inside is an overage of 90 to 100
+percent of the margin (35.62 to 35.65 in the example), on values of 1.00 and
+more only, and never on quantities, whose tolerance is exact (#70).
+
 Pairing floors
 --------------
 
@@ -116,6 +121,15 @@ def band(
     if overage <= FAR_PERCENT * po_value:
         return "far"
     return None
+
+
+JUST_INSIDE_SHARE = Decimal("0.90")
+"""A just-inside hard negative's overage is at least this share of the margin,
+and at most all of it: 35.62 to 35.65 against a purchase order of 35.30 (#70)."""
+
+JUST_INSIDE_LEAST = Decimal("1.00")
+"""No just-inside hard negative on a value under this: 1 percent of it is below
+the cent, so just inside would be rounding drift under another name (#70)."""
 
 
 NEAR_UNITS = Decimal(1)
