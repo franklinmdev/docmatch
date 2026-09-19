@@ -564,6 +564,31 @@ message or an issue. CI runs the same command on a committed synthetic corpus
 in DocILE's shape, `engine/tests/evals/synthetic`, which exercises the whole
 path on every push while the dataset stays on the machine that downloaded it.
 
+### Matching
+
+```bash
+uv run docmatch match
+```
+
+This is the command the matching table comes from. It needs no run and no
+model: it builds cases from every DocILE label, train and val, derives a
+purchase order and a receiving record from each labeled invoice, injects
+discrepancies into those two records with the truth written down, matches
+every case and scores the findings against that truth. The invoice is never
+altered. Cases are rebuilt from the labels on every run from one random seed
+pinned in code, and nothing is saved.
+
+It prints the seed pool (documents and lines per split, and how many documents
+have no lines and seed nothing), the pairing floors, the per-type table
+(precision, recall and n per discrepancy type, with the number of documents
+carrying it, and the clean-case false-positive rate over 1,000 clean cases),
+and a labels control over cases from the fixed subset, the row every end-to-end
+row is read against. Both splits are required; a missing one is an error, so a
+partial download cannot shrink the table silently. Tolerances and pairing
+floors are constants in `engine/src/docmatch/matching/tolerances.py`, so a
+change to one is a commit that reruns this command. CI runs it on the same
+synthetic corpus as the eval, at the real sizes.
+
 ### The baseline run
 
 `docmatch eval` scores a predictions file. `docmatch extract` is what produces
@@ -727,7 +752,8 @@ docmatch/
     pyproject.toml     the docmatch package and its `docmatch` command
     src/docmatch/      extraction, validation, resolution, matching, metrics
       evals/           the pinned subset, the run that scores it, the corpus survey
-    tests/evals/       the synthetic corpus CI runs the eval on
+      matching/        records, pairing, the rules, the case generator, the scorer
+    tests/evals/       the synthetic corpus CI runs the eval and the match on
   apps/review/         Next.js review inbox, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
   docs/                decision records

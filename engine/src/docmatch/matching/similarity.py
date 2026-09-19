@@ -1,0 +1,40 @@
+"""How alike two codes, or two descriptions, are: normalized Levenshtein.
+
+One minus the edit distance over the longer length, so identical texts score
+1.0, texts with nothing in common 0.0, and the measure is a true distance:
+it is symmetric and a single edit always costs the same share of the longer
+text. Hand-written, since it is thirty lines and the alternative in the
+standard library, `difflib.SequenceMatcher.ratio`, is not a distance, scores
+unrelated codes higher, and switches on an autojunk heuristic at 200
+characters (#77).
+
+The texts are compared as the scorer normalizes them, whitespace collapsed
+and case dropped; that is the caller's job, so this function is one thing.
+"""
+
+
+def similarity(one: str, other: str) -> float:
+    """1 minus edits over the longer length; two empty texts are alike."""
+    longer = max(len(one), len(other))
+    if longer == 0:
+        return 1.0
+    return 1 - _distance(one, other) / longer
+
+
+def _distance(one: str, other: str) -> int:
+    """The Levenshtein distance, two rows of the classic table at a time."""
+    if one == other:
+        return 0
+    previous = list(range(len(other) + 1))
+    for row, left in enumerate(one, start=1):
+        current = [row]
+        for column, right in enumerate(other, start=1):
+            current.append(
+                min(
+                    previous[column] + 1,  # delete
+                    current[column - 1] + 1,  # insert
+                    previous[column - 1] + (left != right),  # substitute
+                )
+            )
+        previous = current
+    return previous[-1]

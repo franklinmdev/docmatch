@@ -1,0 +1,94 @@
+"""The constants matching decides by: tolerances, bands, and pairing floors.
+
+One place holds them, as constants and not as flags or a config file, so that
+a tolerance change is a commit that runs the eval and every README number
+corresponds to one set (#70). Every finding records the constant it applied,
+so an explanation can quote it.
+
+Tolerances
+----------
+
+A price, and the header tax, may go over the purchase order by 1 percent of
+the purchase order's value, and always by a cent: a finding needs an overage
+above both. The percent scales with the value (line amounts run from 8.75 at
+the tenth percentile to 3,719.44 at the ninetieth, median 104.00) and the
+cent absorbs rounding on small values, where 1 percent is below a cent. Only
+disagreement against the buyer counts: billing below never fires (#65).
+
+The worked example: purchase order 35.30, so the margin is 0.353. An invoice
+at 35.31 or 35.65 passes; 35.66 is a price variance.
+
+Quantities are exact, since 17,477 of 17,975 labeled quantities are whole
+numbers and seeds copy quantities rather than compute them (#70).
+
+Bands
+-----
+
+An injected overage is near the edge when it is past the tolerance and at
+most 2 percent of the purchase order's value (35.66 to 36.00 in the example),
+and far when it is past 2 percent and at most 50 percent (up to 52.95). The
+generator draws each half and half, so a headline recall is that mix and the
+report splits it (#66, #70).
+
+Pairing floors
+--------------
+
+The lowest similarity at which a code, or a description, counts as agreement
+in pairing. Provisional, from a 500-document train sample: at 0.5, 0.7
+percent of cross-document code pairs clear; at 0.4, 0.6 percent of description
+pairs. The procedure in #77 fixes them from the whole of train.
+"""
+
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Literal
+
+
+@dataclass(frozen=True)
+class Tolerance:
+    """How far above the purchase order a money cell may go: a percent, and a cent."""
+
+    percent: Decimal
+    """Of the purchase order's value."""
+    cent: Decimal
+    """The overage must clear this too, whatever the percent comes to."""
+
+    def margin(self, po_value: Decimal) -> Decimal:
+        """The percent of this purchase-order value, in money."""
+        return self.percent * po_value
+
+    def exceeded(self, invoice_value: Decimal, po_value: Decimal) -> bool:
+        """Whether the invoice is over the purchase order by more than both."""
+        overage = invoice_value - po_value
+        return overage > self.margin(po_value) and overage > self.cent
+
+
+PRICE = Tolerance(percent=Decimal("0.01"), cent=Decimal("0.01"))
+"""On a line's unit price, else its amount."""
+
+NEAR_PERCENT = Decimal("0.02")
+"""An overage past the tolerance and at most this share of the PO value is near."""
+
+FAR_PERCENT = Decimal("0.50")
+"""An overage past the near band and at most this share of the PO value is far."""
+
+Band = Literal["near", "far"]
+
+
+def band(
+    tolerance: Tolerance, invoice_value: Decimal, po_value: Decimal
+) -> Band | None:
+    """Which band an overage falls in, or None when it is within the tolerance
+    or past the far band, where nothing is generated."""
+    if not tolerance.exceeded(invoice_value, po_value):
+        return None
+    overage = invoice_value - po_value
+    if overage <= NEAR_PERCENT * po_value:
+        return "near"
+    if overage <= FAR_PERCENT * po_value:
+        return "far"
+    return None
+
+
+CODE_FLOOR = 0.5
+DESCRIPTION_FLOOR = 0.4
