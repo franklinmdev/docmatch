@@ -261,3 +261,26 @@ def test_a_header_tax_that_is_zero_or_unreadable_is_not_eligible(tax: str) -> No
         injected(generate((untaxed,), seed=1, clean=0, per_type=2), "tax mismatch")
         == []
     )
+
+
+def test_a_po_carries_one_header_tax_the_highest_the_seed_lists() -> None:
+    """A labeled zero-rate row beside the total is not a second tax: every PO,
+    clean or not, carries the total alone, so it never disagrees with itself."""
+    listed = Seed(
+        "listed",
+        Record(
+            header={"amount_total_tax": ("0.00", "8.55")},
+            lines=(line(description="Hex key set", amount_gross="45.00"),),
+        ),
+    )
+
+    cases = generate((listed,), seed=1, clean=1, per_type=2)
+
+    assert [case.purchase_order.header for case in cases[:1]] == [
+        {"amount_total_tax": ("8.55",)}
+    ]
+    assert all(
+        case.purchase_order.header == {"amount_total_tax": ("8.55",)}
+        for case in injected(cases, "price variance")
+    )
+    assert all(case.purchase_order.lines == listed.invoice.lines for case in cases[:1])

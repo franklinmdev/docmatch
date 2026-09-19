@@ -16,9 +16,11 @@ in: a line labeled with only a description and an amount is a purchase-order
 line with only those, and a discrepancy type is injected only on lines that
 carry the cells it touches (#62). Lines whose own arithmetic fails stay as
 seeds, since matching compares field to field and an invoice's arithmetic is
-the gate's business. The receiving record copies quantities, units, codes
-and descriptions, never prices, and each of its lines names the
-purchase-order line it was received against, as an ERP's does (#63).
+the gate's business. The header is copied too, with one tax: a seed that
+lists several keeps its highest, the document's total. The receiving record
+copies quantities, units, codes and descriptions, never prices, and each of
+its lines names the purchase-order line it was received against, as an ERP's
+does (#63).
 
 Injection
 ---------
@@ -195,7 +197,7 @@ def _case(
     po_header: FieldValues | None = None,
 ) -> Case:
     purchase_order = Record(
-        header=seed.invoice.header if po_header is None else po_header,
+        header=_one_tax(seed.invoice.header) if po_header is None else po_header,
         lines=tuple(po_lines),
     )
     receipt = ReceivingRecord(
@@ -295,6 +297,19 @@ def _tax_mismatch(seed: Seed, wanted: Band, rng: random.Random) -> Case | None:
     po_header = {**seed.invoice.header, fieldtype: (lowered,)}
     truth = (Injected("tax mismatch", Place("header"), wanted),)
     return _case(seed, seed.invoice.lines, truth, po_header)
+
+
+def _one_tax(header: FieldValues) -> FieldValues:
+    """The header as a purchase order carries it: one tax, the highest the seed
+    lists. Every seed on train and val that lists two taxes lists a zero beside
+    its total, so the highest is the document's tax, and a purchase order
+    copying both would fire against itself under the matcher's listed-values
+    rule."""
+    read = read_cell(header, "tax")
+    if read is None or read.numbers is None:
+        return header
+    highest = read.numbers.index(max(read.numbers))
+    return {**header, read.fieldtype: (read.texts[highest],)}
 
 
 def _taxed(header: FieldValues) -> tuple[str, Decimal] | None:
