@@ -503,13 +503,32 @@ def test_a_receipt_line_follows_the_po_line_it_names_not_its_own_order() -> None
     ]
 
 
-def test_a_quantity_one_side_lacks_is_not_compared() -> None:
+def test_a_quantity_the_receipt_lacks_is_not_compared() -> None:
     result = shipped("12", "10", ())
 
     assert result.findings == ()
     assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
-        ("quantity", ("12",), "absent"),
-        ("quantity", ("10",), "absent"),
+        ("quantity", ("12",), "absent")
+    ]
+
+
+def test_a_short_ship_needs_no_po_quantity_and_the_over_ship_is_not_compared() -> (
+    None
+):
+    result = shipped("12", (), "10")
+
+    assert [each.type for each in result.findings] == ["short-ship"]
+    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+        ("quantity", ("12",), "absent")
+    ]
+
+
+def test_an_unreadable_po_quantity_leaves_the_short_ship_compared() -> None:
+    result = shipped("12", "ten", "10")
+
+    assert [each.type for each in result.findings] == ["short-ship"]
+    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+        ("quantity", ("ten",), "unreadable")
     ]
 
 

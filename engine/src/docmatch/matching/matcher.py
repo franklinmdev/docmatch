@@ -197,7 +197,8 @@ class Finding:
     """Empty when the rule does not compare against the purchase order, as
     short-ship does not."""
     margin: Decimal
-    """The percent of the purchase-order value, in money; 0 when exact."""
+    """The percent of the value compared against, in money: the purchase
+    order's, or the receipt's for a short-ship; 0 when exact."""
     tolerance: Tolerance
     receipt: tuple[str, ...] = ()
     """The receipt's texts for the cell, for the rules that compare it."""
@@ -251,7 +252,7 @@ def match(
         finding = _price_variance(pairing, invoice_line, po_line, not_compared)
         if finding is not None:
             findings.append(finding)
-        findings += _quantities(
+        findings += _quantity_findings(
             pairing,
             invoice_line,
             po_line,
@@ -464,7 +465,7 @@ def _price_variance(
     return None
 
 
-def _quantities(
+def _quantity_findings(
     pairing: Pairing,
     invoice: FieldValues,
     po: FieldValues,
@@ -473,43 +474,44 @@ def _quantities(
 ) -> list[Finding]:
     """Short-ship against the receipt and over-ship against the purchase
     order, compared exactly; none when the receiving record does not cover the
-    line or a side's quantity is not comparable."""
+    line. A short-ship needs no purchase-order quantity, so one that is
+    absent or unreadable leaves only the over-ship not compared."""
     if received is None:
         return []
     place = Place("po line", pairing.po_line)
-    compared = _comparable(place, "quantity", (invoice, po, received), not_compared)
+    compared = _comparable(place, "quantity", (invoice, received), not_compared)
     if compared is None:
         return []
-    invoice_cell, po_cell, receipt_cell = compared
+    invoice_cell, receipt_cell = compared
+
+    def found(type_: DiscrepancyType, against: _Readable) -> Finding:
+        return Finding(
+            type=type_,
+            place=place,
+            cell="quantity",
+            invoice=invoice_cell.texts,
+            purchase_order=() if against is receipt_cell else against.texts,
+            receipt=receipt_cell.texts,
+            margin=QUANTITY.margin(min(against.numbers)),
+            tolerance=QUANTITY,
+        )
+
     findings: list[Finding] = []
     if _above(invoice_cell, receipt_cell, QUANTITY):
-        findings.append(
-            Finding(
-                type="short-ship",
-                place=place,
-                cell="quantity",
-                invoice=invoice_cell.texts,
-                purchase_order=(),
-                receipt=receipt_cell.texts,
-                margin=QUANTITY.margin(min(receipt_cell.numbers)),
-                tolerance=QUANTITY,
-            )
+        findings.append(found("short-ship", receipt_cell))
+    po_cell = read_cell(po, "quantity")
+    if po_cell is None:
+        not_compared.append(
+            NotCompared(place, "quantity", invoice_cell.texts, "absent")
         )
-    if _above(invoice_cell, po_cell, QUANTITY) and _above(
-        receipt_cell, po_cell, QUANTITY
-    ):
-        findings.append(
-            Finding(
-                type="over-ship",
-                place=place,
-                cell="quantity",
-                invoice=invoice_cell.texts,
-                purchase_order=po_cell.texts,
-                receipt=receipt_cell.texts,
-                margin=QUANTITY.margin(min(po_cell.numbers)),
-                tolerance=QUANTITY,
-            )
-        )
+    elif po_cell.numbers is None:
+        not_compared.append(NotCompared(place, "quantity", po_cell.texts, "unreadable"))
+    else:
+        ordered = _Readable(po_cell.texts, po_cell.numbers)
+        if _above(invoice_cell, ordered, QUANTITY) and _above(
+            receipt_cell, ordered, QUANTITY
+        ):
+            findings.append(found("over-ship", ordered))
     return findings
 
 

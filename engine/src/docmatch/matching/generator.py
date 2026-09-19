@@ -99,6 +99,9 @@ INJECTED_TYPES: tuple[DiscrepancyType, ...] = (
 RECEIPT_CELLS: tuple[Cell, ...] = ("quantity", "unit", "code", "description")
 """What a receiving record copies from a purchase-order line: never prices."""
 
+QUANTITY_FIELDTYPE = CELL_FIELDTYPES["quantity"][0]
+"""Where a lowered quantity is written, on the purchase order or the receipt."""
+
 DRAWS = 100
 """How many values are drawn for a band before the line is given up on."""
 
@@ -283,55 +286,39 @@ def _priced(line: FieldValues) -> tuple[str, Decimal] | None:
 
 
 def _short_ship(seed: Seed, wanted: Band, rng: random.Random) -> Case | None:
-    """The seed with one receipt line's quantity lowered into the band, or
-    None when no line of it can be."""
-    for position, quantity in _quantities(seed, rng):
-        fewer = _fewer(quantity, wanted, rng)
-        if fewer is None:
-            continue
-        received = [_received(line) for line in seed.invoice.lines]
-        received[position] = {**received[position], QUANTITY_FIELDTYPE: (fewer,)}
-        place = Place("po line", position)
-        return _case(
-            seed,
-            seed.invoice.lines,
-            (Injected("short-ship", place, wanted),),
-            received,
-        )
-    return None
+    """The seed with one receipt line's quantity lowered into the band, the
+    purchase order as seeded, or None when no line of it can be."""
+    return _fewer_on_one_line(seed, "short-ship", wanted, rng)
 
 
 def _over_ship(seed: Seed, wanted: Band, rng: random.Random) -> Case | None:
     """The seed with one purchase-order line's quantity lowered into the
     band, received in full as seeded, or None when no line of it can be."""
-    for position, quantity in _quantities(seed, rng):
-        fewer = _fewer(quantity, wanted, rng)
-        if fewer is None:
-            continue
-        po_lines = list(seed.invoice.lines)
-        po_lines[position] = {**po_lines[position], QUANTITY_FIELDTYPE: (fewer,)}
-        place = Place("po line", position)
-        return _case(
-            seed,
-            po_lines,
-            (Injected("over-ship", place, wanted),),
-            [_received(line) for line in seed.invoice.lines],
-        )
-    return None
+    return _fewer_on_one_line(seed, "over-ship", wanted, rng)
 
 
-QUANTITY_FIELDTYPE = CELL_FIELDTYPES["quantity"][0]
-
-
-def _quantities(seed: Seed, rng: random.Random) -> list[tuple[int, Decimal]]:
-    """The seed's lines carrying a quantity, with it, in a shuffled order."""
+def _fewer_on_one_line(
+    seed: Seed, type_: DiscrepancyType, wanted: Band, rng: random.Random
+) -> Case | None:
+    """A short-ship lowers the receipt's quantity, an over-ship the purchase
+    order's; the other record keeps the seed's."""
     lines = [
         (position, quantity)
         for position, line in enumerate(seed.invoice.lines)
         if (quantity := _quantity(line)) is not None
     ]
     rng.shuffle(lines)
-    return lines
+    for position, quantity in lines:
+        fewer = _fewer(quantity, wanted, rng)
+        if fewer is None:
+            continue
+        po_lines = list(seed.invoice.lines)
+        received = [_received(line) for line in seed.invoice.lines]
+        lowered = received if type_ == "short-ship" else po_lines
+        lowered[position] = {**lowered[position], QUANTITY_FIELDTYPE: (fewer,)}
+        place = Place("po line", position)
+        return _case(seed, po_lines, (Injected(type_, place, wanted),), received)
+    return None
 
 
 def _quantity(line: FieldValues) -> Decimal | None:
