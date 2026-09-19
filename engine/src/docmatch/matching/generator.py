@@ -236,7 +236,7 @@ def _injected(
             if len(cases) == count:
                 break
             wanted: Band = "near" if len(cases) % 2 == 0 else "far"
-            case = INJECT[type_](seed, wanted, rng)
+            case = INJECTORS[type_](seed, wanted, rng)
             if case is not None:
                 cases.append(case)
                 built += 1
@@ -319,7 +319,7 @@ HEADER_ELIGIBLE: dict[DiscrepancyType, Callable[[FieldValues], bool]] = {
 """Whether a header carries what a type touches, per injected header type:
 tax mismatch only, on header `amount_total_tax` (#65)."""
 
-INJECT: dict[DiscrepancyType, Callable[[Seed, Band, random.Random], Case | None]] = {
+INJECTORS: dict[DiscrepancyType, Callable[[Seed, Band, random.Random], Case | None]] = {
     "price variance": _price_variance,
     "tax mismatch": _tax_mismatch,
 }

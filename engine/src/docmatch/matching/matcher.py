@@ -416,21 +416,8 @@ def _price_variance(
     place = Place("po line", pairing.po_line)
     for cell in PRICE_CELLS:
         compared = _comparable(place, cell, invoice, po, not_compared)
-        if compared is None:
-            continue
-        invoice_cell, po_cell = compared
-        highest, lowest = max(invoice_cell.numbers), min(po_cell.numbers)
-        if PRICE.exceeded(highest, lowest):
-            return Finding(
-                type="price variance",
-                place=place,
-                cell=cell,
-                invoice=invoice_cell.texts,
-                purchase_order=po_cell.texts,
-                margin=PRICE.margin(lowest),
-                tolerance=PRICE,
-            )
-        return None
+        if compared is not None:
+            return _overbilled("price variance", place, cell, PRICE, *compared)
     return None
 
 
@@ -442,18 +429,30 @@ def _tax_mismatch(
     compared = _comparable(place, "tax", invoice, po, not_compared)
     if compared is None:
         return None
-    invoice_cell, po_cell = compared
-    highest, lowest = max(invoice_cell.numbers), min(po_cell.numbers)
-    if not TAX.exceeded(highest, lowest):
+    return _overbilled("tax mismatch", place, "tax", TAX, *compared)
+
+
+def _overbilled(
+    type_: DiscrepancyType,
+    place: Place,
+    cell: Cell,
+    tolerance: Tolerance,
+    invoice: "_Readable",
+    po: "_Readable",
+) -> Finding | None:
+    """A finding when the highest invoice value is over the lowest purchase-order
+    value by more than the tolerance, else None."""
+    highest, lowest = max(invoice.numbers), min(po.numbers)
+    if not tolerance.exceeded(highest, lowest):
         return None
     return Finding(
-        type="tax mismatch",
+        type=type_,
         place=place,
-        cell="tax",
-        invoice=invoice_cell.texts,
-        purchase_order=po_cell.texts,
-        margin=TAX.margin(lowest),
-        tolerance=TAX,
+        cell=cell,
+        invoice=invoice.texts,
+        purchase_order=po.texts,
+        margin=tolerance.margin(lowest),
+        tolerance=tolerance,
     )
 
 

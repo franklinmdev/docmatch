@@ -58,9 +58,7 @@ NO_LINES = seed("no-lines", vendor_name="Pinefield Catering")
 POOL = (PRICED, AMOUNTS, NO_MONEY, NO_LINES)
 
 
-def injected(
-    cases: Sequence[Case], type_: DiscrepancyType = "price variance"
-) -> list[Case]:
+def injected(cases: Sequence[Case], type_: DiscrepancyType) -> list[Case]:
     return [case for case in cases if any(each.type == type_ for each in case.truth)]
 
 
@@ -93,7 +91,7 @@ def test_the_receiving_record_carries_quantities_and_never_prices() -> None:
 
 
 def test_a_price_variance_lowers_the_po_unit_price_where_the_seed_has_one() -> None:
-    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6))
+    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6), "price variance")
 
     assert len(cases) == 6
     for case in cases:
@@ -123,7 +121,9 @@ def test_a_price_variance_lowers_the_po_unit_price_where_the_seed_has_one() -> N
 
 
 def test_injections_draw_near_and_far_half_and_half_within_their_bands() -> None:
-    cases = injected(generate((PRICED, AMOUNTS), seed=1, clean=0, per_type=10))
+    cases = injected(
+        generate((PRICED, AMOUNTS), seed=1, clean=0, per_type=10), "price variance"
+    )
 
     bands = Counter(truth.band for case in cases for truth in case.truth)
     assert bands == {"near": 5, "far": 5}
@@ -143,7 +143,9 @@ def test_injections_draw_near_and_far_half_and_half_within_their_bands() -> None
 
 
 def test_a_lowered_value_keeps_the_seed_value_decimal_places() -> None:
-    cases = injected(generate((AMOUNTS,), seed=1, clean=0, per_type=2))
+    cases = injected(
+        generate((AMOUNTS,), seed=1, clean=0, per_type=2), "price variance"
+    )
 
     for case in cases:
         (truth,) = case.truth
@@ -156,7 +158,7 @@ def test_a_lowered_value_keeps_the_seed_value_decimal_places() -> None:
 
 
 def test_a_rare_type_reuses_seeds_with_fresh_draws() -> None:
-    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6))
+    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6), "price variance")
 
     touched: tuple[tuple[int, Cell], ...] = ((0, "unit price"), (1, "amount"))
     lowered = {
@@ -182,7 +184,9 @@ def test_a_document_with_no_lines_seeds_nothing() -> None:
 
 
 def test_a_type_is_injected_only_on_lines_carrying_its_cells() -> None:
-    cases = injected(generate((NO_MONEY, AMOUNTS), seed=1, clean=0, per_type=4))
+    cases = injected(
+        generate((NO_MONEY, AMOUNTS), seed=1, clean=0, per_type=4), "price variance"
+    )
 
     assert {case.document_id for case in cases} == {"amounts"}
     assert all(

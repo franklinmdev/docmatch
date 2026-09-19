@@ -275,6 +275,18 @@ def test_no_tax_on_either_side_lists_nothing() -> None:
     assert result.not_compared == ()
 
 
+def test_listed_header_taxes_fire_on_the_least_favourable_combination() -> None:
+    """As on a line: the highest invoice tax against the lowest PO tax, so a
+    header that lists two different taxes fires against itself."""
+    item = line(description="Torque wrench", unit_price_gross="35.30")
+    listed = {"amount_total_tax": ("5.00", "15.00")}
+    result = matched(Record(listed, (item,)), Record(listed, (item,)))
+
+    assert [
+        (each.place, each.invoice, each.purchase_order) for each in result.findings
+    ] == [(Place("header"), ("5.00", "15.00"), ("5.00", "15.00"))]
+
+
 def test_a_tax_mismatch_is_found_beside_a_price_variance() -> None:
     result = matched(
         record(
