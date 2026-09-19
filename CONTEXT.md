@@ -69,7 +69,7 @@ Deciding which invoice line answers which purchase-order line, one to one, by ho
 _Avoid_: line matching, alignment, reconciliation (on its own)
 
 **Unpaired line**:
-An invoice line or purchase-order line that pairing left without a partner. It is reported, never dropped.
+An invoice line or purchase-order line that pairing left without a partner. It is reported, never dropped: an unpaired invoice line is an extra line, an unpaired purchase-order line a missing line. A line that carries no code, description, quantity, price or amount, such as a row labeled with only a date, is not an item: pairing leaves it out and lists it as not compared, so it is never an unpaired line.
 _Avoid_: orphan, unmatched line
 
 **Pairing floor**:
