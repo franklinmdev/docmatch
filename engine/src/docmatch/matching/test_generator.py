@@ -6,20 +6,31 @@ like, never how the draw is made.
 
 from collections import Counter
 from collections.abc import Sequence
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
 
 from docmatch.matching.generator import (
+    HARD_NEGATIVE_KINDS,
     INJECTED_TYPES,
     Case,
     GeneratorError,
+    HardNegative,
+    HardNegativeKind,
+    Injected,
     Seed,
     documents_carrying,
     generate,
 )
-from docmatch.matching.matcher import DiscrepancyType, Place
-from docmatch.matching.records import Cell, Record, cell_values
+from docmatch.matching.matcher import DiscrepancyType, Place, match
+from docmatch.matching.records import (
+    CELL_FIELDTYPES,
+    Cell,
+    ReceivingRecord,
+    Record,
+    cell_values,
+)
 from docmatch.matching.tolerances import PRICE, TAX, band, quantity_band
 from docmatch.metrics.fields import FieldValues
 from docmatch.metrics.normalization import normalize_text, read_number
@@ -65,6 +76,49 @@ NO_LINES = seed("no-lines", vendor_name="Pinefield Catering")
 POOL = (PRICED, AMOUNTS, NO_MONEY, NO_LINES)
 
 
+def single(
+    seeds: Sequence[Seed], *, seed: int, clean: int, per_type: int
+) -> list[Case]:
+    """Cases carrying one discrepancy each, with every hard negative put back
+    as labeled, so a test sees what its injection did and nothing else."""
+    return [
+        as_labeled(case)
+        for case in generate(seeds, seed=seed, clean=clean, per_type=per_type, most=1)
+    ]
+
+
+def as_labeled(case: Case) -> Case:
+    po_lines = list(case.purchase_order.lines)
+    receipt_lines = list(case.receipt.lines)
+    for negative in case.hard_negatives:
+        position = negative.place.line
+        assert position is not None
+        seeded = case.invoice.lines[negative.invoice_line]
+        po_lines[position] = seeded
+        receipt_lines = [
+            replace(
+                each,
+                cells={
+                    **each.cells,
+                    **{
+                        fieldtype: seeded[fieldtype]
+                        for fieldtype in CELL_FIELDTYPES[negative.cell]
+                        if fieldtype in each.cells
+                    },
+                },
+            )
+            if each.po_line == position
+            else each
+            for each in receipt_lines
+        ]
+    return replace(
+        case,
+        purchase_order=replace(case.purchase_order, lines=tuple(po_lines)),
+        receipt=ReceivingRecord(tuple(receipt_lines)),
+        hard_negatives=(),
+    )
+
+
 def injected(
     cases: Sequence[Case], type_: DiscrepancyType = "price variance"
 ) -> list[Case]:
@@ -80,8 +134,8 @@ def test_the_invoice_is_the_seed_in_every_case() -> None:
     assert all(case.invoice == by_id[case.document_id] for case in cases)
 
 
-def test_a_clean_case_copies_every_line_as_labeled_into_the_po_and_receipt() -> None:
-    cases = generate(POOL, seed=1, clean=3, per_type=0)
+def test_a_clean_case_copies_every_line_but_its_hard_negatives() -> None:
+    cases = single(POOL, seed=1, clean=3, per_type=0)
 
     assert [case.truth for case in cases] == [(), (), ()]
     for case in cases:
@@ -92,7 +146,7 @@ def test_a_clean_case_copies_every_line_as_labeled_into_the_po_and_receipt() -> 
 
 
 def test_the_receiving_record_carries_quantities_and_never_prices() -> None:
-    (case,) = generate((PRICED,), seed=1, clean=1, per_type=0)
+    (case,) = single((PRICED,), seed=1, clean=1, per_type=0)
 
     assert [dict(each.cells) for each in case.receipt.lines] == [
         line(description="Hex key set", quantity="6", units_of_measure="SET"),
@@ -101,7 +155,7 @@ def test_the_receiving_record_carries_quantities_and_never_prices() -> None:
 
 
 def test_a_price_variance_lowers_the_po_unit_price_where_the_seed_has_one() -> None:
-    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6), "price variance")
+    cases = injected(single((PRICED,), seed=1, clean=0, per_type=6), "price variance")
 
     assert len(cases) == 6
     for case in cases:
@@ -132,7 +186,7 @@ def test_a_price_variance_lowers_the_po_unit_price_where_the_seed_has_one() -> N
 
 def test_injections_draw_near_and_far_half_and_half_within_their_bands() -> None:
     cases = injected(
-        generate((PRICED, AMOUNTS), seed=1, clean=0, per_type=10), "price variance"
+        single((PRICED, AMOUNTS), seed=1, clean=0, per_type=10), "price variance"
     )
 
     bands = Counter(truth.band for case in cases for truth in case.truth)
@@ -154,7 +208,7 @@ def test_injections_draw_near_and_far_half_and_half_within_their_bands() -> None
 
 def test_a_lowered_value_keeps_the_seed_value_decimal_places() -> None:
     cases = injected(
-        generate((AMOUNTS,), seed=1, clean=0, per_type=2), "price variance"
+        single((AMOUNTS,), seed=1, clean=0, per_type=2), "price variance"
     )
 
     for case in cases:
@@ -168,7 +222,7 @@ def test_a_lowered_value_keeps_the_seed_value_decimal_places() -> None:
 
 
 def test_a_rare_type_reuses_seeds_with_fresh_draws() -> None:
-    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6), "price variance")
+    cases = injected(single((PRICED,), seed=1, clean=0, per_type=6), "price variance")
 
     touched: tuple[tuple[int, Cell], ...] = ((0, "unit price"), (1, "amount"))
     lowered = {
@@ -188,14 +242,14 @@ def test_the_same_seed_rebuilds_the_same_cases_and_another_seed_others() -> None
 
 
 def test_a_document_with_no_lines_seeds_nothing() -> None:
-    cases = generate((NO_LINES, PRICED), seed=1, clean=4, per_type=2)
+    cases = single((NO_LINES, PRICED), seed=1, clean=4, per_type=2)
 
     assert {case.document_id for case in cases} == {"priced"}
 
 
 def test_a_type_is_injected_only_on_lines_carrying_its_cells() -> None:
     cases = injected(
-        generate((NO_MONEY, AMOUNTS), seed=1, clean=0, per_type=4), "price variance"
+        single((NO_MONEY, AMOUNTS), seed=1, clean=0, per_type=4), "price variance"
     )
 
     assert {case.document_id for case in cases} == {"amounts"}
@@ -208,7 +262,7 @@ def test_a_type_is_injected_only_on_lines_carrying_its_cells() -> None:
 
 def test_a_pool_with_no_eligible_seed_injects_nothing() -> None:
     """The type then reads with n 0 in the report rather than failing it."""
-    cases = generate((NO_MONEY, NO_LINES), seed=1, clean=2, per_type=1)
+    cases = single((NO_MONEY, NO_LINES), seed=1, clean=2, per_type=1)
 
     assert injected(cases) == []
 
@@ -218,7 +272,7 @@ def test_a_pool_whose_values_cannot_reach_a_band_is_an_error() -> None:
     tiny = seed("tiny", line(description="Washer", amount_gross="0.03"))
 
     with pytest.raises(GeneratorError, match="near price variance"):
-        generate((tiny,), seed=1, clean=0, per_type=1)
+        single((tiny,), seed=1, clean=0, per_type=1)
 
 
 # Quantities
@@ -251,7 +305,7 @@ def ordered(case: Case, position: int) -> tuple[str, ...]:
 
 
 def test_a_short_ship_lowers_the_receipt_quantity_and_leaves_the_po_as_seeded() -> None:
-    cases = injected(generate((SHIPPED,), seed=1, clean=0, per_type=6), "short-ship")
+    cases = injected(single((SHIPPED,), seed=1, clean=0, per_type=6), "short-ship")
 
     assert len(cases) == 6
     for case in cases:
@@ -271,7 +325,7 @@ def test_a_short_ship_lowers_the_receipt_quantity_and_leaves_the_po_as_seeded() 
 
 
 def test_an_over_ship_lowers_the_po_quantity_and_leaves_the_receipt_as_seeded() -> None:
-    cases = injected(generate((SHIPPED,), seed=1, clean=0, per_type=6), "over-ship")
+    cases = injected(single((SHIPPED,), seed=1, clean=0, per_type=6), "over-ship")
 
     assert len(cases) == 6
     for case in cases:
@@ -296,7 +350,7 @@ def test_an_over_ship_lowers_the_po_quantity_and_leaves_the_receipt_as_seeded() 
 def test_quantity_injections_are_one_unit_near_and_two_up_to_double_far(
     type_: DiscrepancyType,
 ) -> None:
-    cases = injected(generate((SHIPPED,), seed=1, clean=0, per_type=20), type_)
+    cases = injected(single((SHIPPED,), seed=1, clean=0, per_type=20), type_)
 
     bands = Counter(truth.band for case in cases for truth in case.truth)
     assert bands == {"near": 10, "far": 10}
@@ -316,7 +370,7 @@ def test_quantity_injections_are_one_unit_near_and_two_up_to_double_far(
 
 def test_a_quantity_is_injected_only_on_lines_carrying_one() -> None:
     freight = seed("freight", line(description="Freight", amount_gross="45.00"))
-    cases = generate((freight, SHIPPED), seed=1, clean=0, per_type=4)
+    cases = single((freight, SHIPPED), seed=1, clean=0, per_type=4)
 
     assert {
         case.document_id
@@ -330,7 +384,7 @@ def test_a_pool_whose_quantities_cannot_reach_far_is_an_error() -> None:
     few = seed("few", line(description="Washer", quantity="3"))
 
     with pytest.raises(GeneratorError, match="far short-ship"):
-        generate((few,), seed=1, clean=0, per_type=2)
+        single((few,), seed=1, clean=0, per_type=2)
 
 
 # Extra line and missing line
@@ -338,7 +392,7 @@ def test_a_pool_whose_quantities_cannot_reach_far_is_an_error() -> None:
 
 def test_an_extra_line_removes_a_line_from_the_po_and_the_receipt() -> None:
     cases = injected(
-        generate((PRICED, AMOUNTS), seed=1, clean=0, per_type=6), "extra line"
+        single((PRICED, AMOUNTS), seed=1, clean=0, per_type=6), "extra line"
     )
 
     assert len(cases) == 6
@@ -359,7 +413,7 @@ def test_an_extra_line_removes_a_line_from_the_po_and_the_receipt() -> None:
 
 
 def test_a_missing_line_adds_a_labeled_line_from_another_seed_to_the_po() -> None:
-    cases = injected(generate(POOL, seed=1, clean=0, per_type=6), "missing line")
+    cases = injected(single(POOL, seed=1, clean=0, per_type=6), "missing line")
 
     assert len(cases) == 6
     for case in cases:
@@ -386,7 +440,7 @@ def test_a_missing_line_is_never_a_donor_line_with_values_only() -> None:
     nameless = seed("nameless", line(amount_gross="12.00", quantity="1"))
     named = seed("named", line(description="Crate", amount_gross="40.00"))
 
-    cases = generate((PRICED, nameless, named), seed=1, clean=0, per_type=6)
+    cases = single((PRICED, nameless, named), seed=1, clean=0, per_type=6)
 
     added = [
         case.purchase_order.lines[case.truth[0].place.line or 0]
@@ -401,7 +455,7 @@ def test_a_missing_line_is_never_a_donor_line_with_values_only() -> None:
 
 def test_a_missing_line_needs_another_seed_in_the_pool() -> None:
     """A pool of one seed has no other line to add: n 0, not an error."""
-    cases = generate((PRICED,), seed=1, clean=0, per_type=2)
+    cases = single((PRICED,), seed=1, clean=0, per_type=2)
 
     types = {case.truth[0].type for case in cases}
     assert "missing line" not in types
@@ -420,7 +474,7 @@ def test_a_line_the_records_could_not_tell_apart_is_never_the_one_injected() -> 
     )
     donor = seed("donor", line(description="freight", amount_gross="12"))
 
-    cases = generate((doubled, donor), seed=1, clean=0, per_type=6)
+    cases = single((doubled, donor), seed=1, clean=0, per_type=6)
 
     extra = injected(cases, "extra line")
     missing = injected(cases, "missing line")
@@ -440,7 +494,7 @@ def test_a_line_with_nothing_to_pair_on_is_never_removed_or_added() -> None:
         "positioned", line(position="1"), line(description="Pallet", amount_gross="9")
     )
 
-    cases = generate((dated, positioned), seed=1, clean=0, per_type=6)
+    cases = single((dated, positioned), seed=1, clean=0, per_type=6)
 
     assert {case.truth[0].place for case in injected(cases, "extra line")} == {
         Place("invoice line", 1)
@@ -497,7 +551,7 @@ def but_recounted(cells: FieldValues) -> FieldValuesDict:
 def test_a_unit_variant_counts_the_po_line_in_another_unit_and_keeps_the_amount() -> (
     None
 ):
-    cases = injected(generate((COUNTED,), seed=1, clean=0, per_type=10), "unit variant")
+    cases = injected(single((COUNTED,), seed=1, clean=0, per_type=10), "unit variant")
 
     assert len(cases) == 10
     for case in cases:
@@ -561,7 +615,7 @@ def test_a_line_that_cannot_be_recounted_carries_no_unit_variant(
 
 
 def test_only_lines_labeling_a_unit_carry_a_unit_variant() -> None:
-    cases = generate((COUNTED, NO_MONEY), seed=1, clean=0, per_type=6)
+    cases = single((COUNTED, NO_MONEY), seed=1, clean=0, per_type=6)
 
     assert {case.document_id for case in injected(cases, "unit variant")} == {"counted"}
     assert documents_carrying((COUNTED, NO_MONEY), "unit variant") == 1
@@ -571,7 +625,7 @@ def test_only_lines_labeling_a_unit_carry_a_unit_variant() -> None:
 
 
 def test_a_tax_mismatch_lowers_the_po_header_tax_and_nothing_else() -> None:
-    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6), "tax mismatch")
+    cases = injected(single((PRICED,), seed=1, clean=0, per_type=6), "tax mismatch")
 
     assert len(cases) == 6
     for case in cases:
@@ -589,7 +643,7 @@ def test_a_tax_mismatch_lowers_the_po_header_tax_and_nothing_else() -> None:
 
 
 def test_tax_mismatches_draw_near_and_far_half_and_half() -> None:
-    cases = injected(generate(POOL, seed=1, clean=0, per_type=10), "tax mismatch")
+    cases = injected(single(POOL, seed=1, clean=0, per_type=10), "tax mismatch")
 
     assert Counter(truth.band for case in cases for truth in case.truth) == {
         "near": 5,
@@ -598,7 +652,7 @@ def test_tax_mismatches_draw_near_and_far_half_and_half() -> None:
 
 
 def test_only_seeds_labeling_a_header_tax_carry_a_tax_mismatch() -> None:
-    cases = injected(generate(POOL, seed=1, clean=0, per_type=4), "tax mismatch")
+    cases = injected(single(POOL, seed=1, clean=0, per_type=4), "tax mismatch")
 
     assert {case.document_id for case in cases} == {"priced"}
     assert documents_carrying(POOL, "tax mismatch") == 1
@@ -614,7 +668,7 @@ def test_a_header_tax_that_is_zero_or_unreadable_is_not_eligible(tax: str) -> No
 
     assert documents_carrying((untaxed,), "tax mismatch") == 0
     assert (
-        injected(generate((untaxed,), seed=1, clean=0, per_type=2), "tax mismatch")
+        injected(single((untaxed,), seed=1, clean=0, per_type=2), "tax mismatch")
         == []
     )
 
@@ -630,7 +684,7 @@ def test_a_po_carries_one_header_tax_the_highest_the_seed_lists() -> None:
         ),
     )
 
-    cases = generate((listed,), seed=1, clean=1, per_type=2)
+    cases = single((listed,), seed=1, clean=1, per_type=2)
 
     assert [case.purchase_order.header for case in cases[:1]] == [
         {"amount_total_tax": ("8.55",)}
@@ -640,3 +694,232 @@ def test_a_po_carries_one_header_tax_the_highest_the_seed_lists() -> None:
         for case in injected(cases, "price variance")
     )
     assert all(case.purchase_order.lines == listed.invoice.lines for case in cases[:1])
+
+
+# Mixed cases
+
+STOCKED = seed(
+    "stocked",
+    line(code="CP-500", description="Copier paper", quantity="8", amount_gross="96.00"),
+    line(code="ST-120", description="Stapler", quantity="6", unit_price_gross="12.50"),
+    line(code="HL-310", description="Hole punch", quantity="5", amount_gross="45.00"),
+    line(
+        code="TP-044", description="Packing tape", quantity="12", amount_gross="30.00"
+    ),
+    line(
+        code="LB-900",
+        description="Label printer",
+        units_of_measure="EA",
+        quantity="4",
+        unit_price_gross="120.00",
+        amount_gross="480.00",
+    ),
+    amount_total_tax="42.00",
+)
+DONOR = seed(
+    "donor",
+    line(code="ZX-7", description="Mop bucket", quantity="3", amount_gross="54.00"),
+    line(code="QW-2", description="Floor wax", quantity="9", amount_gross="81.00"),
+)
+MIXED = (STOCKED, DONOR)
+
+
+def test_a_case_carries_one_to_three_discrepancies_never_two_on_one_line() -> None:
+    cases = generate(MIXED, seed=1, clean=0, per_type=20)
+
+    assert {len(case.truth) for case in cases} == {1, 2, 3}
+    for case in cases:
+        places = [truth.place for truth in case.truth]
+        assert len(set(places)) == len(places)
+        assert [truth.type for truth in case.truth].count("tax mismatch") <= 1
+        for place in places:
+            if place.kind == "po line":
+                assert place.line is not None
+                assert place.line < len(case.purchase_order.lines)
+
+
+def test_every_type_reaches_its_count_with_near_and_far_half_and_half() -> None:
+    cases = generate(MIXED, seed=1, clean=0, per_type=20)
+
+    found = Counter(truth.type for case in cases for truth in case.truth)
+    assert all(found[type_] >= 20 for type_ in INJECTED_TYPES)
+    for type_ in ("price variance", "short-ship", "over-ship", "tax mismatch"):
+        bands = Counter(
+            truth.band for case in cases for truth in case.truth if truth.type == type_
+        )
+        assert set(bands) == {"near", "far"}
+        assert abs(bands["near"] - bands["far"]) <= 1
+
+
+def test_most_one_keeps_every_case_to_its_own_type() -> None:
+    cases = generate(MIXED, seed=1, clean=0, per_type=4, most=1)
+
+    assert [len(case.truth) for case in cases] == [1] * 4 * len(INJECTED_TYPES)
+
+
+def test_on_named_lines_the_matcher_finds_every_truth_and_nothing_else() -> None:
+    """Each place is where the injection landed once an extra line or a missing
+    line has shifted the purchase order, and no hard negative fires."""
+    cases = generate(MIXED, seed=1, clean=20, per_type=20)
+
+    for case in cases:
+        result = match(case.invoice, case.purchase_order, case.receipt)
+        assert {(each.type, each.place) for each in result.findings} == {
+            (each.type, each.place) for each in case.truth
+        }
+
+
+# Hard negatives
+
+
+def hard_negatives(
+    cases: Sequence[Case], kind: HardNegativeKind
+) -> list[tuple[Case, HardNegative]]:
+    return [
+        (case, each)
+        for case in cases
+        for each in case.hard_negatives
+        if each.kind == kind
+    ]
+
+
+def cell_number(cells: FieldValues, cell: Cell) -> Decimal:
+    """The highest value the cell lists, the one the matcher compares."""
+    values = cell_values(cells, cell)
+    assert values is not None
+    numbers = [read_number(text) for text in values.texts]
+    return max(each for each in numbers if each is not None)
+
+
+def sides(case: Case, negative: HardNegative) -> tuple[Decimal, Decimal]:
+    """The invoice's and the purchase order's value on the hard negative's cell."""
+    assert negative.place.line is not None
+    return (
+        cell_number(case.invoice.lines[negative.invoice_line], negative.cell),
+        cell_number(case.purchase_order.lines[negative.place.line], negative.cell),
+    )
+
+
+def test_hard_negatives_sit_on_clean_lines_in_every_kind_of_case() -> None:
+    cases = generate(MIXED, seed=1, clean=20, per_type=20)
+
+    assert {each.kind for case in cases for each in case.hard_negatives} == set(
+        HARD_NEGATIVE_KINDS
+    )
+    assert any(case.hard_negatives for case in cases if case.is_clean)
+    assert any(case.hard_negatives for case in cases if not case.is_clean)
+    for case in cases:
+        negative_places = [each.place for each in case.hard_negatives]
+        assert len(set(negative_places)) == len(negative_places)
+        assert not set(negative_places) & {truth.place for truth in case.truth}
+
+
+def test_a_hard_negative_line_differs_from_its_seed_only_in_its_cell() -> None:
+    cases = generate((STOCKED,), seed=1, clean=20, per_type=0)
+
+    assert any(case.hard_negatives for case in cases)
+    for case in cases:
+        for negative in case.hard_negatives:
+            assert negative.place == Place("po line", negative.invoice_line)
+            po_line = case.purchase_order.lines[negative.invoice_line]
+            seeded = case.invoice.lines[negative.invoice_line]
+            changed = {
+                fieldtype
+                for fieldtype in {*po_line, *seeded}
+                if po_line.get(fieldtype) != seeded.get(fieldtype)
+            }
+            assert len(changed) == 1
+            assert changed <= set(CELL_FIELDTYPES[negative.cell])
+
+
+def test_rounding_drift_is_one_cent_over_or_under_on_the_compared_cell() -> None:
+    drifts = hard_negatives(
+        generate(MIXED, seed=1, clean=40, per_type=0), "rounding drift"
+    )
+
+    directions = set()
+    for case, negative in drifts:
+        seeded = case.invoice.lines[negative.invoice_line]
+        compared: Cell = "unit price" if cell_values(seeded, "unit price") else "amount"
+        assert negative.cell == compared
+        billed, ordered = sides(case, negative)
+        assert abs(billed - ordered) == Decimal("0.01")
+        directions.add(billed > ordered)
+    assert directions == {True, False}
+
+
+def test_just_inside_lands_within_90_to_100_percent_of_the_margin() -> None:
+    insides = hard_negatives(
+        generate(MIXED, seed=1, clean=40, per_type=0), "just inside"
+    )
+
+    assert insides
+    for case, negative in insides:
+        assert negative.cell != "quantity"
+        billed, ordered = sides(case, negative)
+        margin = PRICE.margin(ordered)
+        assert Decimal("0.9") * margin <= billed - ordered <= margin
+
+
+def test_just_inside_is_never_generated_on_a_value_under_one() -> None:
+    small = seed(
+        "small",
+        line(description="Washer", quantity="40", unit_price_gross="0.95"),
+        line(description="Grommet", quantity="30", amount_gross="0.60"),
+    )
+
+    cases = generate((small,), seed=1, clean=40, per_type=0)
+
+    assert hard_negatives(cases, "just inside") == []
+    assert hard_negatives(cases, "rounding drift")
+
+
+def test_billed_below_raises_the_po_price_or_quantity_and_the_receipt_follows() -> (
+    None
+):
+    belows = hard_negatives(
+        generate(MIXED, seed=1, clean=40, per_type=0), "billed below"
+    )
+
+    assert {negative.cell for _, negative in belows} == {
+        "quantity",
+        "unit price",
+        "amount",
+    }
+    for case, negative in belows:
+        billed, ordered = sides(case, negative)
+        assert billed < ordered
+        if negative.cell == "quantity":
+            (receipt_line,) = [
+                each.cells
+                for each in case.receipt.lines
+                if each.po_line == negative.place.line
+            ]
+            assert cell_number(receipt_line, "quantity") == ordered
+
+
+# Lines with nothing else to pair on
+
+
+def test_no_edit_changes_the_only_cell_a_nameless_line_pairs_on() -> None:
+    """Such a line could not be told from any other once changed, so neither a
+    discrepancy nor a hard negative is put on it: the truth could not be
+    scored. A cell the edit leaves as labeled still pairs it."""
+    nameless = seed(
+        "nameless",
+        line(amount_gross="75.00"),
+        line(quantity="6", amount_gross="84.00"),
+        line(units_of_measure="BOX", quantity="3", unit_price_gross="14.00"),
+    )
+
+    cases = generate((nameless, DONOR), seed=1, clean=40, per_type=20)
+
+    alone = nameless.invoice.lines[0]
+    for case in cases:
+        if case.document_id != "nameless":
+            continue
+        removed = Injected("extra line", Place("invoice line", 0), None)
+        assert removed in case.truth or alone in case.purchase_order.lines
+    assert documents_carrying((nameless,), "price variance") == 1
+    assert documents_carrying((nameless,), "over-ship") == 1
+    assert documents_carrying((nameless,), "unit variant") == 0

@@ -77,6 +77,7 @@ from docmatch.extraction.run import (
 )
 from docmatch.matching import floors
 from docmatch.matching.generator import (
+    BANDED_TYPES,
     INJECTED_TYPES,
     GeneratorError,
     documents_carrying,
@@ -913,6 +914,9 @@ def render_match(
         *_per_type(table, pool),
         *_rows(("clean-case false-positive rate", _clean_rate(table))),
         "",
+        "Diagnostic table, over the same cases",
+        *_diagnostic(table),
+        "",
         "Labels control, over cases from the fixed subset",
         *_end_to_end(("manifest", str(path)), control, control_pool),
     ]
@@ -978,6 +982,41 @@ def _per_type(
             for each in rows
         ],
     )
+
+
+def _diagnostic(table: Table) -> list[str]:
+    """False alarms by the hard negative they sat on, then recall near the
+    edge and far past it for each type that draws a band (#66)."""
+    bands = {(each.type, each.band): each for each in table.bands}
+    return [
+        *_table(
+            ("hard negative", "placed", "false alarms"),
+            [
+                (each.kind, str(each.placed), str(each.false_alarms))
+                for each in table.hard_negatives
+            ],
+        ),
+        *_rows(("false alarms on no hard negative", str(table.false_alarms_elsewhere))),
+        "",
+        *_table(
+            ("type", "near recall", "n", "far recall", "n"),
+            [
+                (
+                    type_,
+                    *(
+                        cell
+                        for band in ("near", "far")
+                        for cell in (
+                            f"{bands[type_, band].recall:.3f}",
+                            str(bands[type_, band].n),
+                        )
+                    ),
+                )
+                for type_ in BANDED_TYPES
+            ],
+        ),
+        "  headline recall is the half-and-half mix of near and far",
+    ]
 
 
 def _clean_rate(table: Table) -> str:
