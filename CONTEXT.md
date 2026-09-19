@@ -71,3 +71,19 @@ _Avoid_: line matching, alignment, reconciliation (on its own)
 **Unpaired line**:
 An invoice line or purchase-order line that pairing left without a partner. It is reported, never dropped.
 _Avoid_: orphan, unmatched line
+
+**Discrepancy type**:
+One way an invoice can disagree with its purchase order and receiving record: price variance, short-ship, over-ship, extra line, missing line, unit-of-measure variant, or tax mismatch. Only disagreement against docmatch's interest counts: billing less than was ordered or received is not a discrepancy. An invoice that repeats another invoice is not a discrepancy type; that is a separate control.
+_Avoid_: exception, error, mismatch (on its own)
+
+**Hold**:
+The severity that stops an invoice from being approved automatically and sends it to review. Every discrepancy type holds except missing line.
+_Avoid_: block, reject, fail
+
+**Note**:
+The severity that reports a discrepancy and leaves approval open. Only missing line is a note, since billing part of an order is normal.
+_Avoid_: warning, info
+
+**Rounding drift**:
+A difference of a cent or so between an invoice amount and its purchase order, within the tolerance. It is never a discrepancy; reporting one counts against the matcher as a false positive.
+_Avoid_: small difference, penny variance
