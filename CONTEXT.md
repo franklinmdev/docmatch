@@ -84,8 +84,12 @@ _Avoid_: block, reject, fail
 The severity that reports a discrepancy and leaves approval open. Only missing line is a note, since billing part of an order is normal.
 _Avoid_: warning, info
 
+**Tolerance**:
+How far an invoice may go above its purchase order or receiving record before the matcher reports a discrepancy. A price or a tax amount may go over by a percentage of the purchase order's value, and always by a cent; a quantity may not go over at all. Only one set of tolerances exists at a time, and a finding's explanation quotes the one applied.
+_Avoid_: threshold, allowance, variance limit
+
 **Rounding drift**:
-A difference of a cent or so between an invoice amount and its purchase order, within the tolerance. It is never a discrepancy; reporting one counts against the matcher as a false positive.
+A difference of one cent between an invoice amount and its purchase order, always within the tolerance. It is never a discrepancy; reporting one counts against the matcher as a false positive.
 _Avoid_: small difference, penny variance
 
 **Case**:
