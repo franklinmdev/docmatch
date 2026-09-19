@@ -360,6 +360,25 @@ class _Slot:
     removed: bool = False
 
 
+@dataclass(frozen=True)
+class _Put:
+    """A discrepancy on a draft, before the finished records place it."""
+
+    type: DiscrepancyType
+    slot: _Slot | None
+    """None for the header."""
+    band: Band | None
+
+
+@dataclass(frozen=True)
+class _Tempted:
+    """A hard negative on a draft, before the finished records place it."""
+
+    kind: HardNegativeKind
+    slot: _Slot
+    cell: Cell
+
+
 class _Draft:
     """A case being built from a seed: its purchase-order lines, its header,
     and what was put on them, placed only once every line has been removed
@@ -371,8 +390,8 @@ class _Draft:
             _Slot(line, position) for position, line in enumerate(seed.invoice.lines)
         ]
         self.header = _one_tax(seed.invoice.header)
-        self.injected: list[tuple[DiscrepancyType, _Slot | None, Band | None]] = []
-        self.negatives: list[tuple[HardNegativeKind, _Slot, Cell]] = []
+        self.injected: list[_Put] = []
+        self.negatives: list[_Tempted] = []
 
     def copied(self, position: int) -> _Slot:
         """The purchase-order line that copies this invoice line."""
@@ -380,21 +399,18 @@ class _Draft:
 
     def free(self, positions: Collection[int] | None = None) -> list[int]:
         """The invoice lines no discrepancy is on, of those given or of all."""
-        taken = {
-            slot.invoice_line for _, slot, _ in self.injected if slot is not None
-        }
+        taken = {each.slot.invoice_line for each in self.injected if each.slot}
         every = range(len(self.seed.invoice.lines)) if positions is None else positions
         return [each for each in every if each not in taken]
 
     def inject(
         self, type_: DiscrepancyType, slot: _Slot | None, wanted: Band | None
-    ) -> Literal[True]:
-        self.injected.append((type_, slot, wanted))
-        return True
+    ) -> None:
+        self.injected.append(_Put(type_, slot, wanted))
 
     @property
     def taxed(self) -> bool:
-        return any(type_ == "tax mismatch" for type_, _, _ in self.injected)
+        return any(each.type == "tax mismatch" for each in self.injected)
 
     def case(self) -> Case:
         """The finished records, and every injection and hard negative placed
@@ -402,12 +418,15 @@ class _Draft:
         live = [each for each in self.slots if not each.removed]
         at = {id(each): position for position, each in enumerate(live)}
 
-        def place(type_: DiscrepancyType, slot: _Slot | None) -> Place:
-            if slot is None:
-                return Place("header")
-            if type_ == "extra line":
-                return Place("invoice line", slot.invoice_line)
+        def po_line(slot: _Slot) -> Place:
             return Place("po line", at[id(slot)])
+
+        def place(put: _Put) -> Place:
+            if put.slot is None:
+                return Place("header")
+            if put.type == "extra line":
+                return Place("invoice line", put.slot.invoice_line)
+            return po_line(put.slot)
 
         return Case(
             document_id=self.seed.document_id,
@@ -427,13 +446,12 @@ class _Draft:
                 )
             ),
             truth=tuple(
-                Injected(type_, place(type_, slot), wanted)
-                for type_, slot, wanted in self.injected
+                Injected(each.type, place(each), each.band) for each in self.injected
             ),
             hard_negatives=tuple(
-                HardNegative(kind, place("price variance", slot), cell, position)
-                for kind, slot, cell in self.negatives
-                if (position := slot.invoice_line) is not None
+                HardNegative(each.kind, po_line(each.slot), each.cell, position)
+                for each in self.negatives
+                if (position := each.slot.invoice_line) is not None
             ),
         )
 
@@ -526,7 +544,8 @@ def _price_variance(
             continue
         slot = draft.copied(position)
         slot.cells = {**slot.cells, priced.fieldtype: (lowered,)}
-        return draft.inject("price variance", slot, wanted)
+        draft.inject("price variance", slot, wanted)
+        return True
     return False
 
 
@@ -539,7 +558,8 @@ def _extra_line(
         return False
     slot = draft.copied(rng.choice(positions))
     slot.removed = True
-    return draft.inject("extra line", slot, None)
+    draft.inject("extra line", slot, None)
+    return True
 
 
 def _missing_line(
@@ -560,7 +580,8 @@ def _missing_line(
         return False
     slot = _Slot(rng.choice(given), None)
     draft.slots.insert(rng.randint(0, len(draft.slots)), slot)
-    return draft.inject("missing line", slot, None)
+    draft.inject("missing line", slot, None)
+    return True
 
 
 def _lines_to_give(seed: Seed, donor: Seed) -> list[FieldValues]:
@@ -676,7 +697,8 @@ def _fewer_on_one_line(
             slot.received = {**slot.received, QUANTITY_FIELDTYPE: (fewer,)}
         else:
             slot.cells = {**slot.cells, QUANTITY_FIELDTYPE: (fewer,)}
-        return draft.inject(type_, slot, wanted)
+        draft.inject(type_, slot, wanted)
+        return True
     return False
 
 
@@ -717,7 +739,8 @@ def _tax_mismatch(
     if lowered is None:
         return False
     draft.header = {**draft.header, fieldtype: (lowered,)}
-    return draft.inject("tax mismatch", None, wanted)
+    draft.inject("tax mismatch", None, wanted)
+    return True
 
 
 def _unit_variant(
@@ -744,7 +767,8 @@ def _unit_variant(
             for fieldtype, numbers in counts.items()
         },
     }
-    return draft.inject("unit variant", slot, None)
+    draft.inject("unit variant", slot, None)
+    return True
 
 
 RECOUNTED_CELLS: tuple[Cell, ...] = ("quantity", "unit price")
@@ -914,7 +938,7 @@ def _tempted(draft: _Draft, rng: random.Random) -> Case:
         if written is None:
             continue
         slot.cells = {**slot.cells, read.fieldtype: (written,)}
-        draft.negatives.append((kind, slot, cell))
+        draft.negatives.append(_Tempted(kind, slot, cell))
     return draft.case()
 
 
@@ -924,7 +948,7 @@ def _tempting(line: FieldValues) -> list[tuple[HardNegativeKind, Cell]]:
     only, each where the line still pairs once it moves (#70)."""
     tempting: list[tuple[HardNegativeKind, Cell]] = []
     priced = _priced(line)
-    if priced is not None and _still_pairs(line, (priced.cell,)):
+    if priced is not None and _price_varies(line):
         tempting.append(("rounding drift", priced.cell))
         if priced.value >= JUST_INSIDE_LEAST:
             tempting.append(("just inside", priced.cell))
@@ -944,8 +968,8 @@ def _drift(value: Decimal, cell: Cell, rng: random.Random) -> str | None:
     """The value one cent over or under, as the purchase order's: the invoice
     then bills a cent more or less. Under when over would leave nothing."""
     places = _places(value, 2)
-    over = rng.random() < 0.5 and value > PRICE.cent
-    moved = value - PRICE.cent if over else value + PRICE.cent
+    bills_over = rng.random() < 0.5 and value > PRICE.cent
+    moved = value - PRICE.cent if bills_over else value + PRICE.cent
     return f"{moved.quantize(places, rounding=ROUND_HALF_UP):f}"
 
 
@@ -979,4 +1003,6 @@ TEMPT: dict[HardNegativeKind, Callable[[Decimal, Cell, random.Random], str | Non
     "just inside": _just_inside,
     "billed below": _billed_below,
 }
-"""How each kind of hard negative moves the value its cell compares."""
+"""How each kind of hard negative moves the value its cell compares. Only
+billed below reads the cell, to tell a quantity from a price; the others move
+the compared price cell whichever it is."""
