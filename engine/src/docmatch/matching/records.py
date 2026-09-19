@@ -50,9 +50,27 @@ class ReceiptLine:
 
 @dataclass(frozen=True)
 class ReceivingRecord:
-    """What was received against a purchase order: quantities, never prices."""
+    """What was received against a purchase order: quantities, never prices.
+
+    Each purchase-order line is named by one receipt line at most, so a line's
+    received quantity is one receipt line's cell and never a sum the matcher
+    has to decide how to take."""
 
     lines: tuple[ReceiptLine, ...]
+
+    def __post_init__(self) -> None:
+        named = [each.po_line for each in self.lines]
+        repeated = sorted({each for each in named if named.count(each) > 1})
+        if repeated:
+            raise ValueError(f"receipt lines name po line {repeated[0]} more than once")
+
+    def against(self, po_line: int) -> FieldValues | None:
+        """The cells received against a purchase-order line, or None when the
+        record does not cover it."""
+        for each in self.lines:
+            if each.po_line == po_line:
+                return each.cells
+        return None
 
 
 def labeled_record(annotation: Annotation) -> Record:
