@@ -13,13 +13,25 @@ to 1.0 is the matcher's own.
 
 Aggregation sums counts, as `metrics.score.MicroAverage` does: a case with
 three findings weighs three, and a rate is derived from the sums.
+
+Beside the headline sits the diagnostic table (#66). False alarms are split
+by the hard negative they sit on: its purchase-order line, or for an extra
+line its invoice line, with those on no hard negative counted apart. Recall
+is split by band, near the edge and far past it, for the types that draw one;
+the headline recall is their half-and-half mix (#70).
 """
 
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from docmatch.matching.generator import Case
+from docmatch.matching.generator import (
+    BANDED_TYPES,
+    HARD_NEGATIVE_KINDS,
+    Case,
+    HardNegative,
+    HardNegativeKind,
+)
 from docmatch.matching.matcher import (
     TYPES,
     DiscrepancyType,
@@ -27,6 +39,7 @@ from docmatch.matching.matcher import (
     Place,
     match,
 )
+from docmatch.matching.tolerances import Band
 from docmatch.metrics.score import MicroAverage, Score, micro_average, ratio
 
 Found = tuple[DiscrepancyType, Place]
@@ -63,9 +76,42 @@ class TypeScore(Score):
         return self.false_alarms
 
 
+BANDS: tuple[Band, ...] = ("near", "far")
+
+
+@dataclass(frozen=True)
+class BandScore:
+    """How one type's injections in one band went: recall only, since a
+    finding carries no band to be a false alarm of."""
+
+    type: DiscrepancyType
+    band: Band
+    hits: int
+    misses: int
+
+    @property
+    def n(self) -> int:
+        return self.hits + self.misses
+
+    @property
+    def recall(self) -> float:
+        return ratio(self.hits, self.n)
+
+
+@dataclass(frozen=True)
+class HardNegativeScore:
+    """How many hard negatives of one kind were placed, and the false alarms
+    found on them."""
+
+    kind: HardNegativeKind
+    placed: int
+    false_alarms: int
+
+
 @dataclass(frozen=True)
 class Table:
-    """Every type's counts, and the clean cases' false positives."""
+    """Every type's counts, the clean cases' false positives, and the
+    diagnostic splits."""
 
     per_type: tuple[TypeScore, ...]
     """One row per discrepancy type, in `TYPES` order, whether or not any was
@@ -73,6 +119,13 @@ class Table:
     clean_cases: int
     clean_false_positives: int
     """Clean cases with at least one finding."""
+    bands: tuple[BandScore, ...]
+    """One row per banded type and band, in `BANDED_TYPES` order, near first."""
+    hard_negatives: tuple[HardNegativeScore, ...]
+    """One row per kind, in `HARD_NEGATIVE_KINDS` order."""
+    false_alarms_elsewhere: int
+    """False alarms on no hard negative: on an injected line, on a line left
+    as labeled, or on the header."""
 
     @property
     def overall(self) -> MicroAverage:
@@ -94,6 +147,11 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
     hits: Counter[DiscrepancyType] = Counter()
     misses: Counter[DiscrepancyType] = Counter()
     false_alarms: Counter[DiscrepancyType] = Counter()
+    band_hits: Counter[tuple[DiscrepancyType, Band]] = Counter()
+    band_misses: Counter[tuple[DiscrepancyType, Band]] = Counter()
+    placed: Counter[HardNegativeKind] = Counter()
+    tempted: Counter[HardNegativeKind] = Counter()
+    elsewhere = 0
     clean_false_positives = 0
     for case, result in zip(cases, results, strict=True):
         truth = {(each.type, each.place) for each in case.truth}
@@ -102,8 +160,18 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
             hits[type_] += 1
         for type_, _ in truth - found:
             misses[type_] += 1
-        for type_, _ in found - truth:
+        for each in case.truth:
+            if each.band is not None:
+                landed = band_hits if (each.type, each.place) in found else band_misses
+                landed[each.type, each.band] += 1
+        on = _hard_negative_places(case.hard_negatives)
+        placed.update(each.kind for each in case.hard_negatives)
+        for type_, place in found - truth:
             false_alarms[type_] += 1
+            if place in on:
+                tempted[on[place]] += 1
+            else:
+                elsewhere += 1
         if case.is_clean and result.findings:
             clean_false_positives += 1
     return Table(
@@ -113,7 +181,29 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
         ),
         clean_cases=sum(1 for case in cases if case.is_clean),
         clean_false_positives=clean_false_positives,
+        bands=tuple(
+            BandScore(type_, band, band_hits[type_, band], band_misses[type_, band])
+            for type_ in BANDED_TYPES
+            for band in BANDS
+        ),
+        hard_negatives=tuple(
+            HardNegativeScore(kind, placed[kind], tempted[kind])
+            for kind in HARD_NEGATIVE_KINDS
+        ),
+        false_alarms_elsewhere=elsewhere,
     )
+
+
+def _hard_negative_places(
+    hard_negatives: Sequence[HardNegative],
+) -> dict[Place, HardNegativeKind]:
+    """Where a finding lands on each hard negative: its purchase-order line,
+    or the invoice line an extra line for it would be placed on."""
+    places: dict[Place, HardNegativeKind] = {}
+    for each in hard_negatives:
+        places[each.place] = each.kind
+        places[Place("invoice line", each.invoice_line)] = each.kind
+    return places
 
 
 def score_matched(cases: Sequence[Case]) -> Table:

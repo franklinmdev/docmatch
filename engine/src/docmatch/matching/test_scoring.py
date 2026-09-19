@@ -7,8 +7,14 @@ counted, not what the matcher does with the case's records.
 from dataclasses import replace
 from decimal import Decimal
 
-from docmatch.matching.generator import Case, Injected
-from docmatch.matching.matcher import Finding, MatchResult, NotCompared, Place
+from docmatch.matching.generator import BANDED_TYPES, Case, HardNegative, Injected
+from docmatch.matching.matcher import (
+    Finding,
+    MatchResult,
+    NotCompared,
+    Place,
+    UnpairedFinding,
+)
 from docmatch.matching.records import ReceivingRecord, Record
 from docmatch.matching.scoring import TypeScore, score
 from docmatch.matching.tolerances import PRICE, UNIT
@@ -124,3 +130,42 @@ def test_what_was_not_compared_counts_in_no_score() -> None:
 
 def test_the_rate_is_zero_when_there_is_no_clean_case() -> None:
     assert score([case(injected(0))], [result(0)]).clean_false_positive_rate == 0.0
+
+
+# The diagnostic table
+
+
+def test_a_false_alarm_on_a_hard_negative_counts_toward_its_kind() -> None:
+    """An extra line counts where its invoice line is the hard negative's."""
+    tempted = replace(
+        case(),
+        hard_negatives=(
+            HardNegative("rounding drift", Place("po line", 0), "amount", 0),
+            HardNegative("billed below", Place("po line", 1), "quantity", 2),
+            HardNegative("rounding drift", Place("po line", 3), "unit price", 4),
+        ),
+    )
+    extra = UnpairedFinding("extra line", Place("invoice line", 2), None)
+    found = replace(result(0, 2), findings=(*result(0, 2).findings, extra))
+
+    table = score([tempted], [found])
+
+    assert [
+        (each.kind, each.placed, each.false_alarms) for each in table.hard_negatives
+    ] == [
+        ("rounding drift", 2, 1),
+        ("just inside", 0, 0),
+        ("billed below", 1, 1),
+    ]
+    assert table.false_alarms_elsewhere == 1
+
+
+def test_recall_splits_into_near_the_edge_and_far_past_it() -> None:
+    far = Injected("price variance", Place("po line", 1), "far")
+    table = score([case(injected(0), far, injected(2))], [result(0, 1)])
+
+    rows = {(each.type, each.band): (each.n, each.recall) for each in table.bands}
+    assert rows["price variance", "near"] == (2, 0.5)
+    assert rows["price variance", "far"] == (1, 1.0)
+    assert {each.type for each in table.bands} == set(BANDED_TYPES)
+    assert rows["tax mismatch", "far"] == (0, 1.0)

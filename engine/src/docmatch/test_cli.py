@@ -1600,21 +1600,44 @@ EXPECTED_MATCH_OUTPUT = "\n".join(
         "  description       0.4        0.4  10000",
         "",
         # Every fixture row carries an amount and none a unit price, so every
-        # price variance falls to the amount; all are found on labels, and
-        # so are the extra and missing lines. A quantity of one unit carries
-        # no short-ship or over-ship, which leaves one document without either.
+        # price variance falls to the amount. Each type starts 500 cases and
+        # the discrepancies mixed into them take it past 500. A quantity of
+        # one unit carries no short-ship or over-ship, which leaves one
+        # document without either. Labels find every discrepancy but where a
+        # case removes an invoice line and adds a donor line whose code agrees
+        # with it at exactly 0.5, ST-120 against HT-204 or HT-207, which
+        # clears the 0.5 floor: the two pair, the extra line and the missing
+        # line are missed, and the pair's price and quantity are compared as
+        # if one line, which is where the price variance and short-ship false
+        # alarms come from.
         "Per-type table, over cases from train and val",
-        "  type            precision  recall    n  documents",
-        "  price variance      1.000   1.000  500          6",
-        "  short-ship          1.000   1.000  500          5",
-        "  over-ship           1.000   1.000  500          5",
-        "  extra line          1.000   1.000  500          6",
-        "  missing line        1.000   1.000  500          6",
+        "  type            precision  recall     n  documents",
+        "  price variance      0.993   1.000  1087          6",
+        "  short-ship          0.989   1.000   689          5",
+        "  over-ship           1.000   1.000   691          5",
+        "  extra line          1.000   0.986  1143          6",
+        "  missing line        1.000   0.991  1850          6",
         # The one document labeling units and a header tax is train's, drawn
-        # afresh 500 times.
-        "  unit variant        1.000   1.000  500          1",
-        "  tax mismatch        1.000   1.000  500          1",
+        # afresh for every case it starts and every one it is mixed into.
+        "  unit variant        1.000   1.000   763          1",
+        "  tax mismatch        1.000   1.000   712          1",
         "  clean-case false-positive rate  0.000 of 1000 cases",
+        "",
+        # No hard negative fires on labels: the 16 false alarms are the
+        # paired extra and missing lines above, on no hard negative.
+        "Diagnostic table, over the same cases",
+        "  hard negative   placed  false alarms",
+        "  rounding drift    1095             0",
+        "  just inside       1111             0",
+        "  billed below      1059             0",
+        "  false alarms on no hard negative  16",
+        "",
+        "  type            near recall    n  far recall    n",
+        "  price variance        1.000  544       1.000  543",
+        "  short-ship            1.000  345       1.000  344",
+        "  over-ship             1.000  346       1.000  345",
+        "  tax mismatch          1.000  356       1.000  356",
+        "  headline recall is the half-and-half mix of near and far",
         "",
         "Labels control, over cases from the fixed subset",
         "  manifest                        {manifest}",
@@ -1623,15 +1646,17 @@ EXPECTED_MATCH_OUTPUT = "\n".join(
         "  recall                          1.000",
         "  clean-case false-positive rate  0.000 of 1000 cases",
         "",
-        "  type            precision  recall    n  documents",
-        "  price variance      1.000   1.000  500          4",
-        "  short-ship          1.000   1.000  500          3",
-        "  over-ship           1.000   1.000  500          3",
-        "  extra line          1.000   1.000  500          4",
-        "  missing line        1.000   1.000  500          4",
+        # The pinned documents carry no code and no two of their descriptions
+        # agree at the floor, so a removed line never pairs with a donor line.
+        "  type            precision  recall     n  documents",
+        "  price variance      1.000   1.000   884          4",
+        "  short-ship          1.000   1.000   714          3",
+        "  over-ship           1.000   1.000   749          3",
+        "  extra line          1.000   1.000   897          4",
+        "  missing line        1.000   1.000  1794          4",
         # No pinned document labels a unit or a header tax: n 0, not an error.
-        "  unit variant        1.000   1.000    0          0",
-        "  tax mismatch        1.000   1.000    0          0",
+        "  unit variant        1.000   1.000     0          0",
+        "  tax mismatch        1.000   1.000     0          0",
         "",
     ]
 )
