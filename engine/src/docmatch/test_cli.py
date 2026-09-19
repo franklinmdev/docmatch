@@ -1600,6 +1600,8 @@ EXPECTED_MATCH_OUTPUT = "\n".join(
         "  over-ship           1.000   1.000  500          4",
         "  extra line          1.000   1.000  500          5",
         "  missing line        1.000   1.000  500          5",
+        # The one taxed document is train's, drawn afresh 500 times.
+        "  tax mismatch        1.000   1.000  500          1",
         "  clean-case false-positive rate  0.000 of 1000 cases",
         "",
         "Labels control, over cases from the fixed subset",
@@ -1615,6 +1617,8 @@ EXPECTED_MATCH_OUTPUT = "\n".join(
         "  over-ship           1.000   1.000  500          3",
         "  extra line          1.000   1.000  500          4",
         "  missing line        1.000   1.000  500          4",
+        # No pinned document labels a header tax: n 0, not an error.
+        "  tax mismatch        1.000   1.000    0          0",
         "",
     ]
 )

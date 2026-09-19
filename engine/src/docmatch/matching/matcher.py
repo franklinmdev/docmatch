@@ -73,6 +73,10 @@ a rule suppressing both on one line reaches them in one place. A
 purchase-order line the receiving record does not cover compares no
 quantity: there is nothing received to be short of.
 
+Tax mismatch: the invoice's header `amount_total_tax` is above the purchase
+order's by more than its tolerance, the same shape as price, and is placed
+on the header (#65, #70, #76). There is no line tax.
+
 A cell one side carries and the other does not, or one the normalizer cannot
 read as a number, is not compared: it is listed with its reason, the rule
 falls back the way it does for an absent cell, unit price then amount, and
@@ -109,6 +113,7 @@ from docmatch.matching.tolerances import (
     DESCRIPTION_FLOOR,
     PRICE,
     QUANTITY,
+    TAX,
     Tolerance,
 )
 from docmatch.metrics.fields import FieldValues
@@ -264,7 +269,8 @@ class MatchResult:
 
     pairings: tuple[Pairing, ...]
     findings: tuple[Finding | UnpairedFinding, ...]
-    """Value findings on paired lines, then extra lines, then missing lines."""
+    """Value findings on paired lines, the header's tax, then extra lines,
+    then missing lines."""
     not_compared: tuple[NotCompared, ...]
 
     @property
@@ -316,6 +322,9 @@ def match(
             receipt.against(pairing.po_line),
             not_compared,
         )
+    tax = _tax_mismatch(invoice.header, purchase_order.header, not_compared)
+    if tax is not None:
+        findings.append(tax)
     findings += [
         UnpairedFinding("extra line", Place("invoice line", each.line), each.candidate)
         for each in paired.unpaired_invoice
@@ -580,22 +589,44 @@ def _price_variance(
     place = Place("po line", pairing.po_line)
     for cell in PRICE_CELLS:
         compared = _comparable(place, cell, (invoice, po), not_compared)
-        if compared is None:
-            continue
-        invoice_cell, po_cell = compared
-        lowest = min(po_cell.numbers)
-        if _above(invoice_cell, po_cell, PRICE):
-            return Finding(
-                type="price variance",
-                place=place,
-                cell=cell,
-                invoice=invoice_cell.texts,
-                purchase_order=po_cell.texts,
-                margin=PRICE.margin(lowest),
-                tolerance=PRICE,
-            )
-        return None
+        if compared is not None:
+            return _overbilled("price variance", place, cell, PRICE, *compared)
     return None
+
+
+def _tax_mismatch(
+    invoice: FieldValues, po: FieldValues, not_compared: list[NotCompared]
+) -> Finding | None:
+    """Overbilled on the header's total tax; None when clean or not comparable."""
+    place = Place("header")
+    compared = _comparable(place, "tax", (invoice, po), not_compared)
+    if compared is None:
+        return None
+    return _overbilled("tax mismatch", place, "tax", TAX, *compared)
+
+
+def _overbilled(
+    type_: DiscrepancyType,
+    place: Place,
+    cell: Cell,
+    tolerance: Tolerance,
+    invoice: "_Readable",
+    po: "_Readable",
+) -> Finding | None:
+    """A finding when the invoice's value is above the purchase order's by more
+    than the tolerance, else None."""
+    if not _above(invoice, po, tolerance):
+        return None
+    lowest = min(po.numbers)
+    return Finding(
+        type=type_,
+        place=place,
+        cell=cell,
+        invoice=invoice.texts,
+        purchase_order=po.texts,
+        margin=tolerance.margin(lowest),
+        tolerance=tolerance,
+    )
 
 
 def _quantity_findings(

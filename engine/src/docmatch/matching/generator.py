@@ -16,21 +16,25 @@ in: a line labeled with only a description and an amount is a purchase-order
 line with only those, and a discrepancy type is injected only on lines that
 carry the cells it touches (#62). Lines whose own arithmetic fails stay as
 seeds, since matching compares field to field and an invoice's arithmetic is
-the gate's business. The receiving record copies quantities, units, codes
-and descriptions, never prices, and each of its lines names the
-purchase-order line it was received against, as an ERP's does (#63).
+the gate's business. The header is copied too, with one tax: a seed that
+lists several keeps its highest, the document's total. The receiving record
+copies quantities, units, codes and descriptions, never prices, and each of
+its lines names the purchase-order line it was received against, as an ERP's
+does (#63).
 
 Injection
 ---------
 
 Price variance lowers the purchase order's unit price where the seed line
 carries one, else its amount, so the invoice ends up billed above the
-purchase order (#65). Each injection draws near the edge or far past it,
-half and half, in the bands `tolerances` defines, so that borderline misses
-show in recall (#66, #70). The lowered value is written with the seed value's
-own decimal places, and redrawn until it lands in its band after rounding;
-a line where no value in the band exists, which is a small value where the
-cent floor swallows the band, is not eligible for that band.
+purchase order (#65). Tax mismatch lowers the purchase order's header
+`amount_total_tax`, header only, since no line tax is labeled (#65). Each
+injection draws near the edge or far past it, half and half, in the bands
+`tolerances` defines, so that borderline misses show in recall (#66, #70).
+The lowered value is written with the seed value's own decimal places, and
+redrawn until it lands in its band after rounding; a line where no value in
+the band exists, which is a small value where the cent floor swallows the
+band, is not eligible for that band.
 
 Extra line removes a line from the purchase order and the receiving record,
 so the invoice bills a line nobody ordered. Missing line adds to the purchase
@@ -95,6 +99,7 @@ from docmatch.matching.tolerances import (
     NEAR_PERCENT,
     NEAR_UNITS,
     PRICE,
+    TAX,
     Band,
     Tolerance,
     band,
@@ -115,6 +120,7 @@ INJECTED_TYPES: tuple[DiscrepancyType, ...] = (
     "missing line",
     "short-ship",
     "over-ship",
+    "tax mismatch",
 )
 """The types the generator injects, in the order their cases are built."""
 
@@ -187,7 +193,7 @@ def eligible(
 ) -> tuple[int, ...]:
     """The positions of the seed's lines a type can be injected on; for a
     missing line, every position the added line can go in, when another seed
-    in the pool can give one."""
+    in the pool can give one; none for a header type."""
     lines = seed.invoice.lines
     if type_ == "extra line":
         keys = [_pairing_key(line) for line in lines]
@@ -199,13 +205,24 @@ def eligible(
     if type_ == "missing line":
         has_donor = any(_lines_to_give(seed, each) for each in pool)
         return tuple(range(len(lines) + 1)) if has_donor else ()
-    carries = ELIGIBLE[type_]
-    return tuple(position for position, line in enumerate(lines) if carries(line))
+    line_carries = ELIGIBLE.get(type_)
+    if line_carries is None:
+        return ()
+    return tuple(position for position, line in enumerate(lines) if line_carries(line))
+
+
+def carries(seed: Seed, type_: DiscrepancyType, pool: Sequence[Seed]) -> bool:
+    """Whether a type can be injected on the seed at all: on its header for a
+    header type, else on one of its lines."""
+    header_carries = HEADER_ELIGIBLE.get(type_)
+    if header_carries is not None:
+        return header_carries(seed.invoice.header)
+    return bool(eligible(seed, type_, pool))
 
 
 def documents_carrying(seeds: Sequence[Seed], type_: DiscrepancyType) -> int:
     """How many seeds a type can be injected on at all."""
-    return sum(1 for each in seeds if eligible(each, type_, seeds))
+    return sum(1 for each in seeds if carries(each, type_, seeds))
 
 
 def _cycle(pool: Sequence[Seed], rng: random.Random, count: int) -> list[Seed]:
@@ -230,10 +247,15 @@ def _case(
     po_lines: Sequence[FieldValues],
     truth: tuple[Injected, ...],
     received: Sequence[FieldValues] | None = None,
+    po_header: FieldValues | None = None,
 ) -> Case:
-    """The case with these purchase-order lines, and receipt lines received
-    in full against them unless given."""
-    purchase_order = Record(header=seed.invoice.header, lines=tuple(po_lines))
+    """The case with these purchase-order lines, receipt lines received in
+    full against them unless given, and the seed's header with one tax on
+    the purchase order unless given."""
+    purchase_order = Record(
+        header=_one_tax(seed.invoice.header) if po_header is None else po_header,
+        lines=tuple(po_lines),
+    )
     receipt_lines = (
         [_received(line) for line in po_lines] if received is None else received
     )
@@ -266,7 +288,7 @@ def _injected(
     failing the report; a pass that builds nothing from eligible seeds means
     no seed can draw the band wanted, which is an error.
     """
-    eligible_pool = [each for each in pool if eligible(each, type_, pool)]
+    eligible_pool = [each for each in pool if carries(each, type_, pool)]
     cases: list[Case] = []
     if not eligible_pool:
         return cases
@@ -456,13 +478,60 @@ def _fewer(quantity: Decimal, wanted: Band, rng: random.Random) -> str | None:
     return f"{fewer:f}" if quantity_band(quantity, fewer) == wanted else None
 
 
+def _tax_mismatch(
+    seed: Seed, wanted: Band, rng: random.Random, pool: Sequence[Seed]
+) -> Case | None:
+    """The seed with the purchase order's header tax lowered into the band, or
+    None when it cannot be."""
+    taxed = _taxed(seed.invoice.header)
+    if taxed is None:
+        return None
+    fieldtype, value = taxed
+    lowered = _lowered(TAX, value, wanted, rng)
+    if lowered is None:
+        return None
+    po_header = {**seed.invoice.header, fieldtype: (lowered,)}
+    truth = (Injected("tax mismatch", Place("header"), wanted),)
+    return _case(seed, seed.invoice.lines, truth, po_header=po_header)
+
+
+def _one_tax(header: FieldValues) -> FieldValues:
+    """The header as a purchase order carries it: one tax, the highest the seed
+    lists. Every seed on train and val that lists two taxes lists a zero beside
+    its total, so the highest is the document's tax, and a purchase order
+    copying both would fire against itself under the matcher's listed-values
+    rule."""
+    read = read_cell(header, "tax")
+    if read is None or read.numbers is None:
+        return header
+    highest = read.numbers.index(max(read.numbers))
+    return {**header, read.fieldtype: (read.texts[highest],)}
+
+
+def _taxed(header: FieldValues) -> tuple[str, Decimal] | None:
+    """The fieldtype a tax mismatch lowers, and the value the matcher will
+    compare, the highest listed; None when the header carries no readable
+    positive tax, since lowering it would not overbill."""
+    read = read_cell(header, "tax")
+    if read is None or read.numbers is None:
+        return None
+    highest = max(read.numbers)
+    return (read.fieldtype, highest) if highest > 0 else None
+
+
 ELIGIBLE: dict[DiscrepancyType, Callable[[FieldValues], bool]] = {
     "price variance": lambda line: _priced(line) is not None,
     "short-ship": lambda line: _quantity(line) is not None,
     "over-ship": lambda line: _quantity(line) is not None,
 }
-"""Whether a line carries what a type touches, for the types whose
+"""Whether a line carries what a type touches, for the line types whose
 eligibility is the line's own."""
+
+HEADER_ELIGIBLE: dict[DiscrepancyType, Callable[[FieldValues], bool]] = {
+    "tax mismatch": lambda header: _taxed(header) is not None,
+}
+"""Whether a header carries what a type touches, per injected header type:
+tax mismatch only, on header `amount_total_tax` (#65)."""
 
 Inject = Callable[[Seed, Band, random.Random, Sequence[Seed]], Case | None]
 INJECT: dict[DiscrepancyType, Inject] = {
@@ -471,6 +540,7 @@ INJECT: dict[DiscrepancyType, Inject] = {
     "missing line": _missing_line,
     "short-ship": _short_ship,
     "over-ship": _over_ship,
+    "tax mismatch": _tax_mismatch,
 }
 """How each injected type builds a case from a seed, for the band wanted
 where the type has bands."""

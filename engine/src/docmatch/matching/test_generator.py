@@ -15,11 +15,12 @@ from docmatch.matching.generator import (
     Case,
     GeneratorError,
     Seed,
+    documents_carrying,
     generate,
 )
 from docmatch.matching.matcher import DiscrepancyType, Place
 from docmatch.matching.records import Cell, Record, cell_values
-from docmatch.matching.tolerances import PRICE, band, quantity_band
+from docmatch.matching.tolerances import PRICE, TAX, band, quantity_band
 from docmatch.metrics.normalization import read_number
 
 FieldValuesDict = dict[str, tuple[str, ...]]
@@ -94,7 +95,7 @@ def test_the_receiving_record_carries_quantities_and_never_prices() -> None:
 
 
 def test_a_price_variance_lowers_the_po_unit_price_where_the_seed_has_one() -> None:
-    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6))
+    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6), "price variance")
 
     assert len(cases) == 6
     for case in cases:
@@ -124,7 +125,9 @@ def test_a_price_variance_lowers_the_po_unit_price_where_the_seed_has_one() -> N
 
 
 def test_injections_draw_near_and_far_half_and_half_within_their_bands() -> None:
-    cases = injected(generate((PRICED, AMOUNTS), seed=1, clean=0, per_type=10))
+    cases = injected(
+        generate((PRICED, AMOUNTS), seed=1, clean=0, per_type=10), "price variance"
+    )
 
     bands = Counter(truth.band for case in cases for truth in case.truth)
     assert bands == {"near": 5, "far": 5}
@@ -144,7 +147,9 @@ def test_injections_draw_near_and_far_half_and_half_within_their_bands() -> None
 
 
 def test_a_lowered_value_keeps_the_seed_value_decimal_places() -> None:
-    cases = injected(generate((AMOUNTS,), seed=1, clean=0, per_type=2))
+    cases = injected(
+        generate((AMOUNTS,), seed=1, clean=0, per_type=2), "price variance"
+    )
 
     for case in cases:
         (truth,) = case.truth
@@ -157,7 +162,7 @@ def test_a_lowered_value_keeps_the_seed_value_decimal_places() -> None:
 
 
 def test_a_rare_type_reuses_seeds_with_fresh_draws() -> None:
-    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6))
+    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6), "price variance")
 
     touched: tuple[tuple[int, Cell], ...] = ((0, "unit price"), (1, "amount"))
     lowered = {
@@ -183,7 +188,9 @@ def test_a_document_with_no_lines_seeds_nothing() -> None:
 
 
 def test_a_type_is_injected_only_on_lines_carrying_its_cells() -> None:
-    cases = injected(generate((NO_MONEY, AMOUNTS), seed=1, clean=0, per_type=4))
+    cases = injected(
+        generate((NO_MONEY, AMOUNTS), seed=1, clean=0, per_type=4), "price variance"
+    )
 
     assert {case.document_id for case in cases} == {"amounts"}
     assert all(
@@ -436,3 +443,78 @@ def test_a_line_with_nothing_to_pair_on_is_never_removed_or_added() -> None:
         added = case.truth[0].place.line
         assert added is not None
         assert "line_item_amount_gross" in case.purchase_order.lines[added]
+
+
+# Tax mismatch
+
+
+def test_a_tax_mismatch_lowers_the_po_header_tax_and_nothing_else() -> None:
+    cases = injected(generate((PRICED,), seed=1, clean=0, per_type=6), "tax mismatch")
+
+    assert len(cases) == 6
+    for case in cases:
+        (truth,) = case.truth
+        assert truth.place == Place("header")
+        assert case.purchase_order.lines == PRICED.invoice.lines
+        header = dict(case.purchase_order.header)
+        lowered = read_number(header.pop("amount_total_tax")[0])
+        seeded = dict(PRICED.invoice.header)
+        assert lowered is not None
+        assert band(TAX, Decimal(seeded.pop("amount_total_tax")[0]), lowered) == (
+            truth.band
+        )
+        assert header == seeded
+
+
+def test_tax_mismatches_draw_near_and_far_half_and_half() -> None:
+    cases = injected(generate(POOL, seed=1, clean=0, per_type=10), "tax mismatch")
+
+    assert Counter(truth.band for case in cases for truth in case.truth) == {
+        "near": 5,
+        "far": 5,
+    }
+
+
+def test_only_seeds_labeling_a_header_tax_carry_a_tax_mismatch() -> None:
+    cases = injected(generate(POOL, seed=1, clean=0, per_type=4), "tax mismatch")
+
+    assert {case.document_id for case in cases} == {"priced"}
+    assert documents_carrying(POOL, "tax mismatch") == 1
+
+
+@pytest.mark.parametrize("tax", ["0.00", "n/a"])
+def test_a_header_tax_that_is_zero_or_unreadable_is_not_eligible(tax: str) -> None:
+    untaxed = seed(
+        "untaxed",
+        line(description="Hex key set", amount_gross="45.00"),
+        amount_total_tax=tax,
+    )
+
+    assert documents_carrying((untaxed,), "tax mismatch") == 0
+    assert (
+        injected(generate((untaxed,), seed=1, clean=0, per_type=2), "tax mismatch")
+        == []
+    )
+
+
+def test_a_po_carries_one_header_tax_the_highest_the_seed_lists() -> None:
+    """A labeled zero-rate row beside the total is not a second tax: every PO,
+    clean or not, carries the total alone, so it never disagrees with itself."""
+    listed = Seed(
+        "listed",
+        Record(
+            header={"amount_total_tax": ("0.00", "8.55")},
+            lines=(line(description="Hex key set", amount_gross="45.00"),),
+        ),
+    )
+
+    cases = generate((listed,), seed=1, clean=1, per_type=2)
+
+    assert [case.purchase_order.header for case in cases[:1]] == [
+        {"amount_total_tax": ("8.55",)}
+    ]
+    assert all(
+        case.purchase_order.header == {"amount_total_tax": ("8.55",)}
+        for case in injected(cases, "price variance")
+    )
+    assert all(case.purchase_order.lines == listed.invoice.lines for case in cases[:1])
