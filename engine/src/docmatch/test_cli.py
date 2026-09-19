@@ -1575,63 +1575,109 @@ def matching(synthetic_subset: Path, *arguments: str) -> list[str]:
     ]
 
 
-EXPECTED_MATCH_OUTPUT = "\n".join(
+MATCH_FLOORS = [
+    # The fixture's train split is its one document with a unit and a
+    # header tax, and one whose two lines nearly repeat each other; its
+    # val split is the five the manifest pins, one of which has no lines
+    # and seeds nothing. Only train's lines carry codes.
+    "Seed pool",
+    "  pool   documents  lines  without lines",
+    "  train          2      4              0",
+    "  val            5      7              1",
+    "",
+    # The procedure pairs lines of different train documents only, so
+    # with two documents of two lines every pair is one of four per cell,
+    # each drawn about a quarter of the time. The closest codes, ST-120
+    # against HT-204 or HT-207, agree at exactly 0.5, which clears 0.5,
+    # so the code floor is 0.6; the closest descriptions agree at 0.370,
+    # so 0.4. HT-204 and HT-207 agree at 0.833 and the two socket sets at
+    # 0.905, so a draw that paired a document with itself would read 0.9
+    # or more on both.
+    "Pairing floors, each constant and the procedure's value on train",
+    "  cell         constant  procedure  pairs",
+    "  code              0.5        0.6  10000",
+    "  description       0.4        0.4  10000",
+]
+
+MATCH_TABLES = [
+    "",
+    # Every fixture row carries an amount and none a unit price, so every
+    # price variance falls to the amount; all are found on labels, and
+    # so are the extra and missing lines. A quantity of one unit carries
+    # no short-ship or over-ship, which leaves one document without either.
+    "Per-type table, over cases from train and val",
+    "  type            precision  recall    n  documents",
+    "  price variance      1.000   1.000  500          6",
+    "  short-ship          1.000   1.000  500          5",
+    "  over-ship           1.000   1.000  500          5",
+    "  extra line          1.000   1.000  500          6",
+    "  missing line        1.000   1.000  500          6",
+    # The one document labeling units and a header tax is train's, drawn
+    # afresh 500 times.
+    "  unit variant        1.000   1.000  500          1",
+    "  tax mismatch        1.000   1.000  500          1",
+    "  clean-case false-positive rate  0.000 of 1000 cases",
+    "",
+    "Labels control, over cases from the fixed subset",
+    "  manifest                        {manifest}",
+    "  documents                       4 of 5 with lines",
+    "  precision                       1.000",
+    "  recall                          1.000",
+    "  clean-case false-positive rate  0.000 of 1000 cases",
+    "",
+    "  type                      precision  recall    n  documents",
+    "  price variance                1.000   1.000  500          4",
+    "  short-ship                    1.000   1.000  500          3",
+    "  over-ship                     1.000   1.000  500          3",
+    "  extra line                    1.000   1.000  500          4",
+    "  missing line                  1.000   1.000  500          4",
+    # No pinned document labels a unit or a header tax: n 0, not an
+    # error. A row over the fixed subset marks both indicative (#67).
+    "  unit variant, indicative      1.000   1.000    0          0",
+    "  tax mismatch, indicative      1.000   1.000    0          0",
+]
+
+EXPECTED_MATCH_OUTPUT = "\n".join([*MATCH_FLOORS, *MATCH_TABLES, ""])
+
+EXPECTED_MATCH_RUN_OUTPUT = "\n".join(
     [
-        # The fixture's train split is its one document with a unit and a
-        # header tax, and one whose two lines nearly repeat each other; its
-        # val split is the five the manifest pins, one of which has no lines
-        # and seeds nothing. Only train's lines carry codes.
-        "Seed pool",
-        "  pool   documents  lines  without lines",
-        "  train          2      4              0",
-        "  val            5      7              1",
+        *MATCH_FLOORS,
         "",
-        # The procedure pairs lines of different train documents only, so
-        # with two documents of two lines every pair is one of four per cell,
-        # each drawn about a quarter of the time. The closest codes, ST-120
-        # against HT-204 or HT-207, agree at exactly 0.5, which clears 0.5,
-        # so the code floor is 0.6; the closest descriptions agree at 0.370,
-        # so 0.4. HT-204 and HT-207 agree at 0.833 and the two socket sets at
-        # 0.905, so a draw that paired a document with itself would read 0.9
-        # or more on both.
-        "Pairing floors, each constant and the procedure's value on train",
-        "  cell         constant  procedure  pairs",
-        "  code              0.5        0.6  10000",
-        "  description       0.4        0.4  10000",
+        # Over one clean case per document: eval0003's three rows, read out
+        # of order, eval0004's one, and eval0005's two with a label; its
+        # made-up delivery line pairs with no labeled row, and eval0006 has
+        # no reading. Every description read agrees with its label, so the
+        # floor leaves none unpaired.
+        "Floor cost per run, over one clean case per document",
+        "  run                   lines the metric pairs  left below a floor",
+        "  gemini synthetic-001                       6                   0",
+        *MATCH_TABLES,
         "",
-        # Every fixture row carries an amount and none a unit price, so every
-        # price variance falls to the amount; all are found on labels, and
-        # so are the extra and missing lines. A quantity of one unit carries
-        # no short-ship or over-ship, which leaves one document without either.
-        "Per-type table, over cases from train and val",
-        "  type            precision  recall    n  documents",
-        "  price variance      1.000   1.000  500          6",
-        "  short-ship          1.000   1.000  500          5",
-        "  over-ship           1.000   1.000  500          5",
-        "  extra line          1.000   1.000  500          6",
-        "  missing line        1.000   1.000  500          6",
-        # The one document labeling units and a header tax is train's, drawn
-        # afresh 500 times.
-        "  unit variant        1.000   1.000  500          1",
-        "  tax mismatch        1.000   1.000  500          1",
-        "  clean-case false-positive rate  0.000 of 1000 cases",
-        "",
-        "Labels control, over cases from the fixed subset",
-        "  manifest                        {manifest}",
+        # The same cases as the control, eval0006's with no reading at all.
+        "End-to-end row, gemini synthetic-001, its readings as the invoices",
+        "  run                             {run}",
         "  documents                       4 of 5 with lines",
-        "  precision                       1.000",
-        "  recall                          1.000",
-        "  clean-case false-positive rate  0.000 of 1000 cases",
+        "  precision                       0.542",
+        "  recall                          0.808",
+        # Every clean case of eval0005 bills the made-up line and every one
+        # of eval0006 misses both its lines: two of the four documents.
+        "  clean-case false-positive rate  0.500 of 1000 cases",
         "",
-        "  type            precision  recall    n  documents",
-        "  price variance      1.000   1.000  500          4",
-        "  short-ship          1.000   1.000  500          3",
-        "  over-ship           1.000   1.000  500          3",
-        "  extra line          1.000   1.000  500          4",
-        "  missing line        1.000   1.000  500          4",
-        # No pinned document labels a unit or a header tax: n 0, not an error.
-        "  unit variant        1.000   1.000    0          0",
-        "  tax mismatch        1.000   1.000    0          0",
+        "  type                      precision  recall    n  documents",
+        # eval0005's junction box is read at a tenth of its amount, so a
+        # price variance there is hidden, and eval0006's are all missed.
+        "  price variance                1.000   0.632  500          4",
+        "  short-ship                    1.000   0.828  500          3",
+        "  over-ship                     1.000   0.830  500          3",
+        # eval0003's rows are read out of order, and its extra lines are
+        # still found once placed through the line-item assignment; only
+        # eval0006's are missed. eval0005's made-up line is the false alarm.
+        "  extra line                    0.265   0.750  500          4",
+        # A document with no reading leaves every purchase-order line
+        # unpaired: the missing line is found, with the others beside it.
+        "  missing line                  0.427   1.000  500          4",
+        "  unit variant, indicative      1.000   1.000    0          0",
+        "  tax mismatch, indicative      1.000   1.000    0          0",
         "",
     ]
 )
@@ -1740,10 +1786,98 @@ def test_match_refuses_a_manifest_that_pins_a_train_document(
     assert "eval0001" in captured.err
 
 
+def test_match_adds_an_end_to_end_row_for_a_saved_run(
+    synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = main(matching(synthetic_subset, "--run", str(synthetic_subset)))
+
+    assert capsys.readouterr().out == EXPECTED_MATCH_RUN_OUTPUT.format(
+        manifest=synthetic_subset / "subset.json", run=synthetic_subset
+    )
+    assert exit_code == 0
+
+
+def a_saved_run(synthetic_subset: Path, where: Path, backend: str) -> Path:
+    """The fixture's saved run, copied, under another backend's name."""
+    where.mkdir()
+    for name in ("predictions.json", "manifest.json"):
+        shutil.copy(synthetic_subset / name, where / name)
+    (where / "run.json").write_text(
+        json.dumps({"backend": backend, "requested_model": "synthetic-002"}),
+        encoding="utf-8",
+    )
+    return where
+
+
+def test_match_adds_one_row_per_run_named_from_its_record(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    other = a_saved_run(synthetic_subset, tmp_path / "azure", "azure")
+
+    exit_code = main(
+        matching(synthetic_subset, "--run", str(synthetic_subset), "--run", str(other))
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert out.index("End-to-end row, gemini synthetic-001") < out.index(
+        "End-to-end row, azure synthetic-002"
+    )
+    # The same readings on the same cases give the same row.
+    first, second = out.split("End-to-end row, ")[1:]
+    assert first.strip().splitlines()[2:] == second.strip().splitlines()[2:]
+
+
+def test_match_refuses_a_run_over_another_subset(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A `--limit` run covers a prefix of the pinned subset, and never becomes
+    a row (#75)."""
+    limited = a_saved_run(synthetic_subset, tmp_path / "limited", "gemini")
+    write(load(synthetic_subset / "subset.json").first(3), limited / "manifest.json")
+
+    exit_code = main(matching(synthetic_subset, "--run", str(limited)))
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert str(limited / "manifest.json") in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("name", ["predictions.json", "manifest.json", "run.json"])
+def test_match_reports_a_run_missing_one_of_its_files(
+    synthetic_subset: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    name: str,
+) -> None:
+    broken = a_saved_run(synthetic_subset, tmp_path / "broken", "gemini")
+    (broken / name).unlink()
+
+    exit_code = main(matching(synthetic_subset, "--run", str(broken)))
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert name in captured.err
+
+
+def test_match_prints_no_reading_text(
+    synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rule 6: the readings are document content too; the rows carry counts."""
+    main(matching(synthetic_subset, "--run", str(synthetic_subset)))
+
+    out = capsys.readouterr().out
+    assert "Delivery" not in out
+    assert "42.00" not in out
+
+
 def test_match_writes_nothing(synthetic_subset: Path, tmp_path: Path) -> None:
     before = sorted(each.name for each in synthetic_subset.iterdir())
 
-    main(matching(synthetic_subset))
+    main(matching(synthetic_subset, "--run", str(synthetic_subset)))
 
     assert sorted(each.name for each in synthetic_subset.iterdir()) == before
     assert list(tmp_path.iterdir()) == []

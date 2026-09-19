@@ -23,7 +23,9 @@ costs money.
 
 `docmatch match` builds cases from every DocILE label, matches each and scores
 the findings against the generator's truth, which is where the matching table
-comes from. It prints and writes nothing.
+comes from. Each `--run` matches a saved run's readings as the invoices of
+the same cases, which is where the end-to-end rows come from. It prints and
+writes nothing.
 
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
@@ -34,6 +36,7 @@ import os
 import sys
 from collections import Counter
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import get_args
@@ -50,10 +53,12 @@ from docmatch.evals.run import (
     DerivedTotals,
     FieldTypeTotals,
     GateTotals,
+    RunRecord,
     SubsetScore,
     read_confidence,
     read_currency_symbols,
     read_predictions,
+    read_run_record,
     score_subset,
 )
 from docmatch.extraction import azure, backends, gemini, pages
@@ -77,8 +82,16 @@ from docmatch.matching.generator import (
     documents_carrying,
     generate,
 )
+from docmatch.matching.matcher import DiscrepancyType
 from docmatch.matching.pool import SPLITS, SeedPool, load_pool, pool_from
-from docmatch.matching.scoring import Table, score_matched
+from docmatch.matching.records import Record, read_record
+from docmatch.matching.scoring import (
+    FloorCost,
+    Table,
+    floor_cost,
+    score_matched,
+    score_read,
+)
 from docmatch.metrics.fields import (
     FieldScore,
     PredictionError,
@@ -365,6 +378,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         help=(
             "the fixed subset the labels control seeds from "
             f"(default: {manifest.MANIFEST.name})"
+        ),
+    )
+    matching.add_argument(
+        "--run",
+        type=Path,
+        action="append",
+        default=[],
+        dest="runs",
+        metavar="DIR",
+        help=(
+            "a directory `extract --out` wrote over the whole fixed subset, "
+            "whose readings are matched as the invoices; each adds one "
+            "end-to-end row, and it can be given more than once"
         ),
     )
     counts = subcommands.add_parser(
@@ -730,16 +756,22 @@ def _write(extracted: Run, out: Path) -> None:
 
 def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
     """The pairing floors measured on train, the per-type table over train
-    and val, and the labels control over the fixed subset, each from cases
-    rebuilt on one pinned draw.
+    and val, the labels control over the fixed subset, and one end-to-end row
+    per saved run on the control's own cases, each from cases rebuilt on one
+    pinned draw.
 
     Nothing is written: cases exist in memory and the report is counts. A bad
     number is still a report, so it exits 0 whenever the report prints. A
     manifest pinning a document the floors are measured on is refused: they
-    are never measured on the fixed subset (#77).
+    are never measured on the fixed subset (#77). So is a run over anything
+    but the pinned subset, before any case is built (#75).
     """
-    pool = load_pool(dataset, SPLITS)
     pinned = manifest.load(arguments.manifest)
+    runs = [
+        _saved_run(directory, pinned, arguments.manifest)
+        for directory in arguments.runs
+    ]
+    pool = load_pool(dataset, SPLITS)
     measured_on = set(dataset.document_ids(floors.SPLIT))
     shared = sorted(measured_on.intersection(pinned.document_ids))
     if shared:
@@ -758,13 +790,74 @@ def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
             for document_id in pinned.document_ids
         ),
     )
-    control = score_matched(generate(control_pool.seeds))
+    cases = generate(control_pool.seeds)
+    control = score_matched(cases)
+    rows = [
+        EndToEnd(
+            record.name,
+            directory,
+            score_read(cases, readings),
+            floor_cost(cases, readings),
+        )
+        for directory, record, readings in runs
+    ]
     return (
         render_match(
-            arguments.manifest, pool, pairing_floors, table, control_pool, control
+            arguments.manifest,
+            pool,
+            pairing_floors,
+            table,
+            control_pool,
+            control,
+            rows,
         ),
         0,
     )
+
+
+def _saved_run(
+    directory: Path, pinned: Manifest, pinned_path: Path
+) -> tuple[Path, RunRecord, dict[str, Record]]:
+    """A saved run's record and its readings as invoices, or a message.
+
+    Strict: its manifest has to be the pinned subset itself, so a `--limit`
+    run, which covers a prefix of it, never becomes a row (#75). A document
+    the run has no reading for is left out here and matched as an invoice
+    with no lines.
+    """
+    covered_path = directory / RUN_FILES[1]
+    covered = manifest.load(covered_path)
+    if covered != pinned:
+        raise ManifestError(
+            f"{covered_path} is not the pinned subset {pinned_path}: it covers "
+            f"{covered.size} documents of {covered.split} drawn with seed "
+            f"{covered.seed}, and only a run over the whole pinned subset is a row"
+        )
+    record = read_run_record(directory / RUN_FILES[2])
+    symbols = read_currency_symbols(directory / CURRENCY_SYMBOLS_FILE)
+    readings = {
+        document_id: read_record(prediction, symbols.get(document_id, {}))
+        for document_id, prediction in read_predictions(
+            directory / RUN_FILES[0]
+        ).items()
+    }
+    return directory, record, readings
+
+
+@dataclass(frozen=True)
+class EndToEnd:
+    """One saved run's end-to-end row, and what the floor cost it."""
+
+    name: str
+    directory: Path
+    table: Table
+    cost: FloorCost
+
+
+INDICATIVE: tuple[DiscrepancyType, ...] = ("unit variant", "tax mismatch")
+"""The types a row over the fixed subset reads as indicative: 8 and 9 of its
+documents carry them, and a reading is fixed per document, so repeated draws
+repeat its errors and the honest n is documents (#67)."""
 
 
 def render_match(
@@ -774,6 +867,7 @@ def render_match(
     table: Table,
     control_pool: SeedPool,
     control: Table,
+    rows: Sequence[EndToEnd] = (),
 ) -> str:
     """The matching report as a block a human can paste anywhere: counts only."""
     lines = [
@@ -804,37 +898,71 @@ def render_match(
                 for each in pairing_floors
             ],
         ),
+        *_floor_costs(rows),
         "",
         f"Per-type table, over cases from {' and '.join(SPLITS)}",
         *_per_type(table, pool),
         *_rows(("clean-case false-positive rate", _clean_rate(table))),
         "",
         "Labels control, over cases from the fixed subset",
-        *_rows(
-            ("manifest", str(path)),
-            (
-                "documents",
-                f"{control_pool.documents - control_pool.without_lines} of "
-                f"{control_pool.documents} with lines",
-            ),
-            ("precision", f"{control.overall.precision:.3f}"),
-            ("recall", f"{control.overall.recall:.3f}"),
-            ("clean-case false-positive rate", _clean_rate(control)),
-        ),
-        "",
-        *_per_type(control, control_pool),
+        *_end_to_end(("manifest", str(path)), control, control_pool),
     ]
+    for row in rows:
+        lines += [
+            "",
+            f"End-to-end row, {row.name}, its readings as the invoices",
+            *_end_to_end(("run", str(row.directory)), row.table, control_pool),
+        ]
     return "\n".join([*lines, ""])
 
 
-def _per_type(table: Table, pool: SeedPool) -> list[str]:
+def _floor_costs(rows: Sequence[EndToEnd]) -> list[str]:
+    """Each saved run's misread lines the floor left unpaired, beside the
+    floors and never tuned against (#77); nothing without a run."""
+    if not rows:
+        return []
+    return [
+        "",
+        # Of the reading lines the line-item metric pairs with a labeled
+        # line, those pairing left unpaired below a floor.
+        "Floor cost per run, over one clean case per document",
+        *_table(
+            ("run", "lines the metric pairs", "left below a floor"),
+            [(row.name, str(row.cost.read), str(row.cost.unpaired)) for row in rows],
+        ),
+    ]
+
+
+def _end_to_end(where: tuple[str, str], table: Table, pool: SeedPool) -> list[str]:
+    """A row over the fixed subset: precision and recall over all findings,
+    the clean-case rate, then the per-type table, the types a few documents
+    carry marked indicative (#67)."""
+    return [
+        *_rows(
+            where,
+            (
+                "documents",
+                f"{pool.documents - pool.without_lines} of {pool.documents} with lines",
+            ),
+            ("precision", f"{table.overall.precision:.3f}"),
+            ("recall", f"{table.overall.recall:.3f}"),
+            ("clean-case false-positive rate", _clean_rate(table)),
+        ),
+        "",
+        *_per_type(table, pool, indicative=INDICATIVE),
+    ]
+
+
+def _per_type(
+    table: Table, pool: SeedPool, indicative: Sequence[DiscrepancyType] = ()
+) -> list[str]:
     """Precision, recall and n per injected type, with the documents carrying it."""
     rows = [each for each in table.per_type if each.type in INJECTED_TYPES]
     return _table(
         ("type", "precision", "recall", "n", "documents"),
         [
             (
-                each.type,
+                f"{each.type}, indicative" if each.type in indicative else each.type,
                 f"{each.precision:.3f}",
                 f"{each.recall:.3f}",
                 str(each.n),

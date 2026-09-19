@@ -200,7 +200,7 @@ def score_line_items(
     labeled: Sequence[FieldValues], predicted: Sequence[FieldValues]
 ) -> LineItemScore:
     """One document's line-item score, over the pairing that agrees the most."""
-    agreement = [[score_fields(gold, guess) for guess in predicted] for gold in labeled]
+    agreement = _agreement(labeled, predicted)
     paired = _pair(agreement)
     taken = set(paired.values())
     rows = [
@@ -221,6 +221,25 @@ def score_line_items(
         if guess not in taken
     ]
     return LineItemScore(tuple(rows))
+
+
+def pair_rows(
+    labeled: Sequence[FieldValues], predicted: Sequence[FieldValues]
+) -> dict[int, int]:
+    """The predicted row each labeled row is paired with, agreeing rows only.
+
+    The assignment `score_line_items` scores over, for a caller that needs to
+    say which labeled row a predicted row is: matching places an extra line
+    on a reading through it, so extra lines are scored against the pairing
+    the extraction score uses (#76).
+    """
+    return _pair(_agreement(labeled, predicted))
+
+
+def _agreement(
+    labeled: Sequence[FieldValues], predicted: Sequence[FieldValues]
+) -> list[list[FieldScore]]:
+    return [[score_fields(gold, guess) for guess in predicted] for gold in labeled]
 
 
 def _pair(agreement: Sequence[Sequence[FieldScore]]) -> dict[int, int]:

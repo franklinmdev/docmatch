@@ -16,8 +16,8 @@ three findings weighs three, and a rate is derived from the sums.
 """
 
 from collections import Counter
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 
 from docmatch.matching.generator import Case
 from docmatch.matching.matcher import (
@@ -27,6 +27,8 @@ from docmatch.matching.matcher import (
     Place,
     match,
 )
+from docmatch.matching.records import Record
+from docmatch.metrics.line_items import pair_rows
 from docmatch.metrics.score import MicroAverage, Score, micro_average, ratio
 
 Found = tuple[DiscrepancyType, Place]
@@ -122,3 +124,87 @@ def score_matched(cases: Sequence[Case]) -> Table:
         cases,
         [match(case.invoice, case.purchase_order, case.receipt) for case in cases],
     )
+
+
+NO_READING = Record(header={}, lines=())
+"""The invoice a document with no reading is matched as: a failed or empty
+reading has no lines, and pays in misses and false alarms (#67)."""
+
+
+def score_read(cases: Sequence[Case], readings: Mapping[str, Record]) -> Table:
+    """Every case matched with the reading of its document as the invoice,
+    then scored against the truth built from its labels.
+
+    An extra line is placed on the invoice line, which on a reading is a
+    reading position; it is moved to the labeled line the line-item metric's
+    assignment pairs it with, so a reading that drops or reorders rows is
+    scored against the pairing the extraction score uses (#76). A reading
+    line that assignment pairs with no labeled line is placed on none, so it
+    is never taken for the line the generator removed.
+    """
+    labeled_at: dict[str, dict[int, int]] = {}
+    results: list[MatchResult] = []
+    for case in cases:
+        reading = readings.get(case.document_id, NO_READING)
+        if case.document_id not in labeled_at:
+            paired = pair_rows(case.invoice.lines, reading.lines)
+            labeled_at[case.document_id] = {
+                read: label for label, read in paired.items()
+            }
+        result = match(reading, case.purchase_order, case.receipt)
+        results.append(_placed(result, labeled_at[case.document_id]))
+    return score(cases, results)
+
+
+def _placed(result: MatchResult, labeled_at: Mapping[int, int]) -> MatchResult:
+    """The result with each extra line moved to the labeled line it reads."""
+    return replace(
+        result,
+        findings=tuple(
+            replace(each, place=Place("invoice line", labeled_at.get(each.place.line)))
+            if each.type == "extra line" and each.place.line is not None
+            else each
+            for each in result.findings
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class FloorCost:
+    """What the pairing floor cost a reading: its misread lines left unpaired.
+
+    Counted over one clean case per document, where the purchase order is the
+    labels, so a reading line the line-item metric pairs with a labeled line
+    is one the matcher should have paired too (#77).
+    """
+
+    read: int
+    """Reading lines the line-item metric's assignment pairs with a labeled
+    line."""
+    unpaired: int
+    """Of those, the lines pairing left unpaired because their best candidate
+    agreed below the floor: each a false extra-line hold on every case of its
+    document."""
+
+
+def floor_cost(cases: Sequence[Case], readings: Mapping[str, Record]) -> FloorCost:
+    """The misread lines the floor left unpaired, over one clean case per
+    document; reported beside the floor and never tuned against (#77)."""
+    read = unpaired = 0
+    seen: set[str] = set()
+    for case in cases:
+        if not case.is_clean or case.document_id in seen:
+            continue
+        seen.add(case.document_id)
+        reading = readings.get(case.document_id, NO_READING)
+        answering = set(pair_rows(case.invoice.lines, reading.lines).values())
+        result = match(reading, case.purchase_order, case.receipt)
+        read += len(answering)
+        unpaired += sum(
+            1
+            for each in result.unpaired_invoice
+            if each.line in answering
+            and each.candidate is not None
+            and each.candidate.reason == "below the floor"
+        )
+    return FloorCost(read, unpaired)

@@ -587,8 +587,28 @@ and a labels control over cases from the fixed subset, the row every end-to-end
 row is read against. Both splits are required; a missing one is an error, so a
 partial download cannot shrink the table silently. Tolerances and pairing
 floors are constants in `engine/src/docmatch/matching/tolerances.py`, so a
-change to one is a commit that reruns this command. CI runs it on the same
-synthetic corpus as the eval, at the real sizes.
+change to one is a commit that reruns this command.
+
+```bash
+uv run docmatch match --run data/runs/gemini --run data/runs/azure --run data/runs/openai
+```
+
+Each `--run` takes a directory `docmatch extract --out` wrote and adds one
+end-to-end row, named from its `run.json` (backend and requested model): the
+control's own cases, with that run's reading of each document matched as the
+invoice. Truth stays the generator's, so a finding a misread value causes is a
+false alarm and a discrepancy the reading hides is a miss. Every reading is
+matched whether it passes the gate or not, and a document the run has no
+reading for is an invoice with no lines. An extra line found on a reading line
+is placed on the labeled line the line-item metric pairs it with. A run whose
+`manifest.json` is not the pinned subset, as a `--limit` run's is not, is
+refused. Each row prints precision and recall over all findings, the
+clean-case false-positive rate and the per-type table, with unit variant and
+tax mismatch marked indicative since only a few fixed-subset documents carry
+them. Beside the floors, each run's floor cost: of its reading lines the
+line-item metric pairs with a labeled line, how many pairing left unpaired
+below a floor, over one clean case per document. CI runs the command with
+`--run` on the same synthetic corpus as the eval, at the real sizes.
 
 ### The baseline run
 

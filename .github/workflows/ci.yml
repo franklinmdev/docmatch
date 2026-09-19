@@ -54,11 +54,14 @@ jobs:
           --predictions engine/tests/evals/synthetic/predictions.json
 
       # The matching report on the same synthetic subset: cases generated
-      # from its labels at the real sizes, matched and scored, so the whole
-      # path from labels to report runs on every push. It only prints; the
-      # README's matching numbers come from the same command run locally.
+      # from its labels at the real sizes, matched and scored, then matched
+      # again with the fixture's saved readings as the invoices, so the whole
+      # path from labels and readings to report runs on every push. It only
+      # prints; the README's matching numbers come from the same command run
+      # locally.
       - name: Match
         run: >-
           uv run docmatch match
           --data-dir engine/tests/evals/synthetic
           --manifest engine/tests/evals/synthetic/subset.json
+          --run engine/tests/evals/synthetic
