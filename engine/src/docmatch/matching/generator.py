@@ -32,6 +32,14 @@ own decimal places, and redrawn until it lands in its band after rounding;
 a line where no value in the band exists, which is a small value where the
 cent floor swallows the band, is not eligible for that band.
 
+Short-ship lowers the receiving record's quantity below the invoice's, which
+still equals the purchase order's, so the case bills goods not received.
+Over-ship lowers the purchase order's quantity below both the invoice's and
+the receipt's, which keeps the seed's, so more was shipped and billed than
+was ordered (#65). Near is exactly one unit fewer, far two units fewer or
+more, down to half (#70). A lowered quantity stays above zero, so a line of
+one unit carries neither type, and one under four units has no far band.
+
 Sizes and the pinned seed
 -------------------------
 
@@ -64,11 +72,14 @@ from docmatch.matching.records import (
 )
 from docmatch.matching.tolerances import (
     FAR_PERCENT,
+    FAR_UNITS,
     NEAR_PERCENT,
+    NEAR_UNITS,
     PRICE,
     Band,
     Tolerance,
     band,
+    quantity_band,
 )
 from docmatch.metrics.fields import FieldValues
 
@@ -78,7 +89,11 @@ SEED = 20260919
 CLEAN_CASES = 1000
 FINDINGS_PER_TYPE = 500
 
-INJECTED_TYPES: tuple[DiscrepancyType, ...] = ("price variance",)
+INJECTED_TYPES: tuple[DiscrepancyType, ...] = (
+    "price variance",
+    "short-ship",
+    "over-ship",
+)
 """The types the generator injects, in the order their cases are built."""
 
 RECEIPT_CELLS: tuple[Cell, ...] = ("quantity", "unit", "code", "description")
@@ -172,13 +187,21 @@ def _clean(seed: Seed) -> Case:
 
 
 def _case(
-    seed: Seed, po_lines: Sequence[FieldValues], truth: tuple[Injected, ...]
+    seed: Seed,
+    po_lines: Sequence[FieldValues],
+    truth: tuple[Injected, ...],
+    received: Sequence[FieldValues] | None = None,
 ) -> Case:
+    """The case with these purchase-order lines, and receipt lines received
+    in full against them unless given."""
     purchase_order = Record(header=seed.invoice.header, lines=tuple(po_lines))
+    receipt_lines = (
+        [_received(line) for line in po_lines] if received is None else received
+    )
     receipt = ReceivingRecord(
         tuple(
-            ReceiptLine(cells=_received(line), po_line=position)
-            for position, line in enumerate(po_lines)
+            ReceiptLine(cells=cells, po_line=position)
+            for position, cells in enumerate(receipt_lines)
         )
     )
     return Case(seed.document_id, seed.invoice, purchase_order, receipt, truth)
@@ -213,7 +236,7 @@ def _injected(
             if len(cases) == count:
                 break
             wanted: Band = "near" if len(cases) % 2 == 0 else "far"
-            case = _price_variance(seed, wanted, rng)
+            case = INJECT[type_](seed, wanted, rng)
             if case is not None:
                 cases.append(case)
                 built += 1
@@ -259,8 +282,93 @@ def _priced(line: FieldValues) -> tuple[str, Decimal] | None:
     return None
 
 
+def _short_ship(seed: Seed, wanted: Band, rng: random.Random) -> Case | None:
+    """The seed with one receipt line's quantity lowered into the band, or
+    None when no line of it can be."""
+    for position, quantity in _quantities(seed, rng):
+        fewer = _fewer(quantity, wanted, rng)
+        if fewer is None:
+            continue
+        received = [_received(line) for line in seed.invoice.lines]
+        received[position] = {**received[position], QUANTITY_FIELDTYPE: (fewer,)}
+        place = Place("po line", position)
+        return _case(
+            seed,
+            seed.invoice.lines,
+            (Injected("short-ship", place, wanted),),
+            received,
+        )
+    return None
+
+
+def _over_ship(seed: Seed, wanted: Band, rng: random.Random) -> Case | None:
+    """The seed with one purchase-order line's quantity lowered into the
+    band, received in full as seeded, or None when no line of it can be."""
+    for position, quantity in _quantities(seed, rng):
+        fewer = _fewer(quantity, wanted, rng)
+        if fewer is None:
+            continue
+        po_lines = list(seed.invoice.lines)
+        po_lines[position] = {**po_lines[position], QUANTITY_FIELDTYPE: (fewer,)}
+        place = Place("po line", position)
+        return _case(
+            seed,
+            po_lines,
+            (Injected("over-ship", place, wanted),),
+            [_received(line) for line in seed.invoice.lines],
+        )
+    return None
+
+
+QUANTITY_FIELDTYPE = CELL_FIELDTYPES["quantity"][0]
+
+
+def _quantities(seed: Seed, rng: random.Random) -> list[tuple[int, Decimal]]:
+    """The seed's lines carrying a quantity, with it, in a shuffled order."""
+    lines = [
+        (position, quantity)
+        for position, line in enumerate(seed.invoice.lines)
+        if (quantity := _quantity(line)) is not None
+    ]
+    rng.shuffle(lines)
+    return lines
+
+
+def _quantity(line: FieldValues) -> Decimal | None:
+    """The quantity a short-ship or over-ship is lowered from, the highest
+    listed, which is the one the matcher compares; None when the line
+    carries none the normalizer reads, or one no lowering keeps above zero."""
+    read = read_cell(line, "quantity")
+    if read is None or read.numbers is None:
+        return None
+    highest = max(read.numbers)
+    return highest if highest > NEAR_UNITS else None
+
+
+def _fewer(quantity: Decimal, wanted: Band, rng: random.Random) -> str | None:
+    """A quantity below `quantity` by a whole number of units in the band, or
+    None when the band holds none: far needs two units that are at most half."""
+    if wanted == "near":
+        fewer = quantity - NEAR_UNITS
+    else:
+        most = int(quantity / 2)
+        if most < FAR_UNITS:
+            return None
+        fewer = quantity - rng.randint(int(FAR_UNITS), most)
+    return f"{fewer:f}" if quantity_band(quantity, fewer) == wanted else None
+
+
+INJECT: dict[DiscrepancyType, Callable[[Seed, Band, random.Random], Case | None]] = {
+    "price variance": _price_variance,
+    "short-ship": _short_ship,
+    "over-ship": _over_ship,
+}
+"""How each injected type builds a case from a seed, for the band wanted."""
+
 ELIGIBLE: dict[DiscrepancyType, Callable[[FieldValues], bool]] = {
     "price variance": lambda line: _priced(line) is not None,
+    "short-ship": lambda line: _quantity(line) is not None,
+    "over-ship": lambda line: _quantity(line) is not None,
 }
 """Whether a line carries what a type touches, per injected type."""
 

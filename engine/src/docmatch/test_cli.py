@@ -1590,10 +1590,14 @@ EXPECTED_MATCH_OUTPUT = "\n".join(
         "  description  0.4",
         "",
         # Every fixture row carries an amount and none a unit price, so every
-        # price variance falls to the amount; all are found on labels.
+        # price variance falls to the amount; all are found on labels. A
+        # quantity of one unit carries no short-ship or over-ship, which
+        # leaves one document without either.
         "Per-type table, over cases from train and val",
         "  type            precision  recall    n  documents",
         "  price variance      1.000   1.000  500          5",
+        "  short-ship          1.000   1.000  500          4",
+        "  over-ship           1.000   1.000  500          4",
         "  clean-case false-positive rate  0.000 of 1000 cases",
         "",
         "Labels control, over cases from the fixed subset",
@@ -1605,6 +1609,8 @@ EXPECTED_MATCH_OUTPUT = "\n".join(
         "",
         "  type            precision  recall    n  documents",
         "  price variance      1.000   1.000  500          4",
+        "  short-ship          1.000   1.000  500          3",
+        "  over-ship           1.000   1.000  500          3",
         "",
     ]
 )
