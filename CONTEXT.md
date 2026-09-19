@@ -72,6 +72,10 @@ _Avoid_: line matching, alignment, reconciliation (on its own)
 An invoice line or purchase-order line that pairing left without a partner. It is reported, never dropped.
 _Avoid_: orphan, unmatched line
 
+**Pairing floor**:
+The lowest similarity at which a code, or a description, counts as agreement in pairing; below it the two lines are no evidence of being the same item. Codes and descriptions each have their own. It is set from lines known to be unrelated, never from the readings the benchmark scores.
+_Avoid_: threshold (on its own), cutoff, match score
+
 **Discrepancy type**:
 One way an invoice can disagree with its purchase order and receiving record: price variance, short-ship, over-ship, extra line, missing line, unit-of-measure variant, or tax mismatch. Only disagreement against docmatch's interest counts: billing less than was ordered or received is not a discrepancy. An invoice that repeats another invoice is not a discrepancy type; that is a separate control.
 _Avoid_: exception, error, mismatch (on its own)
