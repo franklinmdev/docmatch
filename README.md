@@ -579,7 +579,8 @@ altered. Cases are rebuilt from the labels on every run from one random seed
 pinned in code, and nothing is saved.
 
 It prints the seed pool (documents and lines per split, and how many documents
-have no lines and seed nothing), the pairing floors, the per-type table
+have no lines and seed nothing), the pairing floors (each constant beside the
+value the floor procedure measures on train), the per-type table
 (precision, recall and n per discrepancy type, with the number of documents
 carrying it, and the clean-case false-positive rate over 1,000 clean cases),
 and a labels control over cases from the fixed subset, the row every end-to-end

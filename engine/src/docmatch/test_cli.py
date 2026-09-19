@@ -1578,16 +1578,26 @@ def matching(synthetic_subset: Path, *arguments: str) -> list[str]:
 EXPECTED_MATCH_OUTPUT = "\n".join(
     [
         # The fixture's train split is its one document with a unit and a
-        # header tax; its val split is the five the manifest pins, one of
-        # which has no lines and seeds nothing.
+        # header tax, and one whose two lines nearly repeat each other; its
+        # val split is the five the manifest pins, one of which has no lines
+        # and seeds nothing. Only train's lines carry codes.
         "Seed pool",
         "  pool   documents  lines  without lines",
-        "  train          1      2              0",
+        "  train          2      4              0",
         "  val            5      7              1",
         "",
-        "Pairing floors",
-        "  code         0.5",
-        "  description  0.4",
+        # The procedure pairs lines of different train documents only, so
+        # with two documents of two lines every pair is one of four per cell,
+        # each drawn about a quarter of the time. The closest codes, ST-120
+        # against HT-204 or HT-207, agree at exactly 0.5, which clears 0.5,
+        # so the code floor is 0.6; the closest descriptions agree at 0.370,
+        # so 0.4. HT-204 and HT-207 agree at 0.833 and the two socket sets at
+        # 0.905, so a draw that paired a document with itself would read 0.9
+        # or more on both.
+        "Pairing floors, each constant and the procedure's value on train",
+        "  cell         constant  procedure  pairs",
+        "  code              0.5        0.6  10000",
+        "  description       0.4        0.4  10000",
         "",
         # Every fixture row carries an amount and none a unit price, so every
         # price variance falls to the amount; all are found on labels, and
@@ -1595,11 +1605,11 @@ EXPECTED_MATCH_OUTPUT = "\n".join(
         # no short-ship or over-ship, which leaves one document without either.
         "Per-type table, over cases from train and val",
         "  type            precision  recall    n  documents",
-        "  price variance      1.000   1.000  500          5",
-        "  short-ship          1.000   1.000  500          4",
-        "  over-ship           1.000   1.000  500          4",
-        "  extra line          1.000   1.000  500          5",
-        "  missing line        1.000   1.000  500          5",
+        "  price variance      1.000   1.000  500          6",
+        "  short-ship          1.000   1.000  500          5",
+        "  over-ship           1.000   1.000  500          5",
+        "  extra line          1.000   1.000  500          6",
+        "  missing line        1.000   1.000  500          6",
         # The one taxed document is train's, drawn afresh 500 times.
         "  tax mismatch        1.000   1.000  500          1",
         "  clean-case false-positive rate  0.000 of 1000 cases",
@@ -1662,6 +1672,42 @@ def test_match_reports_a_missing_split_without_a_traceback(
     assert exit_code == 1
     assert captured.out == ""
     assert "train.json" in captured.err
+
+
+def test_match_reports_a_cell_no_two_train_documents_carry_as_no_pairs(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A floor is measured on lines of two different documents, so a split
+    with one document carrying the cell has nothing to measure it on."""
+    lone = tmp_path / "docile"
+    shutil.copytree(synthetic_subset, lone)
+    (lone / "train.json").write_text('["eval0001"]', encoding="utf-8")
+
+    exit_code = main(matching(lone))
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "  code              0.5       none      0\n" in out
+    assert "  description       0.4       none      0\n" in out
+
+
+def test_match_reports_a_cell_no_step_keeps_under_its_share_as_none(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two train documents listing the same lines pair identically about half
+    the time, which clears even 1.0, the top of the grid."""
+    twins = tmp_path / "docile"
+    shutil.copytree(synthetic_subset, twins)
+    annotations = twins / "annotations"
+    shutil.copy(annotations / "eval0007.json", annotations / "eval0008.json")
+    (twins / "train.json").write_text('["eval0007", "eval0008"]', encoding="utf-8")
+
+    exit_code = main(matching(twins))
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "  code              0.5       none  10000\n" in out
+    assert "  description       0.4       none  10000\n" in out
 
 
 def test_match_writes_nothing(synthetic_subset: Path, tmp_path: Path) -> None:

@@ -554,9 +554,17 @@ def _compare(one: FieldValues, other: FieldValues) -> _Comparison:
 
 
 def _alike(one: CellValues | None, other: CellValues | None) -> float | None:
-    """The closest two texts of the cell come, or None when a side lacks it."""
+    """How alike the cell is on the two lines, or None when a side lacks it."""
     if one is None or other is None:
         return None
+    return alike(one, other)
+
+
+def alike(one: CellValues, other: CellValues) -> float:
+    """How alike two lines' texts for a cell are, as pairing grades them: the
+    closest any two of them come once normalized, so a line that lists
+    several texts is as alike as its best one. The floor procedure grades
+    its pairs with this too."""
     return max(
         similarity(normalize_text(left), normalize_text(right))
         for left in one.texts

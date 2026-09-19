@@ -70,6 +70,7 @@ from docmatch.extraction.run import (
     write_predictions,
     write_record,
 )
+from docmatch.matching import floors
 from docmatch.matching.generator import (
     INJECTED_TYPES,
     GeneratorError,
@@ -78,7 +79,6 @@ from docmatch.matching.generator import (
 )
 from docmatch.matching.pool import SPLITS, SeedPool, load_pool, pool_from
 from docmatch.matching.scoring import Table, score_matched
-from docmatch.matching.tolerances import CODE_FLOOR, DESCRIPTION_FLOOR
 from docmatch.metrics.fields import (
     FieldScore,
     PredictionError,
@@ -729,13 +729,18 @@ def _write(extracted: Run, out: Path) -> None:
 
 
 def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
-    """The per-type table over train and val, and the labels control over the
-    fixed subset, each from cases rebuilt on one pinned draw.
+    """The pairing floors measured on train, the per-type table over train
+    and val, and the labels control over the fixed subset, each from cases
+    rebuilt on one pinned draw.
 
     Nothing is written: cases exist in memory and the report is counts. A bad
     number is still a report, so it exits 0 whenever the report prints.
     """
     pool = load_pool(dataset, SPLITS)
+    measured_on = set(dataset.document_ids(floors.SPLIT))
+    measured = floors.measure(
+        [each for each in pool.seeds if each.document_id in measured_on]
+    )
     table = score_matched(generate(pool.seeds))
     pinned = manifest.load(arguments.manifest)
     control_pool = pool_from(
@@ -746,11 +751,19 @@ def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
         ),
     )
     control = score_matched(generate(control_pool.seeds))
-    return render_match(arguments.manifest, pool, table, control_pool, control), 0
+    return (
+        render_match(arguments.manifest, pool, measured, table, control_pool, control),
+        0,
+    )
 
 
 def render_match(
-    path: Path, pool: SeedPool, table: Table, control_pool: SeedPool, control: Table
+    path: Path,
+    pool: SeedPool,
+    measured: Sequence[floors.Floor],
+    table: Table,
+    control_pool: SeedPool,
+    control: Table,
 ) -> str:
     """The matching report as a block a human can paste anywhere: counts only."""
     lines = [
@@ -768,9 +781,18 @@ def render_match(
             ],
         ),
         "",
-        "Pairing floors",
-        *_rows(
-            ("code", f"{CODE_FLOOR:.1f}"), ("description", f"{DESCRIPTION_FLOOR:.1f}")
+        f"Pairing floors, each constant and the procedure's value on {floors.SPLIT}",
+        *_table(
+            ("cell", "constant", "procedure", "pairs"),
+            [
+                (
+                    each.cell,
+                    f"{each.constant:.1f}",
+                    "none" if each.measured is None else f"{each.measured:.1f}",
+                    str(each.pairs),
+                )
+                for each in measured
+            ],
         ),
         "",
         f"Per-type table, over cases from {' and '.join(SPLITS)}",
