@@ -97,8 +97,12 @@ One seed with the purchase order, receiving record and invoice derived from it, 
 _Avoid_: sample, example, test case
 
 **Finding**:
-A discrepancy type at a place: an invoice line, a purchase-order line for a missing line, or the header for a tax mismatch. A finding is right only when both its type and its place are; the right type on the wrong line is a miss and a false alarm.
+A discrepancy type at a place: the purchase-order line it concerns, the invoice line for an extra line, or the header for a tax mismatch. A finding is right only when both its type and its place are; the right type on the wrong line is a miss and a false alarm.
 _Avoid_: detection, flag, alert
+
+**Match result**:
+What matching returns for one case: its pairings with their scores, its findings each with the values compared and the tolerance applied, its unpaired lines with the closest candidate and why it was not taken, and the comparisons it could not make with the reason. It is held when any finding is a hold, and approvable otherwise; approving is not matching's decision.
+_Avoid_: match report, reconciliation, outcome
 
 **Hard negative**:
 A clean line built to tempt the matcher: rounding drift, a variance just inside the tolerance, or a price or quantity below the purchase order. Any finding on it is a false alarm.
