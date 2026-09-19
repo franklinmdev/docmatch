@@ -794,12 +794,12 @@ def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
     control = score_matched(cases)
     rows = [
         EndToEnd(
-            record.name,
-            directory,
-            score_read(cases, readings),
-            floor_cost(cases, readings),
+            run.record.name,
+            run.directory,
+            score_read(cases, run.readings),
+            floor_cost(cases, run.readings),
         )
-        for directory, record, readings in runs
+        for run in runs
     ]
     return (
         render_match(
@@ -815,9 +815,17 @@ def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
     )
 
 
-def _saved_run(
-    directory: Path, pinned: Manifest, pinned_path: Path
-) -> tuple[Path, RunRecord, dict[str, Record]]:
+@dataclass(frozen=True)
+class SavedRun:
+    """A directory `extract --out` wrote, as matching reads it."""
+
+    directory: Path
+    record: RunRecord
+    readings: dict[str, Record]
+    """Each document's reading as an invoice, by document id."""
+
+
+def _saved_run(directory: Path, pinned: Manifest, pinned_path: Path) -> SavedRun:
     """A saved run's record and its readings as invoices, or a message.
 
     Strict: its manifest has to be the pinned subset itself, so a `--limit`
@@ -841,7 +849,7 @@ def _saved_run(
             directory / RUN_FILES[0]
         ).items()
     }
-    return directory, record, readings
+    return SavedRun(directory, record, readings)
 
 
 @dataclass(frozen=True)
@@ -855,9 +863,10 @@ class EndToEnd:
 
 
 INDICATIVE: tuple[DiscrepancyType, ...] = ("unit variant", "tax mismatch")
-"""The types a row over the fixed subset reads as indicative: 8 and 9 of its
-documents carry them, and a reading is fixed per document, so repeated draws
-repeat its errors and the honest n is documents (#67)."""
+"""The types a row over the fixed subset reads as indicative: only a few of
+its documents carry them, as the documents column beside each says, and a
+reading is fixed per document, so repeated draws repeat its errors and the
+honest n is documents (#67)."""
 
 
 def render_match(
@@ -923,8 +932,6 @@ def _floor_costs(rows: Sequence[EndToEnd]) -> list[str]:
         return []
     return [
         "",
-        # Of the reading lines the line-item metric pairs with a labeled
-        # line, those pairing left unpaired below a floor.
         "Floor cost per run, over one clean case per document",
         *_table(
             ("run", "lines the metric pairs", "left below a floor"),
