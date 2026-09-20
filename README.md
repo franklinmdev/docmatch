@@ -404,8 +404,8 @@ floor procedure measures on train over 10,000 cross-document pairs each.
 | billed below the PO or the receipt | 5,972 | 34 |
 | on no hard negative | | 23 |
 
-Beside them the report counts the lines paired with a partner other than the
-one the generator's pairing key names: **6,860 of 29,009** keyed pairs.
+Beside them the same report counts the lines paired with a partner other than
+the one the generator's pairing key names: **6,860 of 29,009** keyed pairs.
 
 | Discrepancy type | Near recall | n | Far recall | n |
 |---|---|---|---|---|
@@ -423,22 +423,25 @@ by how close the values come rather than by their being equal (#102) took
 those from 242 to 47 and the clean-case rate from 0.025 to 0.007, and every
 type is at or above where it stood at
 [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) but for
-two cells. Price variance recall goes 0.998 to 0.991: lowering a price is
-exactly what makes the right pair less close, so nine more injections land on
-a line the tiebreak crossed. Unit variant precision goes 0.997 to 0.990, five
-false alarms on pairs crossed between invoice lines alike on every cell
-pairing reads; the unit is not one of those cells, so two lines the matcher
-cannot tell apart may still be counted differently.
+two cells, and a counts-only probe on #102 has the cause of each. Price
+variance recall goes 0.998 to 0.991: lowering a price is exactly what makes
+the right pair less close, so nine more injections land on a line the
+tiebreak crossed. Unit variant precision goes 0.997 to 0.990, five false
+alarms on pairs crossed between invoice lines alike on every cell pairing
+reads; the unit is not one of those cells, so two lines the matcher cannot
+tell apart may still be counted differently.
 
-What is left is pairing. Of the 6,860 crossed pairs, 6,503 are between two
-invoice lines alike on every cell pairing reads, where the matcher has nothing
-to choose by and either answer is as good; that share is a coin toss and moves
-with the weights, which is why the total sits above the 5,498 the old tiebreak
-crossed. The pairs something could have separated fell from 550 to 357: 179
-where the other line scores higher, 135 where the right line was worth more
-and took a better partner elsewhere, 43 tied. 300 of the 357 sit on a hard
-negative and 45 on an injected line, whose moved value is what pulls a line
-towards its neighbour; 12 sit on a line left as labeled.
+What is left is pairing, and the same probe splits it. Of the 6,860 crossed
+pairs, 6,503 are between two invoice lines alike on every cell pairing reads,
+where the matcher has nothing to choose by and either answer is as good; that
+share is a coin toss and moves with the weights, which is why the total sits
+above the 5,498 the old tiebreak crossed on the same cases. The pairs
+something could have separated fell from 550 to 357: 179 where the other line
+scores higher, 135 where the right line was worth more and took a better
+partner elsewhere, 43 tied. 300 of the 357 sit on a hard negative and 45 on
+an injected line, whose moved value is what pulls a line towards its
+neighbour; 12 sit on a line left as labeled. Only the 6,860 reproduces from
+the command above; the probe's own counts are on #102.
 
 ### Matching, end to end
 
@@ -469,9 +472,10 @@ precision and 0.17 to 0.19 of recall, and a clean invoice draws a finding on
 37 to 51 percent of cases. Most of the false alarms are extra lines and missing
 lines: a reading line the matcher cannot pair is a false extra line, and the
 purchase-order line it should have taken a false missing line, so extra line
-and missing line sit between 0.37 and 0.50 precision on every row. The full per-type table of each
-row is in the report; unit variant and tax mismatch are marked indicative
-there, since only 8 and 2 of the 93 documents carry them.
+and missing line sit between 0.37 and 0.50 precision on every row. The full
+per-type table of each row is in the report; unit variant and tax mismatch
+are marked indicative there, since only 8 and 2 of the 93 documents carry
+them.
 
 **Against the pivot trigger.** `docs/alternatives.md` opens a pivot discussion
 when matching precision and recall are above 0.99 on every type at first
@@ -702,10 +706,11 @@ carrying it, and the clean-case false-positive rate over 1,000 clean cases),
 the diagnostic table (false alarms by the hard negative they sat on, the lines
 paired with a partner other than the one the generator's pairing key names,
 and recall near the edge and far past it), and a labels control over cases
-from the fixed subset, the row every end-to-end row is read against. Both splits are required; a missing one is an error, so a
-partial download cannot shrink the table silently. Tolerances and pairing
-floors are constants in `engine/src/docmatch/matching/tolerances.py`, so a
-change to one is a commit that reruns this command.
+from the fixed subset, the row every end-to-end row is read against. Both
+splits are required; a missing one is an error, so a partial download cannot
+shrink the table silently. Tolerances and pairing floors are constants in
+`engine/src/docmatch/matching/tolerances.py`, so a change to one is a commit
+that reruns this command.
 
 ```bash
 uv run docmatch match --run data/runs/gemini --run data/runs/azure --run data/runs/openai

@@ -468,7 +468,7 @@ class _Comparison:
         return agreed
 
     @property
-    def closeness(self) -> tuple[float, int]:
+    def ranking(self) -> tuple[float, int]:
         """What a best candidate is picked by: similarity with the floors
         ignored, then how close the values come (#102)."""
         return ((self.code or 0.0) + (self.description or 0.0), self.values)
@@ -476,8 +476,8 @@ class _Comparison:
     def worth(self, scale: int) -> int:
         """Identity, else exact agreement on values, scaled above everything
         closeness can sum to; closeness itself only breaks the tie."""
-        decides = self.identity or self.agreements
-        return decides * scale + self.values if decides else 0
+        deciding = self.identity or self.agreements
+        return deciding * scale + self.values if deciding else 0
 
 
 @dataclass(frozen=True)
@@ -579,7 +579,7 @@ def _candidate(
     """The closest line on the other side, and why it was not taken."""
     if not against:
         return None
-    best = max(range(len(against)), key=lambda each: against[each].closeness)
+    best = max(range(len(against)), key=lambda each: against[each].ranking)
     comparison = against[best]
     if best in taken and comparison.worth(scale) > 0:
         reason: Reason = "taken by another line"

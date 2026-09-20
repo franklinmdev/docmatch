@@ -176,9 +176,9 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
     clean_false_positives = 0
     keyed = crossed = 0
     for case, result in zip(cases, results, strict=True):
-        pairs, took_another = _crossed(case, result)
-        keyed += pairs
-        crossed += took_another
+        pairs = _crossed(case, result)
+        keyed += pairs.keyed
+        crossed += pairs.crossed
         truth = {(each.type, each.place) for each in case.truth}
         found = {(each.type, each.place) for each in result.findings}
         for type_, _ in truth & found:
@@ -220,15 +220,15 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
     )
 
 
-def _crossed(case: Case, result: MatchResult) -> tuple[int, int]:
-    """How many pairings the case's key names an invoice line for, and how
-    many of those took another line instead."""
+def _crossed(case: Case, result: MatchResult) -> CrossedPairs:
+    """One case's pairings against its key: the ones the key names an invoice
+    line for, and how many of those took another line instead."""
     keyed = [
         (answers, each.invoice_line)
         for each in result.pairings
         if (answers := _answers(case.pairing_key, each.po_line)) is not None
     ]
-    return len(keyed), sum(answers != paired for answers, paired in keyed)
+    return CrossedPairs(len(keyed), sum(answers != paired for answers, paired in keyed))
 
 
 def _answers(key: Sequence[int | None], po_line: int) -> int | None:
