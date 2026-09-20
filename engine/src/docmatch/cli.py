@@ -897,7 +897,7 @@ def _floor_costs(rows: Sequence[EndToEnd]) -> list[str]:
         "",
         "Floor cost per run, over one clean case per document",
         *_table(
-            ("run", "lines the metric pairs", "left below a floor"),
+            ("run", "lines the metric pairs", "floor cost"),
             [
                 (
                     row.run.record.name,
