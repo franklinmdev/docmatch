@@ -985,7 +985,8 @@ def _per_type(
 
 
 def _diagnostic(table: Table) -> list[str]:
-    """False alarms by the hard negative they sat on, then recall near the
+    """False alarms by the hard negative they sat on and the lines paired
+    with a partner other than the pairing key's (#102), then recall near the
     edge and far past it for each type that draws a band (#66)."""
     bands = {(each.type, each.band): each for each in table.bands}
     return [
@@ -996,7 +997,13 @@ def _diagnostic(table: Table) -> list[str]:
                 for each in table.hard_negatives
             ],
         ),
-        *_rows(("false alarms on no hard negative", str(table.false_alarms_elsewhere))),
+        *_rows(
+            ("false alarms on no hard negative", str(table.false_alarms_elsewhere)),
+            (
+                "lines paired with another partner",
+                f"{table.crossed_pairs.crossed} of {table.crossed_pairs.keyed}",
+            ),
+        ),
         "",
         *_table(
             ("type", "near recall", "n", "far recall", "n"),

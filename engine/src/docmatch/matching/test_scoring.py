@@ -14,11 +14,13 @@ from docmatch.matching.matcher import (
     Finding,
     MatchResult,
     NotCompared,
+    Pairing,
     Place,
     UnpairedFinding,
 )
 from docmatch.matching.records import ReceiptLine, ReceivingRecord, Record
 from docmatch.matching.scoring import (
+    CrossedPairs,
     FloorCost,
     Table,
     TypeScore,
@@ -273,6 +275,53 @@ def test_a_false_alarm_on_a_hard_negative_counts_toward_its_kind() -> None:
         ("billed below", 1, 1),
     ]
     assert table.false_alarms_elsewhere == 1
+
+
+def paired(*pairs: tuple[int, int]) -> MatchResult:
+    """A result that found nothing and paired the lines given, invoice first."""
+    return replace(
+        result(),
+        pairings=tuple(
+            Pairing(invoice_line=invoice, po_line=po, code=None, description=1.0)
+            for invoice, po in pairs
+        ),
+    )
+
+
+def test_a_line_paired_with_another_partner_than_the_keys_is_crossed() -> None:
+    keyed = replace(case(), pairing_key=(0, 1, 2))
+
+    table = score([keyed], [paired((1, 0), (0, 1), (2, 2))])
+
+    assert (table.crossed_pairs.keyed, table.crossed_pairs.crossed) == (3, 2)
+
+
+def test_a_po_line_the_key_names_no_invoice_line_for_is_not_counted() -> None:
+    """A line a missing line added answers a line of another seed, so its
+    partner is neither the right one nor a crossed one (#102)."""
+    keyed = replace(case(), pairing_key=(0, None, 1))
+
+    table = score([keyed], [paired((0, 0), (2, 1), (1, 2))])
+
+    assert (table.crossed_pairs.keyed, table.crossed_pairs.crossed) == (2, 0)
+
+
+def test_a_case_with_no_pairing_key_counts_no_pair() -> None:
+    assert score([case()], [paired((0, 0))]).crossed_pairs == CrossedPairs(0, 0)
+
+
+def test_a_reading_is_counted_against_the_key_at_the_labeled_line_it_reads() -> None:
+    """The reading drops the first labeled line, so every later row sits one
+    position early; the pairing is scored at the labeled line the line-item
+    metric's assignment pairs it with, as an extra line's place is (#102)."""
+    po = labeled(HEX_KEYS, WRENCH, GLOVES)
+    keyed = replace(
+        a_case(labeled(HEX_KEYS, WRENCH, GLOVES), po), pairing_key=(0, 1, 2)
+    )
+
+    table = score_read([keyed], {"made-up": labeled(WRENCH, GLOVES)})
+
+    assert table.crossed_pairs == CrossedPairs(keyed=2, crossed=0)
 
 
 def test_recall_splits_into_near_the_edge_and_far_past_it() -> None:

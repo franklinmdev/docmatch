@@ -18,7 +18,9 @@ Beside the headline sits the diagnostic table (#66). False alarms are split
 by the hard negative they sit on: its purchase-order line, or for an extra
 line its invoice line, with those on no hard negative counted apart. Recall
 is split by band, near the edge and far past it, for the types that draw one;
-the headline recall is their half-and-half mix (#70).
+the headline recall is their half-and-half mix (#70). Beside them sits what
+pairing cost before any rule ran: the lines paired with a partner other than
+the one the case's pairing key names (#102).
 """
 
 from collections import Counter
@@ -101,6 +103,21 @@ class BandScore:
 
 
 @dataclass(frozen=True)
+class CrossedPairs:
+    """Lines the matcher paired with a partner other than the pairing key's.
+
+    A wrong partner is not a finding of its own: it shows up as a price
+    variance on the line next door, or as nothing at all. Counting it against
+    the key the generator wrote is what makes it visible and reproducible
+    (#102)."""
+
+    keyed: int
+    """Pairings whose purchase-order line the key names an invoice line for."""
+    crossed: int
+    """Of those, the ones whose invoice line is not the one the key names."""
+
+
+@dataclass(frozen=True)
 class HardNegativeScore:
     """How many hard negatives of one kind were placed, and the false alarms
     found on them."""
@@ -128,6 +145,8 @@ class Table:
     false_alarms_elsewhere: int
     """False alarms on no hard negative: on an injected line, on a line left
     as labeled, or on the header."""
+    crossed_pairs: CrossedPairs
+    """What pairing cost before any rule ran, against the generator's key."""
 
     @property
     def overall(self) -> MicroAverage:
@@ -155,7 +174,11 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
     tempted: Counter[HardNegativeKind] = Counter()
     elsewhere = 0
     clean_false_positives = 0
+    keyed = crossed = 0
     for case, result in zip(cases, results, strict=True):
+        pairs, took_another = _crossed(case, result)
+        keyed += pairs
+        crossed += took_another
         truth = {(each.type, each.place) for each in case.truth}
         found = {(each.type, each.place) for each in result.findings}
         for type_, _ in truth & found:
@@ -193,7 +216,25 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
             for kind in HARD_NEGATIVE_KINDS
         ),
         false_alarms_elsewhere=elsewhere,
+        crossed_pairs=CrossedPairs(keyed, crossed),
     )
+
+
+def _crossed(case: Case, result: MatchResult) -> tuple[int, int]:
+    """How many pairings the case's key names an invoice line for, and how
+    many of those took another line instead."""
+    keyed = [
+        (answers, each.invoice_line)
+        for each in result.pairings
+        if (answers := _answers(case.pairing_key, each.po_line)) is not None
+    ]
+    return len(keyed), sum(answers != paired for answers, paired in keyed)
+
+
+def _answers(key: Sequence[int | None], po_line: int) -> int | None:
+    """The invoice line the key says a purchase-order line answers, or None
+    when it names none and when the case carries no key at all."""
+    return key[po_line] if po_line < len(key) else None
 
 
 def _hard_negative_places(
@@ -230,7 +271,10 @@ def score_read(cases: Sequence[Case], readings: Mapping[str, Record]) -> Table:
     assignment pairs it with, so a reading that drops or reorders rows is
     scored against the pairing the extraction score uses (#76). A reading
     line that assignment pairs with no labeled line is placed on none, so it
-    is never taken for the line the generator removed.
+    is never taken for the line the generator removed. Each pairing's invoice
+    line is moved the same way, so it is read against the pairing key in the
+    labels' own positions; a reading line with no labeled position leaves no
+    pairing to count (#102).
     """
     labeled_at: dict[str, dict[int, int]] = {}
     results: list[MatchResult] = []
@@ -247,9 +291,15 @@ def score_read(cases: Sequence[Case], readings: Mapping[str, Record]) -> Table:
 
 
 def _placed(result: MatchResult, labeled_at: Mapping[int, int]) -> MatchResult:
-    """The result with each extra line moved to the labeled line it reads."""
+    """The result with each extra line and each pairing moved to the labeled
+    line it reads."""
     return replace(
         result,
+        pairings=tuple(
+            replace(each, invoice_line=labeled_at[each.invoice_line])
+            for each in result.pairings
+            if each.invoice_line in labeled_at
+        ),
         findings=tuple(
             replace(each, place=Place("invoice line", labeled_at.get(each.place.line)))
             if each.type == "extra line" and each.place.line is not None

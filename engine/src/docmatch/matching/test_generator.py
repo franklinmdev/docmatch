@@ -385,6 +385,59 @@ def test_a_pool_whose_quantities_cannot_reach_far_is_an_error() -> None:
         single((few,), seed=1, clean=0, per_type=2)
 
 
+# The pairing key
+
+
+def test_the_pairing_key_names_the_invoice_line_every_po_line_answers() -> None:
+    """One entry per purchase-order line, in order, on a case nothing was
+    removed from or added to (#102)."""
+    cases = single(POOL, seed=1, clean=3, per_type=0)
+
+    for case in cases:
+        assert case.pairing_key == tuple(range(len(case.invoice.lines)))
+
+
+def test_an_extra_lines_invoice_line_is_in_no_pairing_key_entry() -> None:
+    cases = injected(
+        single((PRICED, AMOUNTS), seed=1, clean=0, per_type=6), "extra line"
+    )
+
+    assert len(cases) == 6
+    for case in cases:
+        removed = case.truth[0].place.line
+        assert case.pairing_key == tuple(
+            position
+            for position in range(len(case.invoice.lines))
+            if position != removed
+        )
+
+
+def test_the_po_line_a_missing_line_added_answers_no_invoice_line() -> None:
+    cases = injected(single(POOL, seed=1, clean=0, per_type=6), "missing line")
+
+    assert len(cases) == 6
+    for case in cases:
+        added = case.truth[0].place.line
+        assert added is not None
+        assert len(case.pairing_key) == len(case.purchase_order.lines)
+        assert case.pairing_key[added] is None
+        assert [each for each in case.pairing_key if each is not None] == list(
+            range(len(case.invoice.lines))
+        )
+
+
+def test_the_pairing_key_is_what_the_matcher_pairs_on_a_clean_case() -> None:
+    """The key is the generator's own record and the matcher never reads it,
+    so on a case with nothing injected the two agree by themselves (#102)."""
+    for case in single(POOL, seed=1, clean=4, per_type=0):
+        result = match(case.invoice, case.purchase_order, case.receipt)
+        assert {each.po_line: each.invoice_line for each in result.pairings} == {
+            position: answers
+            for position, answers in enumerate(case.pairing_key)
+            if answers is not None
+        }
+
+
 # Extra line and missing line
 
 

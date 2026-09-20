@@ -1632,7 +1632,11 @@ MATCH_TABLES = [
     "  rounding drift    1095             0",
     "  just inside       1111             0",
     "  billed below      1059             0",
-    "  false alarms on no hard negative  16",
+    "  false alarms on no hard negative   16",
+    # The code agreement above pairs a removed line with a donor line, which
+    # the key names no invoice line for, so it crosses no pair: every pair
+    # the key does name is the one the matcher made (#102).
+    "  lines paired with another partner  0 of 7594",
     "",
     "  type            near recall    n  far recall    n",
     "  price variance        1.000  544       1.000  543",

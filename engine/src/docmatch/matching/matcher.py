@@ -14,22 +14,36 @@ Pairing
 Which invoice line answers which purchase-order line is one optimal one-to-one
 assignment per document, solved by `scipy.optimize.linear_sum_assignment`
 maximizing, as the line-item metric does. What a pair is worth is built so
-that identity decides and values only break ties (#63):
+that identity decides and values only break ties (#63, #102):
 
 - Identity is agreement on the line code or the description, each compared
   by normalized Levenshtein after the text normalization, and counting only
   at or above its cell's pairing floor (#77). Below the floor is no
   agreement, so an unrelated extra line and an added missing-line PO line do
   not pair and hide both findings.
-- Values, the quantity, unit price and amount, count one each when the two
-  lines agree on them. They never buy identity: a pair's worth is its identity
-  in thousandths times a scale larger than every value in the table, so any
-  identity difference outranks any amount of value agreement, and values only
-  separate lines whose identity ties, such as lines sharing a description.
+- Values, the quantity, unit price and amount, score how close the two lines
+  come on each: the smaller over the larger, in thousandths, summed (#102).
+  That is the numeric mirror of the identity measure, symmetric and unitless,
+  and it knows nothing about the tolerances in `tolerances`, so pairing never
+  starts depending on the rules it feeds. Equal values still score the most,
+  but a cent of drift no longer wipes out the one cell that told two lines
+  apart, which is what an exact-agreement tiebreak did (#63 as amended).
+  Values never buy identity: a pair's worth is its identity in thousandths
+  times a scale larger than everything closeness can sum to across the whole
+  assignment, so any identity difference outranks any amount of value
+  closeness, and values only separate lines whose identity ties, such as
+  lines sharing a description.
 - Lines that carry neither a code nor a description, on either side, pair
-  by values alone. Lines that carry one and agree below the floor do not
-  pair on values: that would be pairing an unrelated line by its quantity of
-  one. Nor do lines where only one side carries an identity cell: there is
+  by values alone, and there exact agreement keeps the job identity has
+  elsewhere: how many of the three cells agree exactly decides whether the
+  two pair at all and how strongly, and closeness only orders the pairs that
+  agree on as much (#102). Without that, any two numbers score above nothing
+  and every nameless line would pair with something, so an extra line and a
+  missing line could never land on one; and one very close pair would
+  outweigh two that agree outright, leaving both their lines unpaired.
+  Lines that carry an identity cell and agree below the floor do not pair on
+  values: that would be pairing an unrelated line by its quantity of one.
+  Nor do lines where only one side carries an identity cell: there is
   nothing to say they are the same item.
 - A pair worth nothing is no pair, and both lines are reported unpaired with
   their best candidate and why it was not taken.
@@ -101,7 +115,7 @@ approving belongs to the Phase 4 state machine.
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal, get_args
 
 from scipy.optimize import linear_sum_assignment
@@ -142,7 +156,12 @@ TYPES: tuple[DiscrepancyType, ...] = get_args(DiscrepancyType)
 """Every discrepancy type, in the order a report lists them (#65)."""
 
 VALUE_CELLS: tuple[Cell, ...] = ("quantity", "unit price", "amount")
-"""The cells pairing counts agreement on, one each, to break identity ties."""
+"""The cells pairing scores closeness on, one each, to break identity ties."""
+
+THOUSANDTHS = 1000
+"""What one whole agreement is worth. Identity and value closeness are both
+summed in thousandths, so a pair's worth is an integer and the assignment
+never turns on a rounding difference."""
 
 IDENTITY_CELLS: tuple[Cell, ...] = ("code", "description")
 """The cells identity is graded on, each against its floor."""
@@ -422,10 +441,16 @@ class _Comparison:
     code: float | None
     description: float | None
     values: int
-    """How many of quantity, unit price and amount the two agree on."""
-    nameless: bool
-    """Whether neither line carries a code or a description, the one case
-    values pair on their own (#63)."""
+    """How close the two come on quantity, unit price and amount: each the
+    smaller over the larger in thousandths, summed over the three (#102)."""
+    agreements: int
+    """How many of the value cells the two agree on exactly, counted only
+    when neither line carries a code or a description. That is the one case
+    values pair on their own, and there exact agreement does what identity
+    does elsewhere: it decides whether the two pair and how strongly, with
+    closeness ordering the pairs that agree on as much (#63, #102). A line
+    that names its item pairs on identity or not at all, so its exact
+    agreements are never counted."""
 
     @property
     def comparable(self) -> bool:
@@ -437,21 +462,22 @@ class _Comparison:
         """Agreement at or above the floors, in thousandths, summed over cells."""
         agreed = 0
         if self.code is not None and self.code >= CODE_FLOOR:
-            agreed += round(self.code * 1000)
+            agreed += round(self.code * THOUSANDTHS)
         if self.description is not None and self.description >= DESCRIPTION_FLOOR:
-            agreed += round(self.description * 1000)
+            agreed += round(self.description * THOUSANDTHS)
         return agreed
 
     @property
     def closeness(self) -> tuple[float, int]:
         """What a best candidate is picked by: similarity with the floors
-        ignored, then values."""
+        ignored, then how close the values come (#102)."""
         return ((self.code or 0.0) + (self.description or 0.0), self.values)
 
     def worth(self, scale: int) -> int:
-        if self.identity:
-            return self.identity * scale + self.values
-        return self.values if self.nameless else 0
+        """Identity, else exact agreement on values, scaled above everything
+        closeness can sum to; closeness itself only breaks the tie."""
+        decides = self.identity or self.agreements
+        return decides * scale + self.values if decides else 0
 
 
 @dataclass(frozen=True)
@@ -512,9 +538,9 @@ def _renamed(unpaired: Unpaired, own: list[int], other: list[int]) -> Unpaired:
 
 def _pair_items(invoice: Sequence[FieldValues], po: Sequence[FieldValues]) -> _Paired:
     compared = [[_compare(one, other) for other in po] for one in invoice]
-    # Larger than every value in the table, so no amount of value agreement
-    # buys a thousandth of identity.
-    scale = len(VALUE_CELLS) * min(len(invoice), len(po)) + 1
+    # Larger than everything closeness can sum to over a whole assignment, so
+    # no amount of value closeness buys a thousandth of identity.
+    scale = len(VALUE_CELLS) * THOUSANDTHS * min(len(invoice), len(po)) + 1
     assigned: dict[int, int] = {}
     if invoice and po:
         worth = [[each.worth(scale) for each in row] for row in compared]
@@ -567,11 +593,16 @@ def _candidate(
 def _compare(one: FieldValues, other: FieldValues) -> _Comparison:
     codes = (cell_values(one, "code"), cell_values(other, "code"))
     descriptions = (cell_values(one, "description"), cell_values(other, "description"))
+    nameless = all(each is None for each in (*codes, *descriptions))
     return _Comparison(
         code=_alike(*codes),
         description=_alike(*descriptions),
-        values=sum(_agree(one, other, cell) for cell in VALUE_CELLS),
-        nameless=all(each is None for each in (*codes, *descriptions)),
+        values=sum(_close(one, other, cell) for cell in VALUE_CELLS),
+        # Only a nameless pair pairs on exact agreement, so only a nameless
+        # pair pays for reading the values a second way.
+        agreements=sum(_agree(one, other, cell) for cell in VALUE_CELLS)
+        if nameless
+        else 0,
     )
 
 
@@ -603,6 +634,36 @@ def _agree(one: FieldValues, other: FieldValues, cell: Cell) -> bool:
         {normalize(left.fieldtype, text) for text in left.texts}
         & {normalize(right.fieldtype, text) for text in right.texts}
     )
+
+
+def _close(one: FieldValues, other: FieldValues, cell: Cell) -> int:
+    """How close the two lines come on the cell, in thousandths: the closest
+    any two of their values come, as `alike` takes the closest two texts, so a
+    line that lists several is as close as its best one. A cell one side lacks,
+    or whose texts the normalizer reads as no number, is no closeness at all."""
+    left, right = cell_values(one, cell), cell_values(other, cell)
+    if left is None or right is None:
+        return 0
+    values, against = _numbers(left.texts), _numbers(right.texts)
+    if not values or not against:
+        return 0
+    return max(
+        _smaller_over_larger(value, each) for value in values for each in against
+    )
+
+
+def _smaller_over_larger(one: Decimal, other: Decimal) -> int:
+    """The smaller of two values over the larger, in thousandths: 1,000 when
+    they agree, and 0 when their signs differ, since a credit and a charge of
+    the same size are opposites and not the same value. Two zeros agree, and
+    negatives are compared in absolute value, so -4 and -5 come as close as 4
+    and 5 do (#102)."""
+    if (one < 0) != (other < 0):
+        return 0
+    lower, higher = sorted((abs(one), abs(other)))
+    if not higher:
+        return THOUSANDTHS
+    return int((lower * THOUSANDTHS / higher).to_integral_value(ROUND_HALF_UP))
 
 
 # Rules
