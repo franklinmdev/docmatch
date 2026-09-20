@@ -181,12 +181,7 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
     tempted: Counter[HardNegativeKind] = Counter()
     elsewhere = 0
     clean_false_positives = 0
-    keyed = crossed = alike = 0
     for case, result in zip(cases, results, strict=True):
-        pairs = _crossed(case, result)
-        keyed += pairs.keyed
-        crossed += pairs.crossed
-        alike += pairs.alike
         truth = {(each.type, each.place) for each in case.truth}
         found = {(each.type, each.place) for each in result.findings}
         for type_, _ in truth & found:
@@ -224,7 +219,22 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
             for kind in HARD_NEGATIVE_KINDS
         ),
         false_alarms_elsewhere=elsewhere,
-        crossed_pairs=CrossedPairs(keyed, crossed, alike),
+        crossed_pairs=_crossed_pairs(cases, results),
+    )
+
+
+def _crossed_pairs(
+    cases: Sequence[Case], results: Sequence[MatchResult]
+) -> CrossedPairs:
+    """Every case's pairings against its key, summed. Counted apart from the
+    findings, since a crossed pair is what pairing cost before any rule ran."""
+    every = [
+        _crossed(case, result) for case, result in zip(cases, results, strict=True)
+    ]
+    return CrossedPairs(
+        keyed=sum(each.keyed for each in every),
+        crossed=sum(each.crossed for each in every),
+        alike=sum(each.alike for each in every),
     )
 
 

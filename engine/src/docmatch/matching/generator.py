@@ -280,7 +280,17 @@ class Case:
     never by the matcher, so pairing stays the matcher's own job and a wrong
     partner is counted rather than hidden. It is partial: a line a missing
     line added answers a line of another seed and reads None, and an invoice
-    line an extra line removed is named by no entry (#102)."""
+    line an extra line removed is named by no entry (#102). Empty is a case
+    built without one, which the scorer counts no pair for; any other length
+    than the purchase order's is a case that could not be scored, so it is
+    refused here rather than read as a short key."""
+
+    def __post_init__(self) -> None:
+        if self.pairing_key and len(self.pairing_key) != len(self.purchase_order.lines):
+            raise ValueError(
+                f"the pairing key names {len(self.pairing_key)} purchase-order "
+                f"lines, the record has {len(self.purchase_order.lines)}"
+            )
 
     @property
     def is_clean(self) -> bool:

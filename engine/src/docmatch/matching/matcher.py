@@ -474,8 +474,13 @@ class _Comparison:
         return ((self.code or 0.0) + (self.description or 0.0), self.values)
 
     def worth(self, scale: int) -> int:
-        """Identity, else exact agreement on values, scaled above everything
-        closeness can sum to; closeness itself only breaks the tie."""
+        """What decides the pair, scaled above everything closeness can sum
+        to, with closeness itself only breaking the tie.
+
+        Identity decides wherever the two lines name their item; exact
+        agreement on the values decides where neither does, and is zero
+        otherwise, so the two never compete. A pair with neither is no pair.
+        """
         deciding = self.identity or self.agreements
         return deciding * scale + self.values if deciding else 0
 

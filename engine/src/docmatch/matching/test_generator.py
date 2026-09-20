@@ -426,6 +426,15 @@ def test_the_po_line_a_missing_line_added_answers_no_invoice_line() -> None:
         )
 
 
+def test_a_pairing_key_that_does_not_name_every_po_line_is_refused() -> None:
+    """A short key would be read as naming no line for the rest, and the
+    crossed pairs it should have counted would go missing quietly (#102)."""
+    (case,) = single((PRICED,), seed=1, clean=1, per_type=0)
+
+    with pytest.raises(ValueError, match="purchase-order lines"):
+        replace(case, pairing_key=case.pairing_key[:-1])
+
+
 def test_the_pairing_key_is_what_the_matcher_pairs_on_a_clean_case() -> None:
     """The key is the generator's own record and the matcher never reads it,
     so on a case with nothing injected the two agree by themselves (#102)."""
