@@ -65,7 +65,7 @@ A labeled invoice that a purchase order and a receiving record are derived from,
 _Avoid_: base invoice, template, source invoice
 
 **Pairing**:
-Deciding which invoice line answers which purchase-order line, one to one, by how closely their codes and descriptions agree, with quantities and prices only breaking ties. Receiving-record lines name their purchase-order line, so they need no pairing.
+Deciding which invoice line answers which purchase-order line, one to one, by how closely their codes and descriptions agree, with quantities and prices only breaking ties, and breaking them by how close the values come rather than by their being equal. Receiving-record lines name their purchase-order line, so they need no pairing.
 _Avoid_: line matching, alignment, reconciliation (on its own)
 
 **Unpaired line**:
@@ -75,6 +75,10 @@ _Avoid_: orphan, unmatched line
 **Pairing floor**:
 The lowest similarity at which a code, or a description, counts as agreement in pairing; below it the two lines are no evidence of being the same item. Codes and descriptions each have their own. It is set from lines known to be unrelated, never from the readings the benchmark scores.
 _Avoid_: threshold (on its own), cutoff, match score
+
+**Pairing key**:
+Which invoice line each purchase-order line answers, as the generator built the case. It is written when the case is built and read only when the case is scored, never by the matcher, so pairing stays the matcher's own job and a wrong partner is counted rather than hidden. It is partial: a purchase-order line a missing line added answers a line from another seed, and an invoice line that is an extra line answers none.
+_Avoid_: line id, ground-truth pairing, link
 
 **Discrepancy type**:
 One way an invoice can disagree with its purchase order and receiving record: price variance, short-ship, over-ship, extra line, missing line, unit-of-measure variant, or tax mismatch. Only disagreement against docmatch's interest counts: billing less than was ordered or received is not a discrepancy. An invoice that repeats another invoice is not a discrepancy type; that is a separate control.
