@@ -14,11 +14,13 @@ from docmatch.matching.matcher import (
     Finding,
     MatchResult,
     NotCompared,
+    Pairing,
     Place,
     UnpairedFinding,
 )
 from docmatch.matching.records import ReceiptLine, ReceivingRecord, Record
 from docmatch.matching.scoring import (
+    CrossedPairs,
     FloorCost,
     Table,
     TypeScore,
@@ -273,6 +275,64 @@ def test_a_false_alarm_on_a_hard_negative_counts_toward_its_kind() -> None:
         ("billed below", 1, 1),
     ]
     assert table.false_alarms_elsewhere == 1
+
+
+def paired(*pairs: tuple[int, int]) -> MatchResult:
+    """A result that found nothing and paired the lines given, invoice first."""
+    return replace(
+        result(),
+        pairings=tuple(
+            Pairing(invoice_line=invoice, po_line=po, code=None, description=1.0)
+            for invoice, po in pairs
+        ),
+    )
+
+
+def keyed(invoice: Record, *key: int | None) -> Case:
+    """A case with the pairing key given. The scorer reads the invoice's lines
+    only to ask whether a crossed pair's two lines are tellable apart."""
+    return replace(a_case(invoice, invoice), pairing_key=key)
+
+
+THREE = labeled(HEX_KEYS, WRENCH, GLOVES)
+
+
+def test_a_line_paired_with_another_partner_than_the_keys_is_crossed() -> None:
+    table = score([keyed(THREE, 0, 1, 2)], [paired((1, 0), (0, 1), (2, 2))])
+
+    assert table.crossed_pairs == CrossedPairs(keyed=3, crossed=2, alike=0)
+
+
+def test_a_crossing_between_lines_nothing_tells_apart_is_counted_apart() -> None:
+    """The two lines carry the same description, quantity and amount, so no
+    tiebreak could have preferred one of them: the crossing is counted, and
+    counted again as one nothing pairing reads separates (#102)."""
+    twins = labeled(HEX_KEYS, dict(HEX_KEYS), GLOVES)
+
+    table = score([keyed(twins, 0, 1, 2)], [paired((1, 0), (0, 1), (2, 2))])
+
+    assert table.crossed_pairs == CrossedPairs(keyed=3, crossed=2, alike=2)
+
+
+def test_a_po_line_the_key_names_no_invoice_line_for_is_not_counted() -> None:
+    """A line a missing line added answers a line of another seed, so its
+    partner is neither the right one nor a crossed one (#102)."""
+    table = score([keyed(THREE, 0, None, 1)], [paired((0, 0), (2, 1), (1, 2))])
+
+    assert table.crossed_pairs == CrossedPairs(keyed=2, crossed=0, alike=0)
+
+
+def test_a_case_with_no_pairing_key_counts_no_pair() -> None:
+    assert score([case()], [paired((0, 0))]).crossed_pairs == CrossedPairs(0, 0, 0)
+
+
+def test_a_reading_is_counted_against_the_key_at_the_labeled_line_it_reads() -> None:
+    """The reading drops the first labeled line, so every later row sits one
+    position early; the pairing is scored at the labeled line the line-item
+    metric's assignment pairs it with, as an extra line's place is (#102)."""
+    table = score_read([keyed(THREE, 0, 1, 2)], {"made-up": labeled(WRENCH, GLOVES)})
+
+    assert table.crossed_pairs == CrossedPairs(keyed=2, crossed=0, alike=0)
 
 
 def test_recall_splits_into_near_the_edge_and_far_past_it() -> None:

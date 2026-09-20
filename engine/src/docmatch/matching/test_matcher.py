@@ -496,6 +496,91 @@ def test_values_break_a_tie_between_lines_sharing_a_description() -> None:
     ]
 
 
+def test_a_one_cent_drift_on_the_separating_cell_still_pairs_the_lines() -> None:
+    """The two lines share a description and a quantity, so their amount is
+    the only cell telling them apart, and a cent moves it on both
+    purchase-order lines. Exact agreement leaves a perfect tie, which the
+    assignment breaks by position; closeness still puts each line with the
+    amount it is nearest (#102)."""
+    result = matched(
+        record(
+            line(description="Blue widget", quantity="2", amount_gross="100.00"),
+            line(description="Blue widget", quantity="2", amount_gross="250.00"),
+        ),
+        record(
+            line(description="Blue widget", quantity="2", amount_gross="250.01"),
+            line(description="Blue widget", quantity="2", amount_gross="99.99"),
+        ),
+    )
+
+    assert [(each.invoice_line, each.po_line) for each in result.pairings] == [
+        (0, 1),
+        (1, 0),
+    ]
+
+
+def test_a_closer_identity_outranks_perfect_value_closeness_on_every_line() -> None:
+    """Both assignments are above the floor, and the one values prefer agrees
+    on every value of both lines: identity still decides, so the scale is
+    above everything closeness can sum to (#102)."""
+    result = matched(
+        record(
+            line(description="Blue widget", quantity="1", amount_gross="1.00"),
+            line(description="Blue widgets", quantity="100", amount_gross="1000.00"),
+        ),
+        record(
+            line(description="Blue widgets", quantity="1", amount_gross="1.00"),
+            line(description="Blue widget", quantity="100", amount_gross="1000.00"),
+        ),
+    )
+
+    assert [(each.invoice_line, each.po_line) for each in result.pairings] == [
+        (0, 1),
+        (1, 0),
+    ]
+
+
+def test_two_zero_values_are_as_close_as_two_that_agree() -> None:
+    result = matched(
+        record(line(description="Blue widget", amount_gross="0.00")),
+        record(
+            line(description="Blue widget", amount_gross="50.00"),
+            line(description="Blue widget", amount_gross="0.00"),
+        ),
+    )
+
+    assert [(each.invoice_line, each.po_line) for each in result.pairings] == [(0, 1)]
+
+
+def test_values_of_different_signs_are_no_closer_than_none_at_all() -> None:
+    """A credit and a charge of the same size are opposites, not the same
+    value; two credits are compared in absolute value (#102)."""
+    result = matched(
+        record(line(description="Freight credit", amount_gross="-100.00")),
+        record(
+            line(description="Freight credit", amount_gross="100.00"),
+            line(description="Freight credit", amount_gross="-105.00"),
+        ),
+    )
+
+    assert [(each.invoice_line, each.po_line) for each in result.pairings] == [(0, 1)]
+
+
+def test_the_best_candidate_is_the_closest_by_value_too() -> None:
+    """Nothing pairs, since neither line names its item and no value agrees
+    exactly; the candidate reported is still the nearest one (#102)."""
+    result = matched(
+        record(line(quantity="10")),
+        record(line(quantity="1"), line(quantity="9")),
+    )
+
+    assert result.pairings == ()
+    (unpaired,) = result.unpaired_invoice
+    assert unpaired.candidate is not None
+    assert unpaired.candidate.line == 1
+    assert unpaired.candidate.reason == "no agreement"
+
+
 def test_lines_carrying_neither_code_nor_description_pair_by_values() -> None:
     result = matched(
         record(line(quantity="2", amount_gross="100.00"), line(quantity="5")),
@@ -505,6 +590,29 @@ def test_lines_carrying_neither_code_nor_description_pair_by_values() -> None:
     assert [(each.invoice_line, each.po_line) for each in result.pairings] == [
         (0, 1),
         (1, 0),
+    ]
+
+
+def test_two_nameless_pairs_that_agree_outrank_one_that_is_merely_close() -> None:
+    """Invoice line 0 comes very close to PO line 1 on a cent of drift, but
+    taking that one pair alone would leave line 1 and PO line 0 unpaired, a
+    false extra line and a false missing line. Among nameless lines exact
+    agreement decides how strongly they pair, and closeness only orders the
+    pairs that agree on as much (#102)."""
+    result = matched(
+        record(
+            line(quantity="3", unit_price_gross="100.00", amount_gross="200.00"),
+            line(amount_gross="55.00"),
+        ),
+        record(
+            line(quantity="3"),
+            line(quantity="3", unit_price_gross="100.01", amount_gross="55.00"),
+        ),
+    )
+
+    assert [(each.invoice_line, each.po_line) for each in result.pairings] == [
+        (0, 0),
+        (1, 1),
     ]
 
 

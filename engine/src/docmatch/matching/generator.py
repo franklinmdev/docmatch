@@ -34,6 +34,13 @@ case, and a case with nothing left carries fewer. A type can come twice, on
 two lines. The places are the ones the finished records give, after an extra
 line has left the purchase order and a missing line has joined it.
 
+Beside the truth every case carries its pairing key, which invoice line each
+purchase-order line answers (#102). A purchase order copies its seed's lines,
+so the generator knows the answer while it builds the case; writing it down
+is what lets the scorer count a line paired with the wrong partner instead of
+leaving it to show up as a finding somewhere else. It is the scorer's alone:
+the matcher never sees a case, only the three records.
+
 Injection
 ---------
 
@@ -135,6 +142,7 @@ from docmatch.matching.matcher import (
     DiscrepancyType,
     Place,
     pairable,
+    pairing_cells,
 )
 from docmatch.matching.records import (
     CELL_FIELDTYPES,
@@ -162,7 +170,7 @@ from docmatch.matching.tolerances import (
     quantity_band,
 )
 from docmatch.metrics.fields import FieldValues
-from docmatch.metrics.normalization import normalize, normalize_text, read_number
+from docmatch.metrics.normalization import normalize_text, read_number
 
 SEED = 20260919
 """The random seed every case is rebuilt from. Changing it draws new cases."""
@@ -266,6 +274,23 @@ class Case:
     receipt: ReceivingRecord
     truth: tuple[Injected, ...]
     hard_negatives: tuple[HardNegative, ...] = ()
+    pairing_key: tuple[int | None, ...] = ()
+    """Which invoice line each purchase-order line answers, one entry per
+    purchase-order line, in order. Written here and read only by the scorer,
+    never by the matcher, so pairing stays the matcher's own job and a wrong
+    partner is counted rather than hidden. It is partial: a line a missing
+    line added answers a line of another seed and reads None, and an invoice
+    line an extra line removed is named by no entry (#102). Empty is a case
+    built without one, which the scorer counts no pair for; any other length
+    than the purchase order's is a case that could not be scored, so it is
+    refused here rather than read as a short key."""
+
+    def __post_init__(self) -> None:
+        if self.pairing_key and len(self.pairing_key) != len(self.purchase_order.lines):
+            raise ValueError(
+                f"the pairing key names {len(self.pairing_key)} purchase-order "
+                f"lines, the record has {len(self.purchase_order.lines)}"
+            )
 
     @property
     def is_clean(self) -> bool:
@@ -300,7 +325,7 @@ def eligible(
     in the pool can give one; none for a header type."""
     lines = seed.invoice.lines
     if type_ == "extra line":
-        keys = [_pairing_key(line) for line in lines]
+        keys = [pairing_cells(line) for line in lines]
         return tuple(
             position
             for position, key in enumerate(keys)
@@ -453,6 +478,7 @@ class _Draft:
                 for each in self.negatives
                 if (position := each.slot.invoice_line) is not None
             ),
+            pairing_key=tuple(each.invoice_line for each in live),
         )
 
 
@@ -567,12 +593,12 @@ def _missing_line(
 ) -> bool:
     """A line from another seed added to the purchase order, at a random
     position, unlike every line already on it."""
-    taken = {_pairing_key(each.cells) for each in draft.slots}
+    taken = {pairing_cells(each.cells) for each in draft.slots}
     for _ in range(DRAWS):
         given = [
             each
             for each in _lines_to_give(draft.seed, rng.choice(pool))
-            if _pairing_key(each) not in taken
+            if pairing_cells(each) not in taken
         ]
         if given:
             break
@@ -590,11 +616,11 @@ def _lines_to_give(seed: Seed, donor: Seed) -> list[FieldValues]:
     would meet no floor, only the value tiebreak, so it is not given (#77)."""
     if donor.document_id == seed.document_id:
         return []
-    seed_keys = {_pairing_key(line) for line in seed.invoice.lines}
+    seed_keys = {pairing_cells(line) for line in seed.invoice.lines}
     return [
         line
         for line in donor.invoice.lines
-        if _named(line) and _pairing_key(line) not in seed_keys
+        if _named(line) and pairing_cells(line) not in seed_keys
     ]
 
 
@@ -612,23 +638,6 @@ def _still_pairs(line: FieldValues, changed: Collection[Cell]) -> bool:
         for cell in PAIRING_CELLS
         if cell not in changed
     )
-
-
-PairingKey = tuple[frozenset[str] | None, ...]
-
-
-def _pairing_key(line: FieldValues) -> PairingKey:
-    """The line as pairing sees it: each pairing cell's normalized texts, or
-    None where the line lacks the cell."""
-    key: list[frozenset[str] | None] = []
-    for cell in PAIRING_CELLS:
-        values = cell_values(line, cell)
-        key.append(
-            None
-            if values is None
-            else frozenset(normalize(values.fieldtype, text) for text in values.texts)
-        )
-    return tuple(key)
 
 
 @dataclass(frozen=True)
