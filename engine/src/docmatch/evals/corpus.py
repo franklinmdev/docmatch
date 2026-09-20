@@ -256,9 +256,9 @@ class _Tally:
         for fieldtype, texts in by_fieldtype(fields).items():
             if len(texts) > 1:
                 self.repeated_fieldtypes += 1
-                self.repeated_one_value += len(
-                    {normalize(fieldtype, text) for text in texts}
-                ) == 1
+                self.repeated_one_value += (
+                    len({normalize(fieldtype, text) for text in texts}) == 1
+                )
         self.within_a_label += sum(_repeats_a_line(each.text) for each in fields)
 
     def _add_table(self, annotation: Annotation) -> None:
