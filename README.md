@@ -372,18 +372,18 @@ findings of a type, and documents is how many seeds could carry it.
 
 | Discrepancy type | Precision | Recall | n | Documents | Commit |
 |---|---|---|---|---|---|
-| price variance | 0.984 | 0.991 | 1,165 | 4,956 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| short-ship | 0.978 | 0.998 | 819 | 2,500 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| over-ship | 0.998 | 0.989 | 811 | 2,463 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| extra line | 0.977 | 0.977 | 1,089 | 4,750 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| missing line | 1.000 | 1.000 | 1,930 | 5,325 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| unit variant | 0.990 | 1.000 | 576 | 334 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| tax mismatch | 1.000 | 1.000 | 546 | 253 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
+| price variance | 0.984 | 0.991 | 1,165 | 4,956 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| short-ship | 0.978 | 0.998 | 819 | 2,500 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| over-ship | 0.998 | 0.989 | 811 | 2,463 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| extra line | 0.977 | 0.977 | 1,089 | 4,750 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| missing line | 1.000 | 1.000 | 1,930 | 5,325 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| unit variant | 0.990 | 1.000 | 576 | 334 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| tax mismatch | 1.000 | 1.000 | 546 | 253 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
 
 **Clean-case false-positive rate: 0.007**, 7 of 1,000 clean cases that draw a
 finding. The seed pool is 5,180 train and 500 val documents, 38,678
 lines, and the 355 documents with no labeled line seed nothing. Produced at
-[`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) by
+[`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) by
 
 ```bash
 uv run docmatch match --run data/runs/gemini --run data/runs/azure --run data/runs/openai
@@ -436,10 +436,10 @@ differently.
 What is left is pairing, and the row splits it. Of the 6,860 crossed pairs,
 6,503 are between two invoice lines alike on every cell pairing reads, where
 the matcher has nothing to choose by and either answer is as good. That share
-is a coin toss and moves with the weights, so the total is not the number to
-read: what a tiebreak can still reach is the other **357**. The comment on
-#102 holds what the old rule crossed on the same cases, and enumerates the 357
-by cause; the row did not exist before this commit.
+is a coin toss and moves with the weights, so what a tiebreak can reach is the
+other **357**. The comment on #102 holds what the old rule crossed on the same
+cases, and enumerates the 357 by cause; the row did not exist before this
+commit.
 
 ### Matching, end to end
 
@@ -451,10 +451,10 @@ nothing. The labels control is the same cases with the labels as the invoice.
 
 | Invoice | Precision | Recall | Clean-case false-positive rate | Floor cost | Commit |
 |---|---|---|---|---|---|
-| labels control | 1.000 | 0.999 | 0.000 | | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| `gemini-3.1-flash-lite` reading | 0.520 | 0.806 | 0.453 | 11 of 297 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846), run at [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
-| Azure `prebuilt-invoice` reading | 0.540 | 0.814 | 0.506 | 9 of 306 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846), run at [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
-| `gpt-5.6-luna` reading | 0.504 | 0.833 | 0.366 | 18 of 312 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846), run at [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) |
+| labels control | 1.000 | 0.999 | 0.000 | | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| `gemini-3.1-flash-lite` reading | 0.520 | 0.806 | 0.453 | 11 of 297 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a), run at [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
+| Azure `prebuilt-invoice` reading | 0.540 | 0.814 | 0.506 | 9 of 306 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a), run at [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
+| `gpt-5.6-luna` reading | 0.504 | 0.833 | 0.366 | 18 of 312 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a), run at [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) |
 
 Precision and recall are over all findings of every type, the clean-case rate
 over 1,000 clean cases, each run from the extraction command in its own row
