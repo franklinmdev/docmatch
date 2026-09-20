@@ -142,6 +142,7 @@ from docmatch.matching.matcher import (
     DiscrepancyType,
     Place,
     pairable,
+    pairing_cells,
 )
 from docmatch.matching.records import (
     CELL_FIELDTYPES,
@@ -169,7 +170,7 @@ from docmatch.matching.tolerances import (
     quantity_band,
 )
 from docmatch.metrics.fields import FieldValues
-from docmatch.metrics.normalization import normalize, normalize_text, read_number
+from docmatch.metrics.normalization import normalize_text, read_number
 
 SEED = 20260919
 """The random seed every case is rebuilt from. Changing it draws new cases."""
@@ -314,7 +315,7 @@ def eligible(
     in the pool can give one; none for a header type."""
     lines = seed.invoice.lines
     if type_ == "extra line":
-        keys = [_pairing_cells(line) for line in lines]
+        keys = [pairing_cells(line) for line in lines]
         return tuple(
             position
             for position, key in enumerate(keys)
@@ -582,12 +583,12 @@ def _missing_line(
 ) -> bool:
     """A line from another seed added to the purchase order, at a random
     position, unlike every line already on it."""
-    taken = {_pairing_cells(each.cells) for each in draft.slots}
+    taken = {pairing_cells(each.cells) for each in draft.slots}
     for _ in range(DRAWS):
         given = [
             each
             for each in _lines_to_give(draft.seed, rng.choice(pool))
-            if _pairing_cells(each) not in taken
+            if pairing_cells(each) not in taken
         ]
         if given:
             break
@@ -605,11 +606,11 @@ def _lines_to_give(seed: Seed, donor: Seed) -> list[FieldValues]:
     would meet no floor, only the value tiebreak, so it is not given (#77)."""
     if donor.document_id == seed.document_id:
         return []
-    seed_keys = {_pairing_cells(line) for line in seed.invoice.lines}
+    seed_keys = {pairing_cells(line) for line in seed.invoice.lines}
     return [
         line
         for line in donor.invoice.lines
-        if _named(line) and _pairing_cells(line) not in seed_keys
+        if _named(line) and pairing_cells(line) not in seed_keys
     ]
 
 
@@ -627,26 +628,6 @@ def _still_pairs(line: FieldValues, changed: Collection[Cell]) -> bool:
         for cell in PAIRING_CELLS
         if cell not in changed
     )
-
-
-PairingCells = tuple[frozenset[str] | None, ...]
-
-
-def _pairing_cells(line: FieldValues) -> PairingCells:
-    """The line as pairing sees it: each pairing cell's normalized texts, or
-    None where the line lacks the cell. Two lines with the same one are alike
-    to the matcher, which is what makes one of them unsafe to remove or add.
-    Not the pairing key, which is a case's record of which invoice line each
-    purchase-order line answers."""
-    key: list[frozenset[str] | None] = []
-    for cell in PAIRING_CELLS:
-        values = cell_values(line, cell)
-        key.append(
-            None
-            if values is None
-            else frozenset(normalize(values.fieldtype, text) for text in values.texts)
-        )
-    return tuple(key)
 
 
 @dataclass(frozen=True)

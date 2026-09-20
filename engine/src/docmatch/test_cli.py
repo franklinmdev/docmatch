@@ -1636,7 +1636,7 @@ MATCH_TABLES = [
     # The code agreement above pairs a removed line with a donor line, which
     # the key names no invoice line for, so it crosses no pair: every pair
     # the key does name is the one the matcher made (#102).
-    "  lines paired with another partner  0 of 7594",
+    "  lines paired with another partner  0 of 7594, 0 alike on every pairing cell",
     "",
     "  type            near recall    n  far recall    n",
     "  price variance        1.000  544       1.000  543",

@@ -504,6 +504,28 @@ def pairable(line: FieldValues) -> bool:
     return any(cell_values(line, cell) is not None for cell in PAIRING_CELLS)
 
 
+PairingCells = tuple[frozenset[str] | None, ...]
+"""One line as pairing sees it: each pairing cell's normalized values, or None
+where the line lacks the cell."""
+
+
+def pairing_cells(line: FieldValues) -> PairingCells:
+    """The line as pairing sees it.
+
+    Two lines with the same one are alike to every comparison pairing makes,
+    so nothing pairing reads tells them apart and which of the two an
+    assignment takes is arbitrary. The generator never removes or adds one of
+    such a pair, since the truth could not be scored, and the scorer counts a
+    crossing between them apart from the rest (#102).
+    """
+    return tuple(
+        None
+        if (values := cell_values(line, cell)) is None
+        else frozenset(normalize(values.fieldtype, text) for text in values.texts)
+        for cell in PAIRING_CELLS
+    )
+
+
 def _pair(invoice: Sequence[FieldValues], po: Sequence[FieldValues]) -> _Paired:
     """Pair the lines that carry a pairing cell, and name them by their
     position in the whole record."""

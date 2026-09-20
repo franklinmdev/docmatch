@@ -405,7 +405,8 @@ floor procedure measures on train over 10,000 cross-document pairs each.
 | on no hard negative | | 23 |
 
 Beside them the same report counts the lines paired with a partner other than
-the one the generator's pairing key names: **6,860 of 29,009** keyed pairs.
+the one the generator's pairing key names: **6,860 of 29,009** keyed pairs,
+**6,503** of them between two invoice lines alike on every cell pairing reads.
 
 | Discrepancy type | Near recall | n | Far recall | n |
 |---|---|---|---|---|
@@ -423,25 +424,22 @@ by how close the values come rather than by their being equal (#102) took
 those from 242 to 47 and the clean-case rate from 0.025 to 0.007, and every
 type is at or above where it stood at
 [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) but for
-two cells, and a counts-only probe on #102 has the cause of each. Price
-variance recall goes 0.998 to 0.991: lowering a price is exactly what makes
-the right pair less close, so nine more injections land on a line the
-tiebreak crossed. Unit variant precision goes 0.997 to 0.990, five false
+two cells, whose causes a probe on #102 has. Price variance recall goes 0.998
+to 0.991: lowering a price is exactly what makes the right pair less close,
+so nine more injections land on a line the tiebreak crossed. Unit variant precision goes 0.997 to 0.990, five false
 alarms on pairs crossed between invoice lines alike on every cell pairing
 reads; the unit is not one of those cells, so two lines the matcher cannot
 tell apart may still be counted differently.
 
-What is left is pairing, and the same probe splits it. Of the 6,860 crossed
-pairs, 6,503 are between two invoice lines alike on every cell pairing reads,
-where the matcher has nothing to choose by and either answer is as good; that
-share is a coin toss and moves with the weights, which is why the total sits
-above the 5,498 the old tiebreak crossed on the same cases. The pairs
-something could have separated fell from 550 to 357: 179 where the other line
-scores higher, 135 where the right line was worth more and took a better
-partner elsewhere, 43 tied. 300 of the 357 sit on a hard negative and 45 on
-an injected line, whose moved value is what pulls a line towards its
-neighbour; 12 sit on a line left as labeled. Only the 6,860 reproduces from
-the command above; the probe's own counts are on #102.
+What is left is pairing, and the row splits it. Of the 6,860 crossed pairs,
+6,503 are between two invoice lines alike on every cell pairing reads, where
+the matcher has nothing to choose by and either answer is as good. That share
+is a coin toss and moves with the weights, which is why the total sits above
+the 5,498 the old tiebreak crossed on the same cases, 4,948 of them alike. So
+the pairs something could have separated fell from 550 to 357, and those are
+what a tiebreak is for. The old rule's two counts come from a probe on #102,
+which is also where the 357 are enumerated by cause; the row did not exist
+before this commit.
 
 ### Matching, end to end
 
@@ -704,9 +702,10 @@ value the floor procedure measures on train), the per-type table
 (precision, recall and n per discrepancy type, with the number of documents
 carrying it, and the clean-case false-positive rate over 1,000 clean cases),
 the diagnostic table (false alarms by the hard negative they sat on, the lines
-paired with a partner other than the one the generator's pairing key names,
-and recall near the edge and far past it), and a labels control over cases
-from the fixed subset, the row every end-to-end row is read against. Both
+paired with a partner other than the one the generator's pairing key names
+beside how many of those the matcher had nothing to tell apart, and recall
+near the edge and far past it), and a labels control over cases from the
+fixed subset, the row every end-to-end row is read against. Both
 splits are required; a missing one is an error, so a partial download cannot
 shrink the table silently. Tolerances and pairing floors are constants in
 `engine/src/docmatch/matching/tolerances.py`, so a change to one is a commit

@@ -40,6 +40,7 @@ from docmatch.matching.matcher import (
     MatchResult,
     Place,
     match,
+    pairing_cells,
 )
 from docmatch.matching.records import Record
 from docmatch.matching.tolerances import Band
@@ -115,6 +116,12 @@ class CrossedPairs:
     """Pairings whose purchase-order line the key names an invoice line for."""
     crossed: int
     """Of those, the ones whose invoice line is not the one the key names."""
+    alike: int
+    """Of the crossed, the ones between two invoice lines alike on every cell
+    pairing reads. Nothing pairing computes tells those two apart, so which of
+    them the assignment takes is arbitrary and moves with the weights; they
+    are counted apart so that the crossings a tiebreak can reach, the rest,
+    read on their own (#102)."""
 
 
 @dataclass(frozen=True)
@@ -174,11 +181,12 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
     tempted: Counter[HardNegativeKind] = Counter()
     elsewhere = 0
     clean_false_positives = 0
-    keyed = crossed = 0
+    keyed = crossed = alike = 0
     for case, result in zip(cases, results, strict=True):
         pairs = _crossed(case, result)
         keyed += pairs.keyed
         crossed += pairs.crossed
+        alike += pairs.alike
         truth = {(each.type, each.place) for each in case.truth}
         found = {(each.type, each.place) for each in result.findings}
         for type_, _ in truth & found:
@@ -216,19 +224,29 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
             for kind in HARD_NEGATIVE_KINDS
         ),
         false_alarms_elsewhere=elsewhere,
-        crossed_pairs=CrossedPairs(keyed, crossed),
+        crossed_pairs=CrossedPairs(keyed, crossed, alike),
     )
 
 
 def _crossed(case: Case, result: MatchResult) -> CrossedPairs:
     """One case's pairings against its key: the ones the key names an invoice
-    line for, and how many of those took another line instead."""
+    line for, how many took another line instead, and how many of those two
+    lines nothing pairing reads tells apart."""
     keyed = [
         (answers, each.invoice_line)
         for each in result.pairings
         if (answers := _answers(case.pairing_key, each.po_line)) is not None
     ]
-    return CrossedPairs(len(keyed), sum(answers != paired for answers, paired in keyed))
+    crossed = [(answers, paired) for answers, paired in keyed if answers != paired]
+    lines = case.invoice.lines
+    return CrossedPairs(
+        keyed=len(keyed),
+        crossed=len(crossed),
+        alike=sum(
+            pairing_cells(lines[answers]) == pairing_cells(lines[paired])
+            for answers, paired in crossed
+        ),
+    )
 
 
 def _answers(key: Sequence[int | None], po_line: int) -> int | None:
