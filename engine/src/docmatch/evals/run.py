@@ -66,7 +66,7 @@ from docmatch.evals.confidence import (
 )
 from docmatch.evals.manifest import Manifest, ManifestError
 from docmatch.evals.manifest import load as load_manifest
-from docmatch.extraction.derived import DERIVED_FIELDTYPES, derive, with_derived
+from docmatch.extraction.derived import DERIVED_FIELDTYPES, derived_header
 from docmatch.extraction.extractor import Confidence
 from docmatch.gate import RULES, GateResult, RuleName, gate
 from docmatch.metrics.fields import (
@@ -557,7 +557,7 @@ def _score_document(
     predicted = prediction is not None
     prediction = NOTHING if prediction is None else prediction
     labeled = labeled_fields(annotation)
-    reading = with_derived(prediction.header, derive(prediction, currency_symbols))
+    reading = derived_header(prediction, currency_symbols)
     fields = score_fields(labeled, reading)
     as_read = score_fields(labeled, prediction.header)
     line_items = score_line_items(labeled_line_items(annotation), prediction.rows)

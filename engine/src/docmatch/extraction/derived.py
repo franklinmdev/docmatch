@@ -107,3 +107,14 @@ def with_derived(
     for each in derived:
         combined[each.fieldtype] = (*combined.get(each.fieldtype, ()), each.text)
     return combined
+
+
+def derived_header(
+    prediction: Prediction,
+    currency_symbols: Mapping[str, Sequence[str]] | None = None,
+) -> dict[str, tuple[str, ...]]:
+    """One reading's header as everything downstream takes it: what the
+    backend read, with the values derived from it listed beside them. The eval
+    scores and gates this header, and matching reads the invoice from it, so
+    the two can never disagree about what a reading says."""
+    return with_derived(prediction.header, derive(prediction, currency_symbols))

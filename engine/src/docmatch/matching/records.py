@@ -28,7 +28,7 @@ from decimal import Decimal
 from typing import Literal
 
 from docmatch.docile.annotation import Annotation
-from docmatch.extraction.derived import derive, with_derived
+from docmatch.extraction.derived import derived_header
 from docmatch.metrics.fields import FieldValues, Prediction, labeled_fields
 from docmatch.metrics.line_items import labeled_line_items
 from docmatch.metrics.normalization import normalize_text, read_number
@@ -93,8 +93,7 @@ def read_record(
     derived currency (#81). Read whether it passes the gate or not: the gate
     does not filter (#67)."""
     return Record(
-        header=with_derived(prediction.header, derive(prediction, currency_symbols)),
-        lines=prediction.rows,
+        header=derived_header(prediction, currency_symbols), lines=prediction.rows
     )
 
 
