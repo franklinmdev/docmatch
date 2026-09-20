@@ -178,7 +178,7 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
     band_hits: Counter[tuple[DiscrepancyType, Band]] = Counter()
     band_misses: Counter[tuple[DiscrepancyType, Band]] = Counter()
     placed: Counter[HardNegativeKind] = Counter()
-    tempted: Counter[HardNegativeKind] = Counter()
+    false_alarms_on: Counter[HardNegativeKind] = Counter()
     elsewhere = 0
     clean_false_positives = 0
     for case, result in zip(cases, results, strict=True):
@@ -192,12 +192,12 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
             if each.band is not None:
                 landed = band_hits if (each.type, each.place) in found else band_misses
                 landed[each.type, each.band] += 1
-        on = _hard_negative_places(case.hard_negatives)
+        negatives_at = _hard_negative_places(case.hard_negatives)
         placed.update(each.kind for each in case.hard_negatives)
         for type_, place in found - truth:
             false_alarms[type_] += 1
-            if place in on:
-                tempted[on[place]] += 1
+            if place in negatives_at:
+                false_alarms_on[negatives_at[place]] += 1
             else:
                 elsewhere += 1
         if case.is_clean and result.findings:
@@ -215,7 +215,7 @@ def score(cases: Sequence[Case], results: Sequence[MatchResult]) -> Table:
             for band in BANDS
         ),
         hard_negatives=tuple(
-            HardNegativeScore(kind, placed[kind], tempted[kind])
+            HardNegativeScore(kind, placed[kind], false_alarms_on[kind])
             for kind in HARD_NEGATIVE_KINDS
         ),
         false_alarms_elsewhere=elsewhere,
@@ -245,7 +245,7 @@ def _crossed(case: Case, result: MatchResult) -> CrossedPairs:
     keyed = [
         (answers, each.invoice_line)
         for each in result.pairings
-        if (answers := _answers(case.pairing_key, each.po_line)) is not None
+        if (answers := case.pairing_key[each.po_line]) is not None
     ]
     crossed = [(answers, paired) for answers, paired in keyed if answers != paired]
     lines = case.invoice.lines
@@ -257,12 +257,6 @@ def _crossed(case: Case, result: MatchResult) -> CrossedPairs:
             for answers, paired in crossed
         ),
     )
-
-
-def _answers(key: Sequence[int | None], po_line: int) -> int | None:
-    """The invoice line the key says a purchase-order line answers, or None
-    when it names none and when the case carries no key at all."""
-    return key[po_line] if po_line < len(key) else None
 
 
 def _hard_negative_places(
@@ -290,9 +284,56 @@ NO_READING = Record(header={}, lines=())
 reading has no lines, and pays in misses and false alarms (#67)."""
 
 
-def score_read(cases: Sequence[Case], readings: Mapping[str, Record]) -> Table:
+@dataclass(frozen=True)
+class FloorCost:
+    """What the pairing floor cost a reading: its misread lines left unpaired.
+
+    Counted over one clean case per document, where the purchase order is the
+    labels, so a reading line the line-item metric pairs with a labeled line
+    is one the matcher should have paired too (#77).
+    """
+
+    paired: int
+    """Reading lines the line-item metric's assignment pairs with a labeled
+    line."""
+    unpaired: int
+    """Of those, the lines the matcher's own pairing left without a partner
+    because their best candidate agreed below the floor: each a false
+    extra-line hold on every case of its document."""
+
+
+@dataclass(frozen=True)
+class ReadScore:
+    """What one run's readings score as the invoices, and what the pairing
+    floor cost them: the two numbers an end-to-end row prints."""
+
+    table: Table
+    floor_cost: FloorCost
+
+
+@dataclass(frozen=True)
+class _Read:
+    """One document's reading as the invoice, and how the line-item metric's
+    assignment pairs its rows with the labeled lines."""
+
+    invoice: Record
+    labeled_at: Mapping[int, int]
+    """The labeled line each reading line answers, by reading position; a
+    reading line the assignment pairs with none is not in it."""
+
+
+def _read(case: Case, readings: Mapping[str, Record]) -> _Read:
+    """The reading of the case's document, or an invoice with no lines, with
+    its rows paired against the labeled invoice the case was built from."""
+    reading = readings.get(case.document_id, NO_READING)
+    paired = pair_rows(case.invoice.lines, reading.lines)
+    return _Read(reading, {read: label for label, read in paired.items()})
+
+
+def score_read(cases: Sequence[Case], readings: Mapping[str, Record]) -> ReadScore:
     """Every case matched with the reading of its document as the invoice,
-    then scored against the truth built from its labels.
+    then scored against the truth built from its labels, and what the pairing
+    floor cost that reading.
 
     An extra line is placed on the invoice line, which on a reading is a
     reading position; it is moved to the labeled line the line-item metric's
@@ -303,24 +344,42 @@ def score_read(cases: Sequence[Case], readings: Mapping[str, Record]) -> Table:
     line is moved the same way, so it is read against the pairing key in the
     labels' own positions; a reading line with no labeled position leaves no
     pairing to count (#102).
+
+    The floor's cost is taken from the first clean case of each document,
+    whose purchase order is the labels, off the same match (#77).
     """
-    labeled_at: dict[str, dict[int, int]] = {}
+    read: dict[str, _Read] = {}
     results: list[MatchResult] = []
+    costed: set[str] = set()
+    paired = unpaired = 0
     for case in cases:
-        reading = readings.get(case.document_id, NO_READING)
-        if case.document_id not in labeled_at:
-            paired = pair_rows(case.invoice.lines, reading.lines)
-            labeled_at[case.document_id] = {
-                read: label for label, read in paired.items()
-            }
-        result = match(reading, case.purchase_order, case.receipt)
-        results.append(_placed(result, labeled_at[case.document_id]))
-    return score(cases, results)
+        if case.document_id not in read:
+            read[case.document_id] = _read(case, readings)
+        reading = read[case.document_id]
+        result = match(reading.invoice, case.purchase_order, case.receipt)
+        results.append(_placed(result, reading.labeled_at))
+        if case.is_clean and case.document_id not in costed:
+            costed.add(case.document_id)
+            paired += len(reading.labeled_at)
+            unpaired += _below_the_floor(result, reading.labeled_at)
+    return ReadScore(score(cases, results), FloorCost(paired, unpaired))
+
+
+def _below_the_floor(result: MatchResult, labeled_at: Mapping[int, int]) -> int:
+    """How many of the reading lines the metric paired the matcher left
+    unpaired because their best candidate agreed below the floor."""
+    return sum(
+        1
+        for each in result.unpaired_invoice
+        if each.line in labeled_at
+        and each.candidate is not None
+        and each.candidate.reason == "below the floor"
+    )
 
 
 def _placed(result: MatchResult, labeled_at: Mapping[int, int]) -> MatchResult:
-    """The result with each extra line and each pairing moved to the labeled
-    line it reads."""
+    """The result with every place on an invoice line, and every pairing,
+    moved to the labeled line it reads."""
     return replace(
         result,
         pairings=tuple(
@@ -329,50 +388,21 @@ def _placed(result: MatchResult, labeled_at: Mapping[int, int]) -> MatchResult:
             if each.invoice_line in labeled_at
         ),
         findings=tuple(
-            replace(each, place=Place("invoice line", labeled_at.get(each.place.line)))
-            if each.type == "extra line" and each.place.line is not None
-            else each
+            replace(each, place=_labeled(each.place, labeled_at))
             for each in result.findings
+        ),
+        not_compared=tuple(
+            replace(each, place=_labeled(each.place, labeled_at))
+            for each in result.not_compared
         ),
     )
 
 
-@dataclass(frozen=True)
-class FloorCost:
-    """What the pairing floor cost a reading: its misread lines left unpaired.
-
-    Counted over one clean case per document, where the purchase order is the
-    labels, so a reading line the line-item metric pairs with a labeled line
-    is one the matcher should have paired too (#77).
-    """
-
-    read: int
-    """Reading lines the line-item metric's assignment pairs with a labeled
-    line."""
-    unpaired: int
-    """Of those, the lines pairing left unpaired because their best candidate
-    agreed below the floor: each a false extra-line hold on every case of its
-    document."""
-
-
-def floor_cost(cases: Sequence[Case], readings: Mapping[str, Record]) -> FloorCost:
-    """The misread lines the floor left unpaired, over one clean case per
-    document; reported beside the floor and never tuned against (#77)."""
-    read = unpaired = 0
-    seen: set[str] = set()
-    for case in cases:
-        if not case.is_clean or case.document_id in seen:
-            continue
-        seen.add(case.document_id)
-        reading = readings.get(case.document_id, NO_READING)
-        answering = set(pair_rows(case.invoice.lines, reading.lines).values())
-        result = match(reading, case.purchase_order, case.receipt)
-        read += len(answering)
-        unpaired += sum(
-            1
-            for each in result.unpaired_invoice
-            if each.line in answering
-            and each.candidate is not None
-            and each.candidate.reason == "below the floor"
-        )
-    return FloorCost(read, unpaired)
+def _labeled(place: Place, labeled_at: Mapping[int, int]) -> Place:
+    """A place on an invoice line moved to the labeled line that reading line
+    answers, or placed on none when the assignment paired it with none. Every
+    other place is already where the labels have it: a purchase-order line and
+    the header are the case's own."""
+    if place.kind != "invoice line" or place.line is None:
+        return place
+    return Place("invoice line", labeled_at.get(place.line))

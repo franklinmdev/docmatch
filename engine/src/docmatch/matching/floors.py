@@ -30,14 +30,19 @@ from decimal import Decimal
 
 from docmatch.matching.generator import Seed
 from docmatch.matching.matcher import IDENTITY_CELLS, alike
-from docmatch.matching.records import Cell, CellValues, cell_values
-from docmatch.matching.tolerances import CODE_FLOOR, DESCRIPTION_FLOOR
+from docmatch.matching.records import CellValues, LineCell, cell_values
+from docmatch.matching.tolerances import FLOORS
 
 SPLIT = "train"
 """The split the floors are measured on, never the fixed subset's (#77)."""
 
 SEED = 77
-"""The random seed the pairs are drawn with, pinned before the first draw."""
+"""The random seed the pairs are drawn with, pinned before the first draw. The
+number is arbitrary and no reason for it is recorded on #88: only its being
+fixed before the first draw matters. The draw is `random.Random` on Python
+3.12, whose Mersenne Twister stream CPython promises, and `uv.lock` pins the
+interpreter the measured floors were produced with, as the generator's seed
+does for its cases."""
 
 PAIRS = 10_000
 """How many pairs of lines each cell's floor is measured on."""
@@ -48,15 +53,12 @@ SHARE = Decimal("0.01")
 STEPS = tuple(step / 10 for step in range(1, 11))
 """The grid a floor is picked from, 0.1 to 1.0."""
 
-CONSTANTS: dict[Cell, float] = {"code": CODE_FLOOR, "description": DESCRIPTION_FLOOR}
-"""The floor pairing applies to each identity cell."""
-
 
 @dataclass(frozen=True)
 class Floor:
     """One cell's floor as pairing applies it, and as the procedure measures it."""
 
-    cell: Cell
+    cell: LineCell
     constant: float
     pairs: int
     """How many pairs of lines the procedure drew: none when fewer than two
@@ -72,10 +74,10 @@ def measure(seeds: Sequence[Seed]) -> tuple[Floor, ...]:
     return tuple(_measure(seeds, cell) for cell in IDENTITY_CELLS)
 
 
-def _measure(seeds: Sequence[Seed], cell: Cell) -> Floor:
+def _measure(seeds: Sequence[Seed], cell: LineCell) -> Floor:
     documents = [carried for each in seeds if (carried := _carried(each, cell))]
     if len(documents) < 2:
-        return Floor(cell, CONSTANTS[cell], 0, None)
+        return Floor(cell, FLOORS[cell], 0, None)
     rng = random.Random(SEED)
     scores: list[float] = []
     for _ in range(PAIRS):
@@ -89,10 +91,10 @@ def _measure(seeds: Sequence[Seed], cell: Cell) -> Floor:
         ),
         None,
     )
-    return Floor(cell, CONSTANTS[cell], len(scores), measured)
+    return Floor(cell, FLOORS[cell], len(scores), measured)
 
 
-def _carried(seed: Seed, cell: Cell) -> list[CellValues]:
+def _carried(seed: Seed, cell: LineCell) -> list[CellValues]:
     """The cell on each of the seed's lines that carries it."""
     return [
         values

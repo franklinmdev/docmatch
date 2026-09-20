@@ -1678,8 +1678,8 @@ EXPECTED_MATCH_RUN_OUTPUT = "\n".join(
         # no reading. Every description read agrees with its label, so the
         # floor leaves none unpaired.
         "Floor cost per run, over one clean case per document",
-        "  run                   lines the metric pairs  left below a floor",
-        "  gemini synthetic-001                       6                   0",
+        "  run                   lines the metric pairs  floor cost",
+        "  gemini synthetic-001                       6           0",
         *MATCH_TABLES,
         "",
         # The same cases as the control, eval0006's with no reading at all.

@@ -113,7 +113,7 @@ The verdict
 approving belongs to the Phase 4 state machine.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal, get_args
@@ -124,6 +124,8 @@ from docmatch.matching.records import (
     PRICE_CELLS,
     Cell,
     CellValues,
+    LineCell,
+    ReadCell,
     ReceivingRecord,
     Record,
     cell_values,
@@ -132,8 +134,7 @@ from docmatch.matching.records import (
 )
 from docmatch.matching.similarity import similarity
 from docmatch.matching.tolerances import (
-    CODE_FLOOR,
-    DESCRIPTION_FLOOR,
+    FLOORS,
     PRICE,
     QUANTITY,
     TAX,
@@ -155,7 +156,7 @@ DiscrepancyType = Literal[
 TYPES: tuple[DiscrepancyType, ...] = get_args(DiscrepancyType)
 """Every discrepancy type, in the order a report lists them (#65)."""
 
-VALUE_CELLS: tuple[Cell, ...] = ("quantity", "unit price", "amount")
+VALUE_CELLS: tuple[LineCell, ...] = ("quantity", "unit price", "amount")
 """The cells pairing scores closeness on, one each, to break identity ties."""
 
 THOUSANDTHS = 1000
@@ -163,13 +164,13 @@ THOUSANDTHS = 1000
 summed in thousandths, so a pair's worth is an integer and the assignment
 never turns on a rounding difference."""
 
-IDENTITY_CELLS: tuple[Cell, ...] = ("code", "description")
-"""The cells identity is graded on, each against its floor."""
+IDENTITY_CELLS: tuple[LineCell, ...] = ("code", "description")
+"""The cells identity is graded on, each against its floor in `FLOORS`."""
 
-PAIRING_CELLS: tuple[Cell, ...] = (*IDENTITY_CELLS, *VALUE_CELLS)
+PAIRING_CELLS: tuple[LineCell, ...] = (*IDENTITY_CELLS, *VALUE_CELLS)
 """Every cell pairing reads: identity, then the values that break its ties."""
 
-SUPPRESSED_CELLS: tuple[Cell, ...] = (*PRICE_CELLS, "quantity")
+SUPPRESSED_CELLS: tuple[LineCell, ...] = (*PRICE_CELLS, "quantity")
 """What a unit variant leaves uncompared on its line: a price or a quantity
 counted in another unit is not comparable without a conversion table (#66)."""
 
@@ -239,6 +240,11 @@ class Unpaired:
     """None when the other record has no lines at all."""
 
 
+AGAINST_RECEIPT: tuple[DiscrepancyType, ...] = ("short-ship",)
+"""The rules that compare the invoice against the receiving record; every other
+rule compares against the purchase order (#65)."""
+
+
 @dataclass(frozen=True)
 class Finding:
     """A discrepancy type at a place, with everything its explanation quotes."""
@@ -249,14 +255,15 @@ class Finding:
     invoice: tuple[str, ...]
     """The invoice's texts for the cell, exactly as it has them."""
     purchase_order: tuple[str, ...]
-    """Empty when the rule does not compare against the purchase order, as
-    short-ship does not."""
-    margin: Decimal
-    """The percent of the value compared against, in money: the purchase
-    order's, or the receipt's for a short-ship; 0 when exact."""
+    """Empty for the rules in `AGAINST_RECEIPT`, which compare no
+    purchase-order value."""
     tolerance: Tolerance
     receipt: tuple[str, ...] = ()
     """The receipt's texts for the cell, for the rules that compare it."""
+    margin: Decimal = Decimal(0)
+    """The percent of the value compared against, in money: the purchase
+    order's, or the receipt's for a short-ship. An exact tolerance has none,
+    which is what a rule with nothing to measure leaves it."""
 
     @property
     def severity(self) -> Severity:
@@ -293,9 +300,11 @@ class NotCompared:
     place: Place
     cell: Cell | None
     """None when the whole line was not compared, having nothing to pair on."""
-    text: tuple[str, ...]
-    """The texts of the side that carried it, or that could not be read; for
-    a unit variant, what the invoice billed."""
+    texts: tuple[str, ...]
+    """What the entry is about: the texts of the side the reason names, which
+    is the side that carried the cell, or could not be read, or billed in
+    another unit; empty for a line with nothing to pair on, which names no
+    cell and so no side."""
     reason: NotComparedReason
 
 
@@ -311,20 +320,14 @@ class MatchResult:
 
     @property
     def unpaired_invoice(self) -> tuple[Unpaired, ...]:
-        """The invoice lines pairing left without a partner."""
-        return self._unpaired("extra line")
-
-    @property
-    def unpaired_po(self) -> tuple[Unpaired, ...]:
-        """The purchase-order lines pairing left without a partner."""
-        return self._unpaired("missing line")
-
-    def _unpaired(self, type_: UnpairedType) -> tuple[Unpaired, ...]:
+        """The invoice lines pairing left without a partner, which the floor's
+        cost counts. A purchase-order line left without one is read off the
+        findings, where it is a missing line."""
         return tuple(
             Unpaired(each.place.line, each.candidate)
             for each in self.findings
             if isinstance(each, UnpairedFinding)
-            and each.type == type_
+            and each.type == "extra line"
             and each.place.line is not None
         )
 
@@ -388,12 +391,12 @@ def explain(finding: Finding | UnpairedFinding) -> str:
     if isinstance(finding, UnpairedFinding):
         return f"{finding.type}, {place}, {_why_unpaired(finding)}"
     billed = [f"invoice {_quoted(finding.invoice)}"]
-    if finding.purchase_order:
+    if finding.type in AGAINST_RECEIPT:
+        against = f"receipt {_quoted(finding.receipt)}"
+    else:
         if finding.receipt:
             billed.append(f"receipt {_quoted(finding.receipt)}")
         against = f"PO {_quoted(finding.purchase_order)}"
-    else:
-        against = f"receipt {_quoted(finding.receipt)}"
     compared = (
         f"{finding.type}, {place}, {finding.cell}, {' and '.join(billed)} vs {against}"
     )
@@ -459,13 +462,14 @@ class _Comparison:
 
     @property
     def identity(self) -> int:
-        """Agreement at or above the floors, in thousandths, summed over cells."""
-        agreed = 0
-        if self.code is not None and self.code >= CODE_FLOOR:
-            agreed += round(self.code * THOUSANDTHS)
-        if self.description is not None and self.description >= DESCRIPTION_FLOOR:
-            agreed += round(self.description * THOUSANDTHS)
-        return agreed
+        """Agreement at or above each cell's floor, in thousandths, summed."""
+        return sum(
+            round(score * THOUSANDTHS)
+            for cell, score in zip(
+                IDENTITY_CELLS, (self.code, self.description), strict=True
+            )
+            if score is not None and score >= FLOORS[cell]
+        )
 
     @property
     def ranking(self) -> tuple[float, int]:
@@ -477,9 +481,12 @@ class _Comparison:
         """What decides the pair, scaled above everything closeness can sum
         to, with closeness itself only breaking the tie.
 
-        Identity decides wherever the two lines name their item; exact
-        agreement on the values decides where neither does, and is zero
-        otherwise, so the two never compete. A pair with neither is no pair.
+        Identity decides wherever the two lines name their item, in
+        thousandths; where neither does it is zero, and how many value cells
+        agree exactly decides instead, a count of at most three. The two
+        never meet on one scale: a named line and a nameless one are worth
+        nothing together, so no assignment ever weighs a count of agreements
+        against an identity in thousandths. A pair with neither is no pair.
         """
         deciding = self.identity or self.agreements
         return deciding * scale + self.values if deciding else 0
@@ -507,6 +514,13 @@ def pairable(line: FieldValues) -> bool:
     """Whether the line carries any cell pairing reads; one that does not is
     left out of pairing."""
     return any(cell_values(line, cell) is not None for cell in PAIRING_CELLS)
+
+
+def named(line: FieldValues) -> bool:
+    """Whether the line names its item, carrying a code or a description.
+    Those are the cells identity is graded on, and the cells the pairing floor
+    was set on; a line that names nothing pairs by its values alone."""
+    return any(cell_values(line, cell) is not None for cell in IDENTITY_CELLS)
 
 
 PairingCells = tuple[frozenset[str] | None, ...]
@@ -618,12 +632,10 @@ def _candidate(
 
 
 def _compare(one: FieldValues, other: FieldValues) -> _Comparison:
-    codes = (cell_values(one, "code"), cell_values(other, "code"))
-    descriptions = (cell_values(one, "description"), cell_values(other, "description"))
-    nameless = all(each is None for each in (*codes, *descriptions))
+    nameless = not (named(one) or named(other))
     return _Comparison(
-        code=_alike(*codes),
-        description=_alike(*descriptions),
+        code=_identity(one, other, "code"),
+        description=_identity(one, other, "description"),
         values=sum(_close(one, other, cell) for cell in VALUE_CELLS),
         # Only a nameless pair pairs on exact agreement, so only a nameless
         # pair pays for reading the values a second way.
@@ -633,26 +645,36 @@ def _compare(one: FieldValues, other: FieldValues) -> _Comparison:
     )
 
 
-def _alike(one: CellValues | None, other: CellValues | None) -> float | None:
-    """How alike the cell is on the two lines, or None when a side lacks it."""
-    if one is None or other is None:
+def _best[V, S: float](
+    one: Sequence[V], other: Sequence[V], measure: Callable[[V, V], S]
+) -> S:
+    """The closest any one of a cell's values comes to any one of the other
+    side's, by the measure given. A line that lists several values is as close
+    as its best one, which is how pairing reads every cell: a reading that
+    disagrees with itself still pairs on the value that agrees."""
+    return max(measure(left, right) for left in one for right in other)
+
+
+def _identity(one: FieldValues, other: FieldValues, cell: LineCell) -> float | None:
+    """How alike the two lines are on an identity cell, or None when a side
+    lacks it, where there is no agreement to grade."""
+    left, right = cell_values(one, cell), cell_values(other, cell)
+    if left is None or right is None:
         return None
-    return alike(one, other)
+    return alike(left, right)
 
 
 def alike(one: CellValues, other: CellValues) -> float:
-    """How alike two lines' texts for a cell are, as pairing grades them: the
-    closest any two of them come once normalized, so a line that lists
-    several texts is as alike as its best one. The floor procedure grades
-    its pairs with this too."""
-    return max(
-        similarity(normalize_text(left), normalize_text(right))
-        for left in one.texts
-        for right in other.texts
+    """How alike two lines' texts for a cell are, as pairing grades them, once
+    normalized. The floor procedure grades its pairs with this too."""
+    return _best(
+        [normalize_text(text) for text in one.texts],
+        [normalize_text(text) for text in other.texts],
+        similarity,
     )
 
 
-def _agree(one: FieldValues, other: FieldValues, cell: Cell) -> bool:
+def _agree(one: FieldValues, other: FieldValues, cell: LineCell) -> bool:
     """Whether both carry the cell and share a normalized value."""
     left, right = cell_values(one, cell), cell_values(other, cell)
     if left is None or right is None:
@@ -663,20 +685,17 @@ def _agree(one: FieldValues, other: FieldValues, cell: Cell) -> bool:
     )
 
 
-def _close(one: FieldValues, other: FieldValues, cell: Cell) -> int:
-    """How close the two lines come on the cell, in thousandths: the closest
-    any two of their values come, as `alike` takes the closest two texts, so a
-    line that lists several is as close as its best one. A cell one side lacks,
-    or whose texts the normalizer reads as no number, is no closeness at all."""
+def _close(one: FieldValues, other: FieldValues, cell: LineCell) -> int:
+    """How close the two lines come on the cell, in thousandths, as `alike`
+    grades texts. A cell one side lacks, or whose texts the normalizer reads
+    as no number, is no closeness at all."""
     left, right = cell_values(one, cell), cell_values(other, cell)
     if left is None or right is None:
         return 0
     values, against = _numbers(left.texts), _numbers(right.texts)
     if not values or not against:
         return 0
-    return max(
-        _smaller_over_larger(value, each) for value in values for each in against
-    )
+    return _best(values, against, _smaller_over_larger)
 
 
 def _smaller_over_larger(one: Decimal, other: Decimal) -> int:
@@ -716,7 +735,6 @@ def _unit_variant(
         cell="unit",
         invoice=billed.texts,
         purchase_order=ordered.texts,
-        margin=Decimal(0),
         tolerance=UNIT,
     )
 
@@ -740,7 +758,9 @@ def _price_variance(
     when nothing is comparable."""
     place = Place("po line", pairing.po_line)
     for cell in PRICE_CELLS:
-        compared = _comparable(place, cell, (invoice, po), not_compared)
+        compared = _comparable(
+            place, cell, (read_cell(invoice, cell), read_cell(po, cell)), not_compared
+        )
         if compared is not None:
             return _overbilled("price variance", place, cell, PRICE, *compared)
     return None
@@ -751,7 +771,9 @@ def _tax_mismatch(
 ) -> Finding | None:
     """Overbilled on the header's total tax; None when clean or not comparable."""
     place = Place("header")
-    compared = _comparable(place, "tax", (invoice, po), not_compared)
+    compared = _comparable(
+        place, "tax", (read_cell(invoice, "tax"), read_cell(po, "tax")), not_compared
+    )
     if compared is None:
         return None
     return _overbilled("tax mismatch", place, "tax", TAX, *compared)
@@ -795,9 +817,12 @@ def _quantity_findings(
     if received is None:
         return []
     place = Place("po line", pairing.po_line)
-    compared = _comparable(place, "quantity", (invoice, received), not_compared)
+    billed = read_cell(invoice, "quantity")
+    shipped = read_cell(received, "quantity")
+    ordered = read_cell(po, "quantity")
+    compared = _comparable(place, "quantity", (billed, shipped), not_compared)
     if compared is None:
-        _po_quantity_not_compared(place, invoice, po, received, not_compared)
+        _po_quantity_not_compared(place, ordered, (billed, shipped), not_compared)
         return []
     invoice_cell, receipt_cell = compared
 
@@ -807,7 +832,7 @@ def _quantity_findings(
             place=place,
             cell="quantity",
             invoice=invoice_cell.texts,
-            purchase_order=() if against is receipt_cell else against.texts,
+            purchase_order=() if type_ in AGAINST_RECEIPT else against.texts,
             receipt=receipt_cell.texts,
             margin=QUANTITY.margin(min(against.numbers)),
             tolerance=QUANTITY,
@@ -816,39 +841,39 @@ def _quantity_findings(
     findings: list[Finding] = []
     if _above(invoice_cell, receipt_cell, QUANTITY):
         findings.append(found("short-ship", receipt_cell))
-    po_cell = read_cell(po, "quantity")
-    if po_cell is None:
-        for carried in (invoice_cell, receipt_cell):
-            not_compared.append(NotCompared(place, "quantity", carried.texts, "absent"))
-    elif po_cell.numbers is None:
-        not_compared.append(NotCompared(place, "quantity", po_cell.texts, "unreadable"))
-    else:
-        ordered = _Readable(po_cell.texts, po_cell.numbers)
-        if _above(invoice_cell, ordered, QUANTITY) and _above(
-            receipt_cell, ordered, QUANTITY
+    against_order = _comparable(
+        place, "quantity", (billed, shipped, ordered), not_compared
+    )
+    if against_order is not None:
+        *_, ordered_cell = against_order
+        if _above(invoice_cell, ordered_cell, QUANTITY) and _above(
+            receipt_cell, ordered_cell, QUANTITY
         ):
-            findings.append(found("over-ship", ordered))
+            findings.append(found("over-ship", ordered_cell))
     return findings
 
 
 def _po_quantity_not_compared(
     place: Place,
-    invoice: FieldValues,
-    po: FieldValues,
-    received: FieldValues,
+    ordered: ReadCell | None,
+    partners: Sequence[ReadCell | None],
     not_compared: list[NotCompared],
 ) -> None:
-    """List the purchase order's quantity when the over-ship could not reach
-    it, the way `_comparable` lists a side: absent when the invoice or the
-    receipt lacks one, unreadable when only its own text is at fault."""
-    po_cell = read_cell(po, "quantity")
-    if po_cell is None:
+    """List the purchase order's quantity when the short-ship's own comparison
+    failed, so the over-ship never reached it.
+
+    The reason is the one `_comparable` would have given it: absent when a
+    partner it would have been compared against is missing, whatever its own
+    text says, else unreadable when only that text is at fault. Nothing is
+    listed when the purchase order carries no quantity, or when it is readable
+    and only a partner's text failed, since neither is a comparison it missed.
+    """
+    if ordered is None:
         return
-    partners = (read_cell(invoice, "quantity"), read_cell(received, "quantity"))
-    if None in partners:
-        not_compared.append(NotCompared(place, "quantity", po_cell.texts, "absent"))
-    elif po_cell.numbers is None:
-        not_compared.append(NotCompared(place, "quantity", po_cell.texts, "unreadable"))
+    if any(each is None for each in partners):
+        not_compared.append(NotCompared(place, "quantity", ordered.texts, "absent"))
+    elif ordered.numbers is None:
+        not_compared.append(NotCompared(place, "quantity", ordered.texts, "unreadable"))
 
 
 @dataclass(frozen=True)
@@ -870,15 +895,13 @@ def _above(side: _Readable, against: _Readable, tolerance: Tolerance) -> bool:
 def _comparable(
     place: Place,
     cell: Cell,
-    sides: Sequence[FieldValues],
+    cells: Sequence[ReadCell | None],
     not_compared: list[NotCompared],
 ) -> tuple[_Readable, ...] | None:
-    """Every side's cell read as numbers, in the order given, or None with
-    the reason listed: absent as `_carried` lists it, else each side the
+    """Every side's cell as numbers, in the order given, or None with the
+    reason listed: absent as `_carried` lists it, else each side the
     normalizer cannot read in full as unreadable."""
-    carried = _carried(
-        place, cell, [read_cell(side, cell) for side in sides], not_compared
-    )
+    carried = _carried(place, cell, cells, not_compared)
     if carried is None:
         return None
     readable: list[_Readable] = []

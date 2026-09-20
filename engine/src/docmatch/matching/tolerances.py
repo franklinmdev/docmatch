@@ -58,6 +58,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
 
+from docmatch.matching.records import LineCell
+
 
 @dataclass(frozen=True)
 class Tolerance:
@@ -67,6 +69,15 @@ class Tolerance:
     """Of the purchase order's value."""
     cent: Decimal
     """The overage must clear this too, whatever the percent comes to."""
+
+    @classmethod
+    def exactly(cls) -> "Tolerance":
+        """A cell nothing may go over: no percent and no cent, so any
+        difference at all is over and the margin is always zero. That is how
+        a cell compared exactly is written, whether it holds a number, as a
+        quantity does, or a text with no conversion behind it, as a unit of
+        measure does."""
+        return cls(percent=Decimal(0), cent=Decimal(0))
 
     @property
     def exact(self) -> bool:
@@ -86,18 +97,17 @@ class Tolerance:
 PRICE = Tolerance(percent=Decimal("0.01"), cent=Decimal("0.01"))
 """On a line's unit price, else its amount."""
 
-QUANTITY = Tolerance(percent=Decimal(0), cent=Decimal(0))
-"""On a line's quantity, against the receipt and the purchase order: exact,
-so any overage at all is over."""
+QUANTITY = Tolerance.exactly()
+"""On a line's quantity, against the receipt and the purchase order."""
 
 TAX = Tolerance(percent=Decimal("0.01"), cent=Decimal("0.01"))
 """On the header's total tax: the same shape as price, a constant of its own so
 a finding names which one it applied (#65, #70)."""
 
-UNIT = Tolerance(percent=Decimal(0), cent=Decimal(0))
-"""On a line's unit of measure, compared as text after the text normalization:
-exact, since there is no conversion table to say two units agree (#65). A
-constant of its own, like tax, so a finding names which one it applied."""
+UNIT = Tolerance.exactly()
+"""On a line's unit of measure, compared as text after the text normalization,
+since there is no conversion table to say two units agree (#65). A constant of
+its own, like tax, so a finding names which one it applied."""
 
 NEAR_PERCENT = Decimal("0.02")
 """An overage past the tolerance and at most this share of the PO value is near."""
@@ -151,5 +161,6 @@ def quantity_band(invoice_value: Decimal, lowered_value: Decimal) -> Band | None
     return None
 
 
-CODE_FLOOR = 0.5
-DESCRIPTION_FLOOR = 0.4
+FLOORS: dict[LineCell, float] = {"code": 0.5, "description": 0.4}
+"""Each identity cell's pairing floor, in one map: the matcher applies it and
+`floors` reports it beside the value its procedure measures."""

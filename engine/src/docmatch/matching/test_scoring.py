@@ -24,7 +24,6 @@ from docmatch.matching.scoring import (
     FloorCost,
     Table,
     TypeScore,
-    floor_cost,
     score,
     score_read,
 )
@@ -34,7 +33,7 @@ EMPTY = Record(header={}, lines=())
 
 
 def case(*truth: Injected) -> Case:
-    return Case("made-up", EMPTY, EMPTY, ReceivingRecord(()), truth)
+    return Case("made-up", EMPTY, EMPTY, ReceivingRecord(()), truth, ())
 
 
 def injected(line: int) -> Injected:
@@ -176,7 +175,9 @@ def received(po: Record) -> ReceivingRecord:
 
 
 def a_case(invoice: Record, po: Record, *truth: Injected) -> Case:
-    return Case("made-up", invoice, po, received(po), truth)
+    """A case whose key names no invoice line, so nothing it pairs is counted
+    as crossed; `keyed` writes one where a test reads the crossings."""
+    return Case("made-up", invoice, po, received(po), truth, (None,) * len(po.lines))
 
 
 def rows(table: Table) -> dict[str, TypeScore]:
@@ -193,9 +194,9 @@ def test_an_extra_line_on_a_reading_is_placed_on_the_labeled_line_it_reads() -> 
         Injected("extra line", Place("invoice line", 2), None),
     )
 
-    table = score_read([extra], {"made-up": labeled(WRENCH, GLOVES)})
+    scored = score_read([extra], {"made-up": labeled(WRENCH, GLOVES)})
 
-    found = rows(table)
+    found = rows(scored.table)
     assert (found["extra line"].hits, found["extra line"].false_alarms) == (1, 0)
     # The dropped row leaves its purchase-order line unpaired: a false alarm.
     assert found["missing line"].false_alarms == 1
@@ -211,9 +212,9 @@ def test_a_reading_line_no_labeled_line_answers_is_a_false_alarm() -> None:
     )
     made_up = line("Delivery", "2", "0.00")
 
-    table = score_read([extra], {"made-up": labeled(HEX_KEYS, made_up)})
+    scored = score_read([extra], {"made-up": labeled(HEX_KEYS, made_up)})
 
-    found = rows(table)
+    found = rows(scored.table)
     assert (found["extra line"].hits, found["extra line"].misses) == (0, 1)
     assert found["extra line"].false_alarms == 1
 
@@ -227,12 +228,12 @@ def test_a_document_with_no_reading_is_an_invoice_with_no_lines() -> None:
         Injected("short-ship", Place("po line", 0), "near"),
     )
 
-    table = score_read([short, a_case(labeled(HEX_KEYS, WRENCH), po)], {})
+    scored = score_read([short, a_case(labeled(HEX_KEYS, WRENCH), po)], {})
 
-    found = rows(table)
+    found = rows(scored.table)
     assert found["short-ship"].misses == 1
     assert found["missing line"].false_alarms == 4
-    assert table.clean_false_positives == 1
+    assert scored.table.clean_false_positives == 1
 
 
 def test_the_floor_costs_the_misread_lines_it_leaves_unpaired() -> None:
@@ -244,9 +245,11 @@ def test_the_floor_costs_the_misread_lines_it_leaves_unpaired() -> None:
     garbled = line("Spanner", "1", "317.50")
     made_up = line("Delivery", "1", "0.00")
 
-    cost = floor_cost([clean, clean], {"made-up": labeled(HEX_KEYS, garbled, made_up)})
+    reading = labeled(HEX_KEYS, garbled, made_up)
 
-    assert cost == FloorCost(read=2, unpaired=1)
+    scored = score_read([clean, clean], {"made-up": reading})
+
+    assert scored.floor_cost == FloorCost(paired=2, unpaired=1)
 
 
 # The diagnostic table
@@ -322,17 +325,13 @@ def test_a_po_line_the_key_names_no_invoice_line_for_is_not_counted() -> None:
     assert table.crossed_pairs == CrossedPairs(keyed=2, crossed=0, alike=0)
 
 
-def test_a_case_with_no_pairing_key_counts_no_pair() -> None:
-    assert score([case()], [paired((0, 0))]).crossed_pairs == CrossedPairs(0, 0, 0)
-
-
 def test_a_reading_is_counted_against_the_key_at_the_labeled_line_it_reads() -> None:
     """The reading drops the first labeled line, so every later row sits one
     position early; the pairing is scored at the labeled line the line-item
     metric's assignment pairs it with, as an extra line's place is (#102)."""
-    table = score_read([keyed(THREE, 0, 1, 2)], {"made-up": labeled(WRENCH, GLOVES)})
+    scored = score_read([keyed(THREE, 0, 1, 2)], {"made-up": labeled(WRENCH, GLOVES)})
 
-    assert table.crossed_pairs == CrossedPairs(keyed=2, crossed=0, alike=0)
+    assert scored.table.crossed_pairs == CrossedPairs(keyed=2, crossed=0, alike=0)
 
 
 def test_recall_splits_into_near_the_edge_and_far_past_it() -> None:

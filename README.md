@@ -67,8 +67,8 @@ Measurement before modeling.
 
 ### Phase 2. Matching
 
-- Generator that derives purchase orders and receiving records from the labeled invoices and injects labeled discrepancies: price variance, quantity short-ship and over-ship, missing line, extra line, unit-of-measure variant, tax mismatch. Clean cases carry rounding drift inside the tolerance, which must not fire. Duplicate invoice detection is a separate control and stays out of this phase.
-- Rules engine with tolerances written as constants in code, so a tolerance change is a commit that reruns `docmatch match`, and a discrepancy taxonomy with severities.
+- Generator that derives purchase orders and receiving records from the labeled invoices and injects labeled discrepancies: price variance, quantity short-ship and over-ship, missing line, extra line, unit variant, tax mismatch. Clean cases carry rounding drift inside the tolerance, which must not fire. Duplicate invoice detection is a separate control and stays out of this phase.
+- Rules engine with tolerances written as constants in code, and a discrepancy taxonomy with severities.
 - Explainable results: which rule fired, on which numbers, with the tolerance applied.
 
 **The number:** discrepancy detection precision and recall per type, and the false-positive rate on clean cases. An end-to-end row, image to match result, showing compound error.
@@ -372,18 +372,18 @@ findings of a type, and documents is how many seeds could carry it.
 
 | Discrepancy type | Precision | Recall | n | Documents | Commit |
 |---|---|---|---|---|---|
-| price variance | 0.984 | 0.991 | 1,165 | 4,956 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| short-ship | 0.978 | 0.998 | 819 | 2,500 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| over-ship | 0.998 | 0.989 | 811 | 2,463 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| extra line | 0.977 | 0.977 | 1,089 | 4,750 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| missing line | 1.000 | 1.000 | 1,930 | 5,325 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| unit-of-measure variant | 0.990 | 1.000 | 576 | 334 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| tax mismatch | 1.000 | 1.000 | 546 | 253 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
+| price variance | 0.984 | 0.991 | 1,165 | 4,956 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| short-ship | 0.978 | 0.998 | 819 | 2,500 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| over-ship | 0.998 | 0.989 | 811 | 2,463 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| extra line | 0.977 | 0.977 | 1,089 | 4,750 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| missing line | 1.000 | 1.000 | 1,930 | 5,325 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| unit variant | 0.990 | 1.000 | 576 | 334 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| tax mismatch | 1.000 | 1.000 | 546 | 253 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
 
 **Clean-case false-positive rate: 0.007**, 7 of 1,000 clean cases that draw a
 finding. The seed pool is 5,180 train and 500 val documents, 38,678
 lines, and the 355 documents with no labeled line seed nothing. Produced at
-[`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) by
+[`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) by
 
 ```bash
 uv run docmatch match --run data/runs/gemini --run data/runs/azure --run data/runs/openai
@@ -391,22 +391,23 @@ uv run docmatch match --run data/runs/gemini --run data/runs/azure --run data/ru
 
 which prints this table, the diagnostic table, the labels control and the
 three end-to-end rows below in one report; without `--run` it prints all but
-the end-to-end rows. The command builds every case from the labels on one seed
-pinned in code, so rerunning it at that commit reproduces this table; the
-end-to-end rows also need the saved runs the extraction rows produced.
-The pairing floors, 0.5 on codes and 0.4 on descriptions, are the values the
-floor procedure measures on train over 10,000 cross-document pairs each.
+the end-to-end rows. What it builds, and from what, is under
+[Matching](#matching); every case is rebuilt from one pinned seed, so
+rerunning the command at that commit reproduces this table, and the end-to-end
+rows also need the saved runs the extraction rows produced. The pairing
+floors, 0.5 on codes and 0.4 on descriptions, are the values the floor
+procedure measures on train over 10,000 cross-document pairs each.
 
 | Hard negative on a clean line | Placed | False alarms |
 |---|---|---|
 | rounding drift, one cent | 5,746 | 8 |
 | just inside, 90 to 100 percent of the margin | 5,255 | 5 |
-| billed below the PO or the receipt | 5,972 | 34 |
-| on no hard negative | | 23 |
+| billed below the purchase order or the receiving record | 5,972 | 34 |
 
-Beside them the same report counts the lines paired with a partner other than
-the one the generator's pairing key names: **6,860 of 29,009** keyed pairs,
-**6,503** of them between two invoice lines alike on every cell pairing reads.
+Beside the table the same report counts **23** more false alarms on no hard
+negative, and the lines paired with a partner other than the one the
+generator's pairing key names: **6,860 of 29,009** keyed pairs, **6,503** of
+them between two invoice lines alike on every cell pairing reads.
 
 | Discrepancy type | Near recall | n | Far recall | n |
 |---|---|---|---|---|
@@ -435,35 +436,30 @@ differently.
 What is left is pairing, and the row splits it. Of the 6,860 crossed pairs,
 6,503 are between two invoice lines alike on every cell pairing reads, where
 the matcher has nothing to choose by and either answer is as good. That share
-is a coin toss and moves with the weights, which is why the total sits above
-the 5,498 the old tiebreak crossed on the same cases, 4,948 of them alike. So
-the pairs something could have separated fell from 550 to 357, and those are
-what a tiebreak is for. The old rule's two counts come from a probe on #102,
-which is also where the 357 are enumerated by cause; the row did not exist
-before this commit.
+is a coin toss and moves with the weights, so what a tiebreak can reach is the
+other **357**. The comment on #102 holds what the old rule crossed on the same
+cases, and enumerates the 357 by cause; the row did not exist before this
+commit.
 
 ### Matching, end to end
 
 The same matcher over cases built from the fixed subset's labels, with each
-backend's saved reading of the document swapped in as the invoice. Truth is
-still the generator's, so a finding a misread value causes is a false alarm
-and a discrepancy the reading hides is a miss. **Every row rests on 93
+backend's saved reading of the document swapped in as the invoice, which
+[Matching](#matching) describes, truth and all. **Every row rests on 93
 documents**, the fixed subset's documents with labeled lines; the other 7 seed
 nothing. The labels control is the same cases with the labels as the invoice.
 
-| Invoice | Precision | Recall | Clean-case false-positive rate | Left below a floor | Commit |
+| Invoice | Precision | Recall | Clean-case false-positive rate | Floor cost | Commit |
 |---|---|---|---|---|---|
-| labels control | 1.000 | 0.999 | 0.000 | | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
-| `gemini-3.1-flash-lite` reading | 0.520 | 0.806 | 0.453 | 11 of 297 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846), run at [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
-| Azure `prebuilt-invoice` reading | 0.540 | 0.814 | 0.506 | 9 of 306 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846), run at [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
-| `gpt-5.6-luna` reading | 0.504 | 0.833 | 0.366 | 18 of 312 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846), run at [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) |
+| labels control | 1.000 | 0.999 | 0.000 | | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| `gemini-3.1-flash-lite` reading | 0.520 | 0.806 | 0.453 | 11 of 297 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a), run at [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
+| Azure `prebuilt-invoice` reading | 0.540 | 0.814 | 0.506 | 9 of 306 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a), run at [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
+| `gpt-5.6-luna` reading | 0.504 | 0.833 | 0.366 | 18 of 312 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a), run at [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) |
 
 Precision and recall are over all findings of every type, the clean-case rate
 over 1,000 clean cases, each run from the extraction command in its own row
-above. Left below a floor is the floor's cost on that run: of its reading
-lines the line-item metric pairs with a labeled line, how many pairing left
-unpaired because they fell below a pairing floor, over one clean case per
-document. It is reported and not tuned against.
+above. Floor cost is what the pairing floor cost that run, defined under
+[Matching](#matching); it is reported and never tuned against.
 
 The control's gap to 1.0 is the matcher's, and a backend's gap to the control
 is what extraction costs. On every backend that cost is 0.46 to 0.50 of
@@ -494,7 +490,7 @@ negatives and misread lines, so no pivot discussion opens.
 |---|---|---|---|---|
 | | | | | |
 
-### End to end
+### Pipeline, end to end
 
 | Stage | p95 latency | Cost / doc | Review rate | Commit |
 |---|---|---|---|---|
@@ -729,8 +725,9 @@ refused. Each row prints precision and recall over all findings, the
 clean-case false-positive rate and the per-type table, with unit variant and
 tax mismatch marked indicative since only a few fixed-subset documents carry
 them. Beside the floors, each run's floor cost: of its reading lines the
-line-item metric pairs with a labeled line, how many pairing left unpaired
-below a floor, over one clean case per document. CI runs the command with
+line-item metric pairs with a labeled line, how many the matcher's own pairing
+left without a partner because they fell below a pairing floor, over one clean
+case per document. CI runs the command with
 `--run` on the same synthetic corpus as the eval, at the real sizes.
 
 ### The baseline run

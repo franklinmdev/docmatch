@@ -148,7 +148,7 @@ def test_price_variance_falls_to_the_amount_when_a_unit_price_is_unreadable() ->
     )
 
     assert [each.cell for each in compared(result)] == ["amount"]
-    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+    assert [(each.cell, each.texts, each.reason) for each in result.not_compared] == [
         ("unit price", ("n/a",), "unreadable")
     ]
 
@@ -268,7 +268,7 @@ def test_a_tax_one_side_lacks_is_listed_on_the_header_as_absent() -> None:
 
     assert result.findings == ()
     assert [
-        (each.place, each.cell, each.text, each.reason) for each in result.not_compared
+        (each.place, each.cell, each.texts, each.reason) for each in result.not_compared
     ] == [(Place("header"), "tax", ("35.66",), "absent")]
 
 
@@ -658,7 +658,9 @@ def test_a_pair_below_the_floor_is_left_unpaired_with_its_best_candidate() -> No
     assert unpaired.candidate.code is None
     assert unpaired.candidate.description == pytest.approx(1 - 10 / 13)
     assert unpaired.candidate.reason == "below the floor"
-    assert [each.line for each in result.unpaired_po] == [0]
+    assert [each.place for each in result.findings if each.type == "missing line"] == [
+        Place("po line", 0)
+    ]
 
 
 def test_a_candidate_taken_by_another_line_is_the_reason_a_line_is_unpaired() -> None:
@@ -849,7 +851,7 @@ def test_a_quantity_the_receipt_lacks_is_not_compared() -> None:
     result = shipped("12", "10", ())
 
     assert result.findings == ()
-    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+    assert [(each.cell, each.texts, each.reason) for each in result.not_compared] == [
         ("quantity", ("12",), "absent"),
         ("quantity", ("10",), "absent"),
     ]
@@ -859,7 +861,7 @@ def test_a_short_ship_needs_no_po_quantity_and_the_over_ship_is_not_compared() -
     result = shipped("12", (), "10")
 
     assert [each.type for each in result.findings] == ["short-ship"]
-    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+    assert [(each.cell, each.texts, each.reason) for each in result.not_compared] == [
         ("quantity", ("12",), "absent"),
         ("quantity", ("10",), "absent"),
     ]
@@ -870,7 +872,7 @@ def test_a_po_quantity_left_without_its_partners_is_listed_absent() -> None:
     one to compare it with."""
     result = shipped((), "5", ())
 
-    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+    assert [(each.cell, each.texts, each.reason) for each in result.not_compared] == [
         ("quantity", ("5",), "absent")
     ]
 
@@ -878,7 +880,7 @@ def test_a_po_quantity_left_without_its_partners_is_listed_absent() -> None:
 def test_every_quantity_an_invoice_without_one_leaves_is_listed_absent() -> None:
     result = shipped((), "5", "5")
 
-    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+    assert [(each.cell, each.texts, each.reason) for each in result.not_compared] == [
         ("quantity", ("5",), "absent"),
         ("quantity", ("5",), "absent"),
     ]
@@ -888,7 +890,7 @@ def test_an_unreadable_po_quantity_leaves_the_short_ship_compared() -> None:
     result = shipped("12", "ten", "10")
 
     assert [each.type for each in result.findings] == ["short-ship"]
-    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+    assert [(each.cell, each.texts, each.reason) for each in result.not_compared] == [
         ("quantity", ("ten",), "unreadable")
     ]
 
@@ -897,7 +899,7 @@ def test_an_unreadable_quantity_is_not_compared() -> None:
     result = shipped("twelve", "10", "12")
 
     assert result.findings == ()
-    assert [(each.cell, each.text, each.reason) for each in result.not_compared] == [
+    assert [(each.cell, each.texts, each.reason) for each in result.not_compared] == [
         ("quantity", ("twelve",), "unreadable")
     ]
 
@@ -992,8 +994,8 @@ def test_every_unpaired_line_is_a_finding_and_names_its_candidate() -> None:
     ]
     extra, missing = result.findings
     assert isinstance(extra, UnpairedFinding) and isinstance(missing, UnpairedFinding)
+    assert extra.candidate is not None and missing.candidate is not None
     assert result.unpaired_invoice == (Unpaired(line=0, candidate=extra.candidate),)
-    assert result.unpaired_po == (Unpaired(line=0, candidate=missing.candidate),)
 
 
 def test_an_extra_line_leaves_a_price_variance_on_its_own_po_line() -> None:

@@ -137,10 +137,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal, get_args
 
 from docmatch.matching.matcher import (
-    IDENTITY_CELLS,
     PAIRING_CELLS,
     DiscrepancyType,
     Place,
+    named,
     pairable,
     pairing_cells,
 )
@@ -148,6 +148,7 @@ from docmatch.matching.records import (
     CELL_FIELDTYPES,
     PRICE_CELLS,
     Cell,
+    LineCell,
     ReceiptLine,
     ReceivingRecord,
     Record,
@@ -181,18 +182,6 @@ FINDINGS_PER_TYPE = 500
 MOST_PER_CASE = 3
 """The most discrepancies one case carries: each draws one up to this (#66)."""
 
-INJECTED_TYPES: tuple[DiscrepancyType, ...] = (
-    "price variance",
-    "extra line",
-    "missing line",
-    "short-ship",
-    "over-ship",
-    "tax mismatch",
-    "unit variant",
-)
-"""The types the generator injects, in the order their cases are built. A new
-type goes last, so the cases every other type draws stay the same."""
-
 BANDED_TYPES: tuple[DiscrepancyType, ...] = (
     "price variance",
     "short-ship",
@@ -206,7 +195,7 @@ HardNegativeKind = Literal["rounding drift", "just inside", "billed below"]
 HARD_NEGATIVE_KINDS: tuple[HardNegativeKind, ...] = get_args(HardNegativeKind)
 """Every kind of hard negative, in the order a report lists them (#66)."""
 
-RECEIPT_CELLS: tuple[Cell, ...] = ("quantity", "unit", "code", "description")
+RECEIPT_CELLS: tuple[LineCell, ...] = ("quantity", "unit", "code", "description")
 """What a receiving record copies from a purchase-order line: never prices."""
 
 QUANTITY_FIELDTYPE = CELL_FIELDTYPES["quantity"][0]
@@ -273,20 +262,19 @@ class Case:
     purchase_order: Record
     receipt: ReceivingRecord
     truth: tuple[Injected, ...]
-    hard_negatives: tuple[HardNegative, ...] = ()
-    pairing_key: tuple[int | None, ...] = ()
+    pairing_key: tuple[int | None, ...]
     """Which invoice line each purchase-order line answers, one entry per
     purchase-order line, in order. Written here and read only by the scorer,
     never by the matcher, so pairing stays the matcher's own job and a wrong
     partner is counted rather than hidden. It is partial: a line a missing
     line added answers a line of another seed and reads None, and an invoice
-    line an extra line removed is named by no entry (#102). Empty is a case
-    built without one, which the scorer counts no pair for; any other length
+    line an extra line removed is named by no entry (#102). Any length other
     than the purchase order's is a case that could not be scored, so it is
     refused here rather than read as a short key."""
+    hard_negatives: tuple[HardNegative, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.pairing_key and len(self.pairing_key) != len(self.purchase_order.lines):
+        if len(self.pairing_key) != len(self.purchase_order.lines):
             raise ValueError(
                 f"the pairing key names {len(self.pairing_key)} purchase-order "
                 f"lines, the record has {len(self.purchase_order.lines)}"
@@ -310,7 +298,7 @@ def generate(
     draw seeded with `seed`."""
     rng = random.Random(seed)
     pool = [each for each in seeds if each.invoice.lines]
-    cases = [_tempted(_Draft(each), rng) for each in _cycle(pool, rng, clean)]
+    cases = [_tempted(_Draft(each, rng, pool)) for each in _cycle(pool, rng, clean)]
     mixed: Counter[DiscrepancyType] = Counter()
     for type_ in INJECTED_TYPES:
         cases += _injected(pool, type_, rng, per_type, most, mixed)
@@ -323,30 +311,14 @@ def eligible(
     """The positions of the seed's lines a type can be injected on; for a
     missing line, every position the added line can go in, when another seed
     in the pool can give one; none for a header type."""
-    lines = seed.invoice.lines
-    if type_ == "extra line":
-        keys = [pairing_cells(line) for line in lines]
-        return tuple(
-            position
-            for position, key in enumerate(keys)
-            if pairable(lines[position]) and keys.count(key) == 1
-        )
-    if type_ == "missing line":
-        has_donor = any(_lines_to_give(seed, each) for each in pool)
-        return tuple(range(len(lines) + 1)) if has_donor else ()
-    line_carries = ELIGIBLE.get(type_)
-    if line_carries is None:
-        return ()
-    return tuple(position for position, line in enumerate(lines) if line_carries(line))
+    return INJECTORS[type_].positions(seed, pool)
 
 
 def carries(seed: Seed, type_: DiscrepancyType, pool: Sequence[Seed]) -> bool:
     """Whether a type can be injected on the seed at all: on its header for a
     header type, else on one of its lines."""
-    header_carries = HEADER_ELIGIBLE.get(type_)
-    if header_carries is not None:
-        return header_carries(seed.invoice.header)
-    return bool(eligible(seed, type_, pool))
+    injector = INJECTORS[type_]
+    return injector.header(seed.invoice.header) or bool(injector.positions(seed, pool))
 
 
 def documents_carrying(seeds: Sequence[Seed], type_: DiscrepancyType) -> int:
@@ -386,7 +358,7 @@ class _Slot:
 
 
 @dataclass(frozen=True)
-class _Put:
+class _Injection:
     """A discrepancy on a draft, before the finished records place it."""
 
     type: DiscrepancyType
@@ -407,15 +379,19 @@ class _Tempted:
 class _Draft:
     """A case being built from a seed: its purchase-order lines, its header,
     and what was put on them, placed only once every line has been removed
-    or added."""
+    or added. It carries the stream every injection draws from and the pool a
+    donor line comes from, so an injector takes the draft and the band it is
+    drawing for and nothing else."""
 
-    def __init__(self, seed: Seed) -> None:
+    def __init__(self, seed: Seed, rng: random.Random, pool: Sequence[Seed]) -> None:
         self.seed = seed
+        self.rng = rng
+        self.pool = pool
         self.slots = [
             _Slot(line, position) for position, line in enumerate(seed.invoice.lines)
         ]
         self.header = _one_tax(seed.invoice.header)
-        self.injected: list[_Put] = []
+        self.injected: list[_Injection] = []
         self.negatives: list[_Tempted] = []
 
     def copied(self, position: int) -> _Slot:
@@ -427,11 +403,6 @@ class _Draft:
         taken = {each.slot.invoice_line for each in self.injected if each.slot}
         every = range(len(self.seed.invoice.lines)) if positions is None else positions
         return [each for each in every if each not in taken]
-
-    def inject(
-        self, type_: DiscrepancyType, slot: _Slot | None, wanted: Band | None
-    ) -> None:
-        self.injected.append(_Put(type_, slot, wanted))
 
     @property
     def taxed(self) -> bool:
@@ -446,12 +417,12 @@ class _Draft:
         def po_line(slot: _Slot) -> Place:
             return Place("po line", at[id(slot)])
 
-        def place(put: _Put) -> Place:
-            if put.slot is None:
+        def place(injection: _Injection) -> Place:
+            if injection.slot is None:
                 return Place("header")
-            if put.type == "extra line":
-                return Place("invoice line", put.slot.invoice_line)
-            return po_line(put.slot)
+            if injection.type == "extra line":
+                return Place("invoice line", injection.slot.invoice_line)
+            return po_line(injection.slot)
 
         return Case(
             document_id=self.seed.document_id,
@@ -517,10 +488,10 @@ def _injected(
             if len(cases) == count:
                 break
             wanted: Band = "near" if len(cases) % 2 == 0 else "far"
-            draft = _Draft(seed)
-            if INJECT[type_](draft, wanted, rng, pool):
-                _mix(draft, rng.randint(1, most) - 1, rng, pool, mixed)
-                cases.append(_tempted(draft, rng))
+            draft = _Draft(seed, rng, pool)
+            if INJECTORS[type_].inject(draft, wanted):
+                _mix(draft, rng.randint(1, most) - 1, mixed)
+                cases.append(_tempted(draft))
                 built += 1
         if not built:
             raise GeneratorError(
@@ -529,21 +500,15 @@ def _injected(
     return cases
 
 
-def _mix(
-    draft: _Draft,
-    more: int,
-    rng: random.Random,
-    pool: Sequence[Seed],
-    mixed: Counter[DiscrepancyType],
-) -> None:
+def _mix(draft: _Draft, more: int, mixed: Counter[DiscrepancyType]) -> None:
     """Up to `more` discrepancies drawn from every type onto what the draft
     has left. Each type's mixed-in findings alternate near and far on their
     own count, so the bands stay half and half whatever the case began with."""
     types = list(INJECTED_TYPES)
     while more and types:
-        type_ = rng.choice(types)
+        type_ = draft.rng.choice(types)
         wanted: Band = "near" if mixed[type_] % 2 == 0 else "far"
-        if INJECT[type_](draft, wanted, rng, pool):
+        if INJECTORS[type_].inject(draft, wanted):
             mixed[type_] += 1
             more -= 1
         else:
@@ -553,60 +518,54 @@ def _mix(
 # Injection
 
 
-def _price_variance(
-    draft: _Draft, wanted: Band, rng: random.Random, pool: Sequence[Seed]
-) -> bool:
+def _price_variance(draft: _Draft, wanted: Band) -> bool:
     """One free purchase-order line's price lowered into the band, or False
     when no line of it can be."""
     lines = [
         (position, priced)
-        for position in draft.free(eligible(draft.seed, "price variance", pool))
+        for position in draft.free(eligible(draft.seed, "price variance", draft.pool))
         if (priced := _priced(draft.seed.invoice.lines[position])) is not None
     ]
-    rng.shuffle(lines)
+    draft.rng.shuffle(lines)
     for position, priced in lines:
-        lowered = _lowered(PRICE, priced.value, wanted, rng)
+        lowered = _lowered(PRICE, priced.value, wanted, draft.rng)
         if lowered is None:
             continue
         slot = draft.copied(position)
         slot.cells = {**slot.cells, priced.fieldtype: (lowered,)}
-        draft.inject("price variance", slot, wanted)
+        draft.injected.append(_Injection("price variance", slot, wanted))
         return True
     return False
 
 
-def _extra_line(
-    draft: _Draft, wanted: Band, rng: random.Random, pool: Sequence[Seed]
-) -> bool:
+def _extra_line(draft: _Draft, wanted: Band) -> bool:
     """One free line left off the purchase order and the receipt."""
-    positions = draft.free(eligible(draft.seed, "extra line", pool))
+    positions = draft.free(eligible(draft.seed, "extra line", draft.pool))
     if not positions:
         return False
-    slot = draft.copied(rng.choice(positions))
+    slot = draft.copied(draft.rng.choice(positions))
     slot.removed = True
-    draft.inject("extra line", slot, None)
+    draft.injected.append(_Injection("extra line", slot, None))
     return True
 
 
-def _missing_line(
-    draft: _Draft, wanted: Band, rng: random.Random, pool: Sequence[Seed]
-) -> bool:
+def _missing_line(draft: _Draft, wanted: Band) -> bool:
     """A line from another seed added to the purchase order, at a random
     position, unlike every line already on it."""
     taken = {pairing_cells(each.cells) for each in draft.slots}
     for _ in range(DRAWS):
         given = [
             each
-            for each in _lines_to_give(draft.seed, rng.choice(pool))
+            for each in _lines_to_give(draft.seed, draft.rng.choice(draft.pool))
             if pairing_cells(each) not in taken
         ]
         if given:
             break
     else:
         return False
-    slot = _Slot(rng.choice(given), None)
-    draft.slots.insert(rng.randint(0, len(draft.slots)), slot)
-    draft.inject("missing line", slot, None)
+    slot = _Slot(draft.rng.choice(given), None)
+    draft.slots.insert(draft.rng.randint(0, len(draft.slots)), slot)
+    draft.injected.append(_Injection("missing line", slot, None))
     return True
 
 
@@ -620,14 +579,8 @@ def _lines_to_give(seed: Seed, donor: Seed) -> list[FieldValues]:
     return [
         line
         for line in donor.invoice.lines
-        if _named(line) and pairing_cells(line) not in seed_keys
+        if named(line) and pairing_cells(line) not in seed_keys
     ]
-
-
-def _named(line: FieldValues) -> bool:
-    """Whether the line carries a code or a description, the cells the
-    pairing floor was set on."""
-    return any(cell_values(line, cell) is not None for cell in IDENTITY_CELLS)
 
 
 def _still_pairs(line: FieldValues, changed: Collection[Cell]) -> bool:
@@ -641,85 +594,80 @@ def _still_pairs(line: FieldValues, changed: Collection[Cell]) -> bool:
 
 
 @dataclass(frozen=True)
-class _Priced:
-    """The price cell the matcher compares on a line, and its highest value."""
+class _Highest:
+    """A cell read in full and the highest value it lists, which is the one
+    the matcher compares, with the text it was written as and the fieldtype it
+    sits under."""
 
     cell: Cell
     fieldtype: str
+    text: str
     value: Decimal
 
 
-def _priced(line: FieldValues) -> _Priced | None:
+def _highest(values: FieldValues, cell: Cell) -> _Highest | None:
+    """The cell's highest value on this line or header; None when it carries
+    none, or when the normalizer cannot read one of its texts, which leaves
+    nothing an injection could be drawn from."""
+    read = read_cell(values, cell)
+    if read is None or read.numbers is None:
+        return None
+    at = read.numbers.index(max(read.numbers))
+    return _Highest(cell, read.fieldtype, read.texts[at], read.numbers[at])
+
+
+def _priced(line: FieldValues) -> _Highest | None:
     """The cell a price variance or a price hard negative moves on this line,
-    and the value the matcher will compare, the highest listed: the first of
-    `PRICE_CELLS` the line carries and the normalizer reads, which is the cell
-    the matcher compares, since the purchase order copies the line. A line
-    whose readable price is not positive is not eligible: lowering it would
-    not overbill."""
+    and the value the matcher will compare: the first of `PRICE_CELLS` the
+    line carries and the normalizer reads, which is the cell the matcher
+    compares, since the purchase order copies the line. A line whose readable
+    price is not positive is not eligible: lowering it would not overbill."""
     for cell in PRICE_CELLS:
-        read = read_cell(line, cell)
-        if read is None or read.numbers is None:
+        highest = _highest(line, cell)
+        if highest is None:
             continue
-        highest = max(read.numbers)
-        return _Priced(cell, read.fieldtype, highest) if highest > 0 else None
+        return highest if highest.value > 0 else None
     return None
 
 
-def _short_ship(
-    draft: _Draft, wanted: Band, rng: random.Random, pool: Sequence[Seed]
-) -> bool:
-    """One free receipt line's quantity lowered into the band, the purchase
-    order as seeded, or False when no line of it can be."""
-    return _fewer_on_one_line(draft, "short-ship", wanted, rng, pool)
+def _fewer_on_one_line(type_: DiscrepancyType) -> "Inject":
+    """One free line's quantity lowered into the band, or False when no line
+    of it can be: a short-ship lowers the receipt's and leaves the purchase
+    order as seeded, an over-ship lowers the purchase order's and leaves the
+    line received in full."""
 
+    def inject(draft: _Draft, wanted: Band) -> bool:
+        lines = [
+            (position, quantity)
+            for position in draft.free(eligible(draft.seed, type_, draft.pool))
+            if (quantity := _quantity(draft.seed.invoice.lines[position])) is not None
+        ]
+        draft.rng.shuffle(lines)
+        for position, quantity in lines:
+            fewer = _fewer(quantity, wanted, draft.rng)
+            if fewer is None:
+                continue
+            slot = draft.copied(position)
+            slot.received = _received(slot.cells)
+            if type_ == "short-ship":
+                slot.received = {**slot.received, QUANTITY_FIELDTYPE: (fewer,)}
+            else:
+                slot.cells = {**slot.cells, QUANTITY_FIELDTYPE: (fewer,)}
+            draft.injected.append(_Injection(type_, slot, wanted))
+            return True
+        return False
 
-def _over_ship(
-    draft: _Draft, wanted: Band, rng: random.Random, pool: Sequence[Seed]
-) -> bool:
-    """One free purchase-order line's quantity lowered into the band,
-    received in full as seeded, or False when no line of it can be."""
-    return _fewer_on_one_line(draft, "over-ship", wanted, rng, pool)
-
-
-def _fewer_on_one_line(
-    draft: _Draft,
-    type_: DiscrepancyType,
-    wanted: Band,
-    rng: random.Random,
-    pool: Sequence[Seed],
-) -> bool:
-    """A short-ship lowers the receipt's quantity, an over-ship the purchase
-    order's; the other record keeps the seed's."""
-    lines = [
-        (position, quantity)
-        for position in draft.free(eligible(draft.seed, type_, pool))
-        if (quantity := _quantity(draft.seed.invoice.lines[position])) is not None
-    ]
-    rng.shuffle(lines)
-    for position, quantity in lines:
-        fewer = _fewer(quantity, wanted, rng)
-        if fewer is None:
-            continue
-        slot = draft.copied(position)
-        slot.received = _received(slot.cells)
-        if type_ == "short-ship":
-            slot.received = {**slot.received, QUANTITY_FIELDTYPE: (fewer,)}
-        else:
-            slot.cells = {**slot.cells, QUANTITY_FIELDTYPE: (fewer,)}
-        draft.inject(type_, slot, wanted)
-        return True
-    return False
+    return inject
 
 
 def _quantity(line: FieldValues) -> Decimal | None:
     """The quantity a short-ship or over-ship is lowered from, the highest
     listed, which is the one the matcher compares; None when the line
     carries none the normalizer reads, or one no lowering keeps above zero."""
-    read = read_cell(line, "quantity")
-    if read is None or read.numbers is None:
+    highest = _highest(line, "quantity")
+    if highest is None or highest.value <= NEAR_UNITS:
         return None
-    highest = max(read.numbers)
-    return highest if highest > NEAR_UNITS else None
+    return highest.value
 
 
 def _fewer(quantity: Decimal, wanted: Band, rng: random.Random) -> str | None:
@@ -735,59 +683,54 @@ def _fewer(quantity: Decimal, wanted: Band, rng: random.Random) -> str | None:
     return f"{fewer:f}" if quantity_band(quantity, fewer) == wanted else None
 
 
-def _tax_mismatch(
-    draft: _Draft, wanted: Band, rng: random.Random, pool: Sequence[Seed]
-) -> bool:
+def _tax_mismatch(draft: _Draft, wanted: Band) -> bool:
     """The purchase order's header tax lowered into the band, or False when it
     cannot be or already was."""
     taxed = _taxed(draft.seed.invoice.header)
     if taxed is None or draft.taxed:
         return False
-    fieldtype, value = taxed
-    lowered = _lowered(TAX, value, wanted, rng)
+    lowered = _lowered(TAX, taxed.value, wanted, draft.rng)
     if lowered is None:
         return False
-    draft.header = {**draft.header, fieldtype: (lowered,)}
-    draft.inject("tax mismatch", None, wanted)
+    draft.header = {**draft.header, taxed.fieldtype: (lowered,)}
+    draft.injected.append(_Injection("tax mismatch", None, wanted))
     return True
 
 
-def _unit_variant(
-    draft: _Draft, wanted: Band, rng: random.Random, pool: Sequence[Seed]
-) -> bool:
+def _unit_variant(draft: _Draft, wanted: Band) -> bool:
     """One free purchase-order line counted in another unit, its quantities
     times a whole factor and its unit prices over it, the amount as seeded,
     and received in full in that unit."""
-    positions = draft.free(eligible(draft.seed, "unit variant", pool))
+    positions = draft.free(eligible(draft.seed, "unit variant", draft.pool))
     if not positions:
         return False
-    position = rng.choice(positions)
+    position = draft.rng.choice(positions)
     line = draft.seed.invoice.lines[position]
     counts = _counts(line)
     if counts is None:
         return False
-    factor = Decimal(rng.choice(PO_UNITS_PER_INVOICE_UNIT))
+    factor = Decimal(draft.rng.choice(PO_UNITS_PER_INVOICE_UNIT))
     slot = draft.copied(position)
     slot.cells = {
         **line,
-        UNIT_FIELDTYPE: (rng.choice(_other_units(line)),),
+        UNIT_FIELDTYPE: (draft.rng.choice(_other_units(line)),),
         **{
             fieldtype: tuple(_recount(fieldtype, each, factor) for each in numbers)
             for fieldtype, numbers in counts.items()
         },
     }
-    draft.inject("unit variant", slot, None)
+    draft.injected.append(_Injection("unit variant", slot, None))
     return True
 
 
-RECOUNTED_CELLS: tuple[Cell, ...] = ("quantity", "unit price")
+RECOUNTED_CELLS: tuple[LineCell, ...] = ("quantity", "unit price")
 """What a unit variant moves on its purchase-order line."""
 
-ORDERED_CELLS: tuple[Cell, ...] = ("quantity",)
+ORDERED_CELLS: tuple[LineCell, ...] = ("quantity",)
 """What an over-ship, or a quantity billed below, moves on its line."""
 
 
-def _counted(line: FieldValues) -> bool:
+def _unit_varies(line: FieldValues) -> bool:
     """Whether a unit variant can be injected on the line: it labels a unit
     another can replace, it keeps a cell pairing reads once its counts are
     recounted, and its counts can be recounted."""
@@ -838,22 +781,17 @@ def _one_tax(header: FieldValues) -> FieldValues:
     its total, so the highest is the document's tax, and a purchase order
     copying both would fire against itself under the matcher's listed-values
     rule."""
-    read = read_cell(header, "tax")
-    if read is None or read.numbers is None:
+    highest = _highest(header, "tax")
+    if highest is None:
         return header
-    highest = read.numbers.index(max(read.numbers))
-    return {**header, read.fieldtype: (read.texts[highest],)}
+    return {**header, highest.fieldtype: (highest.text,)}
 
 
-def _taxed(header: FieldValues) -> tuple[str, Decimal] | None:
-    """The fieldtype a tax mismatch lowers, and the value the matcher will
-    compare, the highest listed; None when the header carries no readable
-    positive tax, since lowering it would not overbill."""
-    read = read_cell(header, "tax")
-    if read is None or read.numbers is None:
-        return None
-    highest = max(read.numbers)
-    return (read.fieldtype, highest) if highest > 0 else None
+def _taxed(header: FieldValues) -> _Highest | None:
+    """The header's tax as a tax mismatch lowers it; None when the header
+    carries no readable positive tax, since lowering it would not overbill."""
+    highest = _highest(header, "tax")
+    return highest if highest is not None and highest.value > 0 else None
 
 
 def _price_varies(line: FieldValues) -> bool:
@@ -869,34 +807,94 @@ def _orders_fewer(line: FieldValues) -> bool:
     return _quantity(line) is not None and _still_pairs(line, ORDERED_CELLS)
 
 
-ELIGIBLE: dict[DiscrepancyType, Callable[[FieldValues], bool]] = {
-    "price variance": _price_varies,
-    "short-ship": _ships_fewer,
-    "over-ship": _orders_fewer,
-    "unit variant": _counted,
-}
-"""Whether a line carries what a type touches, for the line types whose
-eligibility is the line's own. A short-ship moves only the receipt, so it
-leaves pairing, which is invoice to purchase order, as labeled."""
+def _taxes(header: FieldValues) -> bool:
+    return _taxed(header) is not None
 
-HEADER_ELIGIBLE: dict[DiscrepancyType, Callable[[FieldValues], bool]] = {
-    "tax mismatch": lambda header: _taxed(header) is not None,
-}
-"""Whether a header carries what a type touches, per injected header type:
-tax mismatch only, on header `amount_total_tax` (#65)."""
 
-Inject = Callable[[_Draft, Band, random.Random, Sequence[Seed]], bool]
-INJECT: dict[DiscrepancyType, Inject] = {
-    "price variance": _price_variance,
-    "extra line": _extra_line,
-    "missing line": _missing_line,
-    "short-ship": _short_ship,
-    "over-ship": _over_ship,
-    "tax mismatch": _tax_mismatch,
-    "unit variant": _unit_variant,
+Inject = Callable[[_Draft, Band], bool]
+"""How a type goes onto a draft, for the band wanted where the type has bands;
+False when it cannot go on what the draft has left."""
+
+Positions = Callable[[Seed, Sequence[Seed]], tuple[int, ...]]
+"""Where on a seed a type can be injected: the positions of its invoice lines,
+or for a missing line every position the added line can go in."""
+
+
+def _on_lines(carried: Callable[[FieldValues], bool]) -> Positions:
+    """Every position of the seed's lines that carries what the type touches,
+    for the types whose eligibility is the line's own. A short-ship moves only
+    the receipt, so it leaves pairing, which is invoice to purchase order, as
+    labeled."""
+
+    def positions(seed: Seed, pool: Sequence[Seed]) -> tuple[int, ...]:
+        return tuple(
+            position
+            for position, line in enumerate(seed.invoice.lines)
+            if carried(line)
+        )
+
+    return positions
+
+
+def _unlike_every_other(seed: Seed, pool: Sequence[Seed]) -> tuple[int, ...]:
+    """Where an extra line can be taken from: a line pairing reads that is
+    unlike every other line of the seed, so the matcher could say which one
+    was removed."""
+    lines = seed.invoice.lines
+    keys = [pairing_cells(line) for line in lines]
+    return tuple(
+        position
+        for position, key in enumerate(keys)
+        if pairable(lines[position]) and keys.count(key) == 1
+    )
+
+
+def _anywhere_with_a_donor(seed: Seed, pool: Sequence[Seed]) -> tuple[int, ...]:
+    """Where a missing line can be added: any position, when another seed in
+    the pool can give a line, and none when none can."""
+    has_donor = any(_lines_to_give(seed, each) for each in pool)
+    return tuple(range(len(seed.invoice.lines) + 1)) if has_donor else ()
+
+
+def _no_lines(seed: Seed, pool: Sequence[Seed]) -> tuple[int, ...]:
+    """A header type goes on no line."""
+    return ()
+
+
+def _no_header(header: FieldValues) -> bool:
+    """A line type touches no header cell."""
+    return False
+
+
+@dataclass(frozen=True)
+class _Injector:
+    """Everything the generator knows about one injected type: where it can
+    go, and how it goes there."""
+
+    inject: Inject
+    """How it goes onto a draft."""
+    positions: Positions = _no_lines
+    """Where on the seed's lines it can go."""
+    header: Callable[[FieldValues], bool] = _no_header
+    """Whether the seed's header carries what it touches."""
+
+
+INJECTORS: dict[DiscrepancyType, _Injector] = {
+    "price variance": _Injector(_price_variance, _on_lines(_price_varies)),
+    "extra line": _Injector(_extra_line, _unlike_every_other),
+    "missing line": _Injector(_missing_line, _anywhere_with_a_donor),
+    "short-ship": _Injector(_fewer_on_one_line("short-ship"), _on_lines(_ships_fewer)),
+    "over-ship": _Injector(_fewer_on_one_line("over-ship"), _on_lines(_orders_fewer)),
+    "tax mismatch": _Injector(_tax_mismatch, header=_taxes),
+    "unit variant": _Injector(_unit_variant, _on_lines(_unit_varies)),
 }
-"""How each injected type goes onto a draft, for the band wanted where the
-type has bands; False when it cannot go on what the draft has left."""
+"""Every type the generator injects, in the order their cases are built. A new
+type goes last, so the cases every other type draws stay the same. Tax mismatch
+is the one header type: it goes on header `amount_total_tax` and on no line
+(#65)."""
+
+INJECTED_TYPES: tuple[DiscrepancyType, ...] = tuple(INJECTORS)
+"""The types the generator injects, in that order."""
 
 
 def _lowered(
@@ -928,9 +926,10 @@ def _places(value: Decimal, fewest: int) -> Decimal:
 # Hard negatives
 
 
-def _tempted(draft: _Draft, rng: random.Random) -> Case:
+def _tempted(draft: _Draft) -> Case:
     """The draft with a hard negative drawn on every line no discrepancy is
     on, or the line left as labeled, evenly among what it can carry."""
+    rng = draft.rng
     for position in draft.free():
         slot = draft.copied(position)
         if slot.removed:
@@ -941,12 +940,12 @@ def _tempted(draft: _Draft, rng: random.Random) -> Case:
         if kind is None:
             continue
         cell = rng.choice([cell for each, cell in tempting if each == kind])
-        read = read_cell(line, cell)
-        assert read is not None and read.numbers is not None
-        written = TEMPT[kind](max(read.numbers), cell, rng)
+        highest = _highest(line, cell)
+        assert highest is not None
+        written = TEMPT[kind](highest, rng)
         if written is None:
             continue
-        slot.cells = {**slot.cells, read.fieldtype: (written,)}
+        slot.cells = {**slot.cells, highest.fieldtype: (written,)}
         draft.negatives.append(_Tempted(kind, slot, cell))
     return draft.case()
 
@@ -957,35 +956,36 @@ def _tempting(line: FieldValues) -> list[tuple[HardNegativeKind, Cell]]:
     only, each where the line still pairs once it moves (#70)."""
     tempting: list[tuple[HardNegativeKind, Cell]] = []
     priced = _priced(line)
-    if priced is not None and _price_varies(line):
+    if priced is not None and _still_pairs(line, (priced.cell,)):
         tempting.append(("rounding drift", priced.cell))
         if priced.value >= JUST_INSIDE_LEAST:
             tempting.append(("just inside", priced.cell))
         tempting.append(("billed below", priced.cell))
-    quantity = read_cell(line, "quantity")
+    quantity = _highest(line, "quantity")
     if (
         quantity is not None
-        and quantity.numbers is not None
-        and max(quantity.numbers) > 0
+        and quantity.value > 0
         and _still_pairs(line, ORDERED_CELLS)
     ):
         tempting.append(("billed below", "quantity"))
     return tempting
 
 
-def _drift(value: Decimal, cell: Cell, rng: random.Random) -> str | None:
+def _drift(highest: _Highest, rng: random.Random) -> str:
     """The value one cent over or under, as the purchase order's: the invoice
     then bills a cent more or less. Under when over would leave nothing."""
+    value = highest.value
     places = _places(value, 2)
     bills_over = rng.random() < 0.5 and value > PRICE.cent
     moved = value - PRICE.cent if bills_over else value + PRICE.cent
     return f"{moved.quantize(places, rounding=ROUND_HALF_UP):f}"
 
 
-def _just_inside(value: Decimal, cell: Cell, rng: random.Random) -> str | None:
+def _just_inside(highest: _Highest, rng: random.Random) -> str | None:
     """A purchase-order value the invoice's is above by 90 to 100 percent of
     the margin, written with the value's decimal places, or None when
     rounding leaves none in that band."""
+    value = highest.value
     places = _places(value, 2)
     for _ in range(DRAWS):
         share = Decimal(rng.uniform(float(JUST_INSIDE_SHARE), 1.0)) * PRICE.percent
@@ -996,18 +996,19 @@ def _just_inside(value: Decimal, cell: Cell, rng: random.Random) -> str | None:
     return None
 
 
-def _billed_below(value: Decimal, cell: Cell, rng: random.Random) -> str | None:
+def _billed_below(highest: _Highest, rng: random.Random) -> str | None:
     """A purchase-order price above the invoice's by past the tolerance up to
     half again, or a quantity above by one unit up to double; the invoice then
     bills less than was ordered."""
-    if cell == "quantity":
+    value = highest.value
+    if highest.cell == "quantity":
         return f"{value + rng.randint(1, max(1, int(value))):f}"
     share = Decimal(rng.uniform(float(PRICE.percent), float(FAR_PERCENT)))
     raised = (value * (1 + share)).quantize(_places(value, 2), rounding=ROUND_HALF_UP)
     return f"{raised:f}" if raised > value else None
 
 
-TEMPT: dict[HardNegativeKind, Callable[[Decimal, Cell, random.Random], str | None]] = {
+TEMPT: dict[HardNegativeKind, Callable[[_Highest, random.Random], str | None]] = {
     "rounding drift": _drift,
     "just inside": _just_inside,
     "billed below": _billed_below,
