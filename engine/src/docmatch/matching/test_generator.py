@@ -207,9 +207,7 @@ def test_injections_draw_near_and_far_half_and_half_within_their_bands() -> None
 
 
 def test_a_lowered_value_keeps_the_seed_value_decimal_places() -> None:
-    cases = injected(
-        single((AMOUNTS,), seed=1, clean=0, per_type=2), "price variance"
-    )
+    cases = injected(single((AMOUNTS,), seed=1, clean=0, per_type=2), "price variance")
 
     for case in cases:
         (truth,) = case.truth
@@ -668,8 +666,7 @@ def test_a_header_tax_that_is_zero_or_unreadable_is_not_eligible(tax: str) -> No
 
     assert documents_carrying((untaxed,), "tax mismatch") == 0
     assert (
-        injected(single((untaxed,), seed=1, clean=0, per_type=2), "tax mismatch")
-        == []
+        injected(single((untaxed,), seed=1, clean=0, per_type=2), "tax mismatch") == []
     )
 
 
@@ -874,9 +871,7 @@ def test_just_inside_is_never_generated_on_a_value_under_one() -> None:
     assert hard_negatives(cases, "rounding drift")
 
 
-def test_billed_below_raises_the_po_price_or_quantity_and_the_receipt_follows() -> (
-    None
-):
+def test_billed_below_raises_the_po_price_or_quantity_and_the_receipt_follows() -> None:
     belows = hard_negatives(
         generate(MIXED, seed=1, clean=40, per_type=0), "billed below"
     )
