@@ -137,10 +137,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal, get_args
 
 from docmatch.matching.matcher import (
-    IDENTITY_CELLS,
     PAIRING_CELLS,
     DiscrepancyType,
     Place,
+    named,
     pairable,
     pairing_cells,
 )
@@ -620,14 +620,8 @@ def _lines_to_give(seed: Seed, donor: Seed) -> list[FieldValues]:
     return [
         line
         for line in donor.invoice.lines
-        if _named(line) and pairing_cells(line) not in seed_keys
+        if named(line) and pairing_cells(line) not in seed_keys
     ]
-
-
-def _named(line: FieldValues) -> bool:
-    """Whether the line carries a code or a description, the cells the
-    pairing floor was set on."""
-    return any(cell_values(line, cell) is not None for cell in IDENTITY_CELLS)
 
 
 def _still_pairs(line: FieldValues, changed: Collection[Cell]) -> bool:

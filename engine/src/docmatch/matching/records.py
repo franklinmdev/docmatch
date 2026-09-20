@@ -98,9 +98,15 @@ def read_record(
     )
 
 
-Cell = Literal["unit price", "amount", "quantity", "unit", "code", "description", "tax"]
-"""The cells a line is compared or paired on, and the header's tax, named apart
-from their fieldtypes."""
+LineCell = Literal["unit price", "amount", "quantity", "unit", "code", "description"]
+"""The cells a line is compared or paired on, named apart from their fieldtypes."""
+
+HeaderCell = Literal["tax"]
+"""The header's own cells: the tax alone, since no fixed-subset row labels a
+line tax (#65)."""
+
+Cell = LineCell | HeaderCell
+"""Every cell a rule compares, a line's or the header's."""
 
 CELL_FIELDTYPES: dict[Cell, tuple[str, ...]] = {
     "unit price": ("line_item_unit_price_gross", "line_item_unit_price_net"),
@@ -147,7 +153,7 @@ def listed_units(line: FieldValues) -> frozenset[str]:
     return frozenset(normalize_text(text) for text in values.texts)
 
 
-PRICE_CELLS: tuple[Cell, ...] = ("unit price", "amount")
+PRICE_CELLS: tuple[LineCell, ...] = ("unit price", "amount")
 """The cells price variance falls through: the unit price where both lines
 carry one the normalizer reads, else the amount (#65, #76). The generator
 injects on the same cell the matcher will compare, by the same rule."""
