@@ -64,7 +64,8 @@ from docmatch.evals.confidence import (
     judge_header,
     sweep,
 )
-from docmatch.evals.manifest import Manifest
+from docmatch.evals.manifest import Manifest, ManifestError
+from docmatch.evals.manifest import load as load_manifest
 from docmatch.extraction.derived import DERIVED_FIELDTYPES, derive, with_derived
 from docmatch.extraction.extractor import Confidence
 from docmatch.gate import RULES, GateResult, RuleName, gate
@@ -84,6 +85,30 @@ from docmatch.metrics.line_items import (
 )
 from docmatch.metrics.normalization import normalize
 from docmatch.metrics.score import MicroAverage, Score, micro_average, ratio
+
+PREDICTIONS_FILE = "predictions.json"
+"""What a run read, the file every eval scores."""
+
+MANIFEST_FILE = "manifest.json"
+"""The subset the run claims to cover."""
+
+RECORD_FILE = "run.json"
+"""What the run recorded of itself: its backend, its model, what it cost."""
+
+CONFIDENCE_FILE = "confidence.json"
+"""What the backend returned beside the reading; empty or absent is no signal."""
+
+CURRENCY_SYMBOLS_FILE = "currency_symbols.json"
+"""What the vendor returned beside each amount, when it returns any."""
+
+RUN_FILES = (
+    PREDICTIONS_FILE,
+    MANIFEST_FILE,
+    RECORD_FILE,
+    CONFIDENCE_FILE,
+    CURRENCY_SYMBOLS_FILE,
+)
+"""Every file `docmatch extract --out` writes into a run's directory."""
 
 PREDICTIONS = TypeAdapter(dict[str, Prediction])
 """A run's predictions: one document id to one document's prediction.
@@ -191,6 +216,40 @@ def read_confidence(path: Path) -> dict[str, Confidence]:
             'confidences, and "line_items", a list of cells to one confidence. '
             f"{first_problem(error, within=1)}"
         ) from error
+
+
+@dataclass(frozen=True)
+class SavedRun:
+    """A directory `docmatch extract --out` wrote, read back and checked."""
+
+    directory: Path
+    record: RunRecord
+    predictions: Mapping[str, Prediction]
+    currency_symbols: CurrencySymbolsByDocument
+    """What the vendor returned beside each document's amounts; empty for a
+    run that saved none."""
+
+
+def read_saved_run(directory: Path, pinned: Manifest, pinned_path: Path) -> SavedRun:
+    """A saved run read back, or a message rather than a traceback.
+
+    Strict: its manifest has to be the pinned subset itself, so a `--limit`
+    run, which covers a prefix of it, never becomes a row (#75).
+    """
+    covered_path = directory / MANIFEST_FILE
+    covered = load_manifest(covered_path)
+    if covered != pinned:
+        raise ManifestError(
+            f"{covered_path} is not the pinned subset {pinned_path}: it covers "
+            f"{covered.size} documents of {covered.split} drawn with seed "
+            f"{covered.seed}, and only a run over the whole pinned subset is a row"
+        )
+    return SavedRun(
+        directory=directory,
+        record=read_run_record(directory / RECORD_FILE),
+        predictions=read_predictions(directory / PREDICTIONS_FILE),
+        currency_symbols=read_currency_symbols(directory / CURRENCY_SYMBOLS_FILE),
+    )
 
 
 @dataclass(frozen=True)

@@ -49,16 +49,22 @@ from docmatch.evals.corpus import Census, Coverage, RuleCoverage, Survey
 from docmatch.evals.manifest import Manifest, ManifestError, Reason
 from docmatch.evals.public import PublicCopyError
 from docmatch.evals.run import (
+    CONFIDENCE_FILE,
+    CURRENCY_SYMBOLS_FILE,
+    MANIFEST_FILE,
+    PREDICTIONS_FILE,
+    RECORD_FILE,
+    RUN_FILES,
     Ablation,
     DerivedTotals,
     FieldTypeTotals,
     GateTotals,
-    RunRecord,
+    SavedRun,
     SubsetScore,
     read_confidence,
     read_currency_symbols,
     read_predictions,
-    read_run_record,
+    read_saved_run,
     score_subset,
 )
 from docmatch.extraction import azure, backends, gemini, pages
@@ -706,21 +712,6 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     )
 
 
-CURRENCY_SYMBOLS_FILE = "currency_symbols.json"
-"""Read by `docmatch eval` beside the predictions when a run saved one."""
-
-CONFIDENCE_FILE = "confidence.json"
-"""Read by `docmatch eval` beside the predictions; empty or absent is no signal."""
-
-RUN_FILES = (
-    "predictions.json",
-    "manifest.json",
-    "run.json",
-    CONFIDENCE_FILE,
-    CURRENCY_SYMBOLS_FILE,
-)
-
-
 def _prepare(out: Path) -> None:
     """Make sure the run can be written, before the first document is paid for.
 
@@ -745,11 +736,11 @@ def _prepare(out: Path) -> None:
 def _write(extracted: Run, out: Path) -> None:
     """The files of a run, or a message rather than a traceback."""
     try:
-        write_predictions(extracted, out / RUN_FILES[0])
-        write_manifest(extracted, out / RUN_FILES[1])
-        write_record(extracted, out / RUN_FILES[2])
-        write_confidence(extracted, out / RUN_FILES[3])
-        write_currency_symbols(extracted, out / RUN_FILES[4])
+        write_predictions(extracted, out / PREDICTIONS_FILE)
+        write_manifest(extracted, out / MANIFEST_FILE)
+        write_record(extracted, out / RECORD_FILE)
+        write_confidence(extracted, out / CONFIDENCE_FILE)
+        write_currency_symbols(extracted, out / CURRENCY_SYMBOLS_FILE)
     except OSError as error:
         raise ExtractionError(f"cannot write the run to {out}: {error}") from error
 
@@ -768,7 +759,7 @@ def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
     """
     pinned = manifest.load(arguments.manifest)
     runs = [
-        _saved_run(directory, pinned, arguments.manifest)
+        read_saved_run(directory, pinned, arguments.manifest)
         for directory in arguments.runs
     ]
     pool = load_pool(dataset, SPLITS)
@@ -782,7 +773,6 @@ def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
     pairing_floors = floors.measure(
         [each for each in pool.seeds if each.document_id in measured_on]
     )
-    table = score_matched(generate(pool.seeds))
     control_pool = pool_from(
         "fixed subset",
         (
@@ -791,68 +781,33 @@ def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
         ),
     )
     cases = generate(control_pool.seeds)
-    control = score_matched(cases)
-    rows = [
-        EndToEnd(run.record.name, run.directory, score_read(cases, run.readings))
-        for run in runs
-    ]
     return (
         render_match(
             arguments.manifest,
-            pool,
             pairing_floors,
-            table,
-            control_pool,
-            control,
-            rows,
+            Scored(pool, score_matched(generate(pool.seeds))),
+            Scored(control_pool, score_matched(cases)),
+            [EndToEnd(run, score_read(cases, _readings(run))) for run in runs],
         ),
         0,
     )
 
 
-@dataclass(frozen=True)
-class SavedRun:
-    """A directory `extract --out` wrote, as matching reads it."""
-
-    directory: Path
-    record: RunRecord
-    readings: dict[str, Record]
-    """Each document's reading as an invoice, by document id."""
-
-
-def _saved_run(directory: Path, pinned: Manifest, pinned_path: Path) -> SavedRun:
-    """A saved run's record and its readings as invoices, or a message.
-
-    Strict: its manifest has to be the pinned subset itself, so a `--limit`
-    run, which covers a prefix of it, never becomes a row (#75). A document
+def _readings(run: SavedRun) -> dict[str, Record]:
+    """A saved run's predictions as the invoices matching takes. A document
     the run has no reading for is left out here and matched as an invoice
-    with no lines.
-    """
-    covered_path = directory / RUN_FILES[1]
-    covered = manifest.load(covered_path)
-    if covered != pinned:
-        raise ManifestError(
-            f"{covered_path} is not the pinned subset {pinned_path}: it covers "
-            f"{covered.size} documents of {covered.split} drawn with seed "
-            f"{covered.seed}, and only a run over the whole pinned subset is a row"
-        )
-    record = read_run_record(directory / RUN_FILES[2])
-    symbols = read_currency_symbols(directory / CURRENCY_SYMBOLS_FILE)
-    readings = {
-        document_id: read_record(prediction, symbols.get(document_id, {}))
-        for document_id, prediction in read_predictions(
-            directory / RUN_FILES[0]
-        ).items()
+    with no lines."""
+    return {
+        document_id: read_record(prediction, run.currency_symbols.get(document_id, {}))
+        for document_id, prediction in run.predictions.items()
     }
-    return SavedRun(directory, record, readings)
 
 
 @dataclass(frozen=True)
 class EndToEnd:
     """One saved run's end-to-end row, and what the floor cost it."""
 
-    name: str
-    directory: Path
+    run: SavedRun
     scored: ReadScore
 
 
@@ -863,13 +818,21 @@ reading is fixed per document, so repeated draws repeat its errors and the
 honest n is documents (#67)."""
 
 
+@dataclass(frozen=True)
+class Scored:
+    """A table and the seed pool whose cases it was built from: the report
+    prints the two together, since a type's row is read beside how many
+    documents could carry it."""
+
+    pool: SeedPool
+    table: Table
+
+
 def render_match(
     path: Path,
-    pool: SeedPool,
     pairing_floors: Sequence[floors.Floor],
-    table: Table,
-    control_pool: SeedPool,
-    control: Table,
+    per_type: Scored,
+    control: Scored,
     rows: Sequence[EndToEnd] = (),
 ) -> str:
     """The matching report as a block a human can paste anywhere: counts only."""
@@ -884,7 +847,7 @@ def render_match(
                     str(each.lines),
                     str(each.without_lines),
                 )
-                for each in pool.counts
+                for each in per_type.pool.counts
             ],
         ),
         "",
@@ -904,20 +867,23 @@ def render_match(
         *_floor_costs(rows),
         "",
         f"Per-type table, over cases from {' and '.join(SPLITS)}",
-        *_per_type(table, pool),
-        *_rows(("clean-case false-positive rate", _clean_rate(table))),
+        *_per_type(per_type),
+        *_rows(("clean-case false-positive rate", _clean_rate(per_type.table))),
         "",
         "Diagnostic table, over the same cases",
-        *_diagnostic(table),
+        *_diagnostic(per_type.table),
         "",
         "Labels control, over cases from the fixed subset",
-        *_end_to_end(("manifest", str(path)), control, control_pool),
+        *_end_to_end(("manifest", str(path)), control),
     ]
     for row in rows:
         lines += [
             "",
-            f"End-to-end row, {row.name}, its readings as the invoices",
-            *_end_to_end(("run", str(row.directory)), row.scored.table, control_pool),
+            f"End-to-end row, {row.run.record.name}, its readings as the invoices",
+            *_end_to_end(
+                ("run", str(row.run.directory)),
+                Scored(control.pool, row.scored.table),
+            ),
         ]
     return "\n".join([*lines, ""])
 
@@ -934,7 +900,7 @@ def _floor_costs(rows: Sequence[EndToEnd]) -> list[str]:
             ("run", "lines the metric pairs", "left below a floor"),
             [
                 (
-                    row.name,
+                    row.run.record.name,
                     str(row.scored.floor_cost.paired),
                     str(row.scored.floor_cost.unpaired),
                 )
@@ -944,10 +910,11 @@ def _floor_costs(rows: Sequence[EndToEnd]) -> list[str]:
     ]
 
 
-def _end_to_end(where: tuple[str, str], table: Table, pool: SeedPool) -> list[str]:
+def _end_to_end(where: tuple[str, str], scored: Scored) -> list[str]:
     """A row over the fixed subset: precision and recall over all findings,
     the clean-case rate, then the per-type table, the types a few documents
     carry marked indicative (#67)."""
+    pool, table = scored.pool, scored.table
     return [
         *_rows(
             where,
@@ -960,15 +927,13 @@ def _end_to_end(where: tuple[str, str], table: Table, pool: SeedPool) -> list[st
             ("clean-case false-positive rate", _clean_rate(table)),
         ),
         "",
-        *_per_type(table, pool, indicative=INDICATIVE),
+        *_per_type(scored, indicative=INDICATIVE),
     ]
 
 
-def _per_type(
-    table: Table, pool: SeedPool, indicative: Sequence[DiscrepancyType] = ()
-) -> list[str]:
+def _per_type(scored: Scored, indicative: Sequence[DiscrepancyType] = ()) -> list[str]:
     """Precision, recall and n per injected type, with the documents carrying it."""
-    rows = [each for each in table.per_type if each.type in INJECTED_TYPES]
+    rows = [each for each in scored.table.per_type if each.type in INJECTED_TYPES]
     return _table(
         ("type", "precision", "recall", "n", "documents"),
         [
@@ -977,7 +942,7 @@ def _per_type(
                 f"{each.precision:.3f}",
                 f"{each.recall:.3f}",
                 str(each.n),
-                str(documents_carrying(pool.seeds, each.type)),
+                str(documents_carrying(scored.pool.seeds, each.type)),
             )
             for each in rows
         ],
