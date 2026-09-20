@@ -899,7 +899,7 @@ docmatch/
   data/                ignored: datasets, generated fixtures, private sets
   docs/                decision records
   scripts/             the markdown-location check CI runs
-  .github/workflows/   CI: ruff, mypy and pytest on every push
+  .github/workflows/   CI: ruff, mypy and pytest on every push; a PR judge that only comments
 ```
 
 Tests live next to the code they test, so `src/docmatch/docile/dataset.py` is

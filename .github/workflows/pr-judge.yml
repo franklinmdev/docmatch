@@ -1,0 +1,33 @@
+name: PR Judge
+
+# TypeSafe's Jev judges every pull request against its own description and
+# posts one sticky comment with a typed verdict, updated in place on later
+# pushes. It is advisory: `fail-on: none` means the step passes whatever the
+# verdict, so the comment never blocks a merge. `edited` is included because
+# the judge reads the description, and a rewritten description changes the
+# verdict. Never `pull_request_target`: the action reads the pull request
+# through the API and needs no checkout, so it has no reason to run with the
+# base branch's trust.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  judge:
+    name: judge the pull request
+    runs-on: ubuntu-latest
+    # Pull requests from forks do not receive repository secrets, so the key
+    # would be empty and the step would fail for nothing.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      # No checkout: the action reads the pull request through the GitHub API
+      # and never executes its code.
+      - uses: juanegido/jev-pr-judge@5566cb41cac6656433a06b7614436e4657f8623e # v1.0.1
+        with:
+          typesafe-api-key: ${{ secrets.TYPESAFE_API_KEY }}
+          profile: balanced
+          fail-on: none
