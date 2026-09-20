@@ -87,9 +87,8 @@ from docmatch.matching.matcher import DiscrepancyType
 from docmatch.matching.pool import SPLITS, SeedPool, load_pool, pool_from
 from docmatch.matching.records import Record, read_record
 from docmatch.matching.scoring import (
-    FloorCost,
+    ReadScore,
     Table,
-    floor_cost,
     score_matched,
     score_read,
 )
@@ -794,12 +793,7 @@ def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
     cases = generate(control_pool.seeds)
     control = score_matched(cases)
     rows = [
-        EndToEnd(
-            run.record.name,
-            run.directory,
-            score_read(cases, run.readings),
-            floor_cost(cases, run.readings),
-        )
+        EndToEnd(run.record.name, run.directory, score_read(cases, run.readings))
         for run in runs
     ]
     return (
@@ -859,8 +853,7 @@ class EndToEnd:
 
     name: str
     directory: Path
-    table: Table
-    cost: FloorCost
+    scored: ReadScore
 
 
 INDICATIVE: tuple[DiscrepancyType, ...] = ("unit variant", "tax mismatch")
@@ -924,7 +917,7 @@ def render_match(
         lines += [
             "",
             f"End-to-end row, {row.name}, its readings as the invoices",
-            *_end_to_end(("run", str(row.directory)), row.table, control_pool),
+            *_end_to_end(("run", str(row.directory)), row.scored.table, control_pool),
         ]
     return "\n".join([*lines, ""])
 
@@ -939,7 +932,14 @@ def _floor_costs(rows: Sequence[EndToEnd]) -> list[str]:
         "Floor cost per run, over one clean case per document",
         *_table(
             ("run", "lines the metric pairs", "left below a floor"),
-            [(row.name, str(row.cost.read), str(row.cost.unpaired)) for row in rows],
+            [
+                (
+                    row.name,
+                    str(row.scored.floor_cost.paired),
+                    str(row.scored.floor_cost.unpaired),
+                )
+                for row in rows
+            ],
         ),
     ]
 
