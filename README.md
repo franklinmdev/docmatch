@@ -372,18 +372,18 @@ findings of a type, and documents is how many seeds could carry it.
 
 | Discrepancy type | Precision | Recall | n | Documents | Commit |
 |---|---|---|---|---|---|
-| price variance | 0.984 | 0.991 | 1,165 | 4,956 | [`0c4a080`](https://github.com/franklinmdev/docmatch/commit/0c4a080) |
-| short-ship | 0.978 | 0.998 | 819 | 2,500 | [`0c4a080`](https://github.com/franklinmdev/docmatch/commit/0c4a080) |
-| over-ship | 0.998 | 0.989 | 811 | 2,463 | [`0c4a080`](https://github.com/franklinmdev/docmatch/commit/0c4a080) |
-| extra line | 0.977 | 0.977 | 1,089 | 4,750 | [`0c4a080`](https://github.com/franklinmdev/docmatch/commit/0c4a080) |
-| missing line | 1.000 | 1.000 | 1,930 | 5,325 | [`0c4a080`](https://github.com/franklinmdev/docmatch/commit/0c4a080) |
-| unit-of-measure variant | 0.990 | 1.000 | 576 | 334 | [`0c4a080`](https://github.com/franklinmdev/docmatch/commit/0c4a080) |
-| tax mismatch | 1.000 | 1.000 | 546 | 253 | [`0c4a080`](https://github.com/franklinmdev/docmatch/commit/0c4a080) |
+| price variance | 0.984 | 0.991 | 1,165 | 4,956 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
+| short-ship | 0.978 | 0.998 | 819 | 2,500 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
+| over-ship | 0.998 | 0.989 | 811 | 2,463 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
+| extra line | 0.977 | 0.977 | 1,089 | 4,750 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
+| missing line | 1.000 | 1.000 | 1,930 | 5,325 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
+| unit-of-measure variant | 0.990 | 1.000 | 576 | 334 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
+| tax mismatch | 1.000 | 1.000 | 546 | 253 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
 
 **Clean-case false-positive rate: 0.007**, 7 of 1,000 clean cases that draw a
 finding. The seed pool is 5,180 train and 500 val documents, 38,678
 lines, and the 355 documents with no labeled line seed nothing. Produced at
-[`0c4a080`](https://github.com/franklinmdev/docmatch/commit/0c4a080) by
+[`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) by
 
 ```bash
 uv run docmatch match --run data/runs/gemini --run data/runs/azure --run data/runs/openai
@@ -452,10 +452,10 @@ nothing. The labels control is the same cases with the labels as the invoice.
 
 | Invoice | Precision | Recall | Clean-case false-positive rate | Left below a floor | Commit |
 |---|---|---|---|---|---|
-| labels control | 1.000 | 0.999 | 0.000 | | [`0c4a080`](https://github.com/franklinmdev/docmatch/commit/0c4a080) |
-| `gemini-3.1-flash-lite` reading | 0.520 | 0.806 | 0.453 | 11 of 297 | [`0c4a080`](https://github.com/franklinmdev/docmatch/commit/0c4a080), run at [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
-| Azure `prebuilt-invoice` reading | 0.540 | 0.814 | 0.506 | 9 of 306 | [`0c4a080`](https://github.com/franklinmdev/docmatch/commit/0c4a080), run at [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
-| `gpt-5.6-luna` reading | 0.504 | 0.833 | 0.366 | 18 of 312 | [`0c4a080`](https://github.com/franklinmdev/docmatch/commit/0c4a080), run at [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) |
+| labels control | 1.000 | 0.999 | 0.000 | | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846) |
+| `gemini-3.1-flash-lite` reading | 0.520 | 0.806 | 0.453 | 11 of 297 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846), run at [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
+| Azure `prebuilt-invoice` reading | 0.540 | 0.814 | 0.506 | 9 of 306 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846), run at [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
+| `gpt-5.6-luna` reading | 0.504 | 0.833 | 0.366 | 18 of 312 | [`d860846`](https://github.com/franklinmdev/docmatch/commit/d860846), run at [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) |
 
 Precision and recall are over all findings of every type, the clean-case rate
 over 1,000 clean cases, each run from the extraction command in its own row
