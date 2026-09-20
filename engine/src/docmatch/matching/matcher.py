@@ -758,7 +758,9 @@ def _price_variance(
     when nothing is comparable."""
     place = Place("po line", pairing.po_line)
     for cell in PRICE_CELLS:
-        compared = _comparable(place, cell, (invoice, po), not_compared)
+        compared = _comparable(
+            place, cell, (read_cell(invoice, cell), read_cell(po, cell)), not_compared
+        )
         if compared is not None:
             return _overbilled("price variance", place, cell, PRICE, *compared)
     return None
@@ -769,7 +771,9 @@ def _tax_mismatch(
 ) -> Finding | None:
     """Overbilled on the header's total tax; None when clean or not comparable."""
     place = Place("header")
-    compared = _comparable(place, "tax", (invoice, po), not_compared)
+    compared = _comparable(
+        place, "tax", (read_cell(invoice, "tax"), read_cell(po, "tax")), not_compared
+    )
     if compared is None:
         return None
     return _overbilled("tax mismatch", place, "tax", TAX, *compared)
@@ -816,7 +820,7 @@ def _quantity_findings(
     billed = read_cell(invoice, "quantity")
     shipped = read_cell(received, "quantity")
     ordered = read_cell(po, "quantity")
-    compared = _readable(place, "quantity", (billed, shipped), not_compared)
+    compared = _comparable(place, "quantity", (billed, shipped), not_compared)
     if compared is None:
         _po_quantity_not_compared(place, ordered, (billed, shipped), not_compared)
         return []
@@ -837,7 +841,7 @@ def _quantity_findings(
     findings: list[Finding] = []
     if _above(invoice_cell, receipt_cell, QUANTITY):
         findings.append(found("short-ship", receipt_cell))
-    against_order = _readable(
+    against_order = _comparable(
         place, "quantity", (billed, shipped, ordered), not_compared
     )
     if against_order is not None:
@@ -856,16 +860,20 @@ def _po_quantity_not_compared(
     not_compared: list[NotCompared],
 ) -> None:
     """List the purchase order's quantity when the short-ship's own comparison
-    failed, so the over-ship never reached it. It is listed by the same rule a
-    side it did compare is listed by, against however many partners it lost:
-    absent when one of them is missing, whatever the purchase order's own text
-    says, unreadable when only that text is at fault."""
-    _readable(
-        place,
-        "quantity",
-        (ordered, *(each for each in partners if each is None)),
-        not_compared,
-    )
+    failed, so the over-ship never reached it.
+
+    The reason is the one `_comparable` would have given it: absent when a
+    partner it would have been compared against is missing, whatever its own
+    text says, else unreadable when only that text is at fault. Nothing is
+    listed when the purchase order carries no quantity, or when it is readable
+    and only a partner's text failed, since neither is a comparison it missed.
+    """
+    if ordered is None:
+        return
+    if any(each is None for each in partners):
+        not_compared.append(NotCompared(place, "quantity", ordered.texts, "absent"))
+    elif ordered.numbers is None:
+        not_compared.append(NotCompared(place, "quantity", ordered.texts, "unreadable"))
 
 
 @dataclass(frozen=True)
@@ -887,24 +895,11 @@ def _above(side: _Readable, against: _Readable, tolerance: Tolerance) -> bool:
 def _comparable(
     place: Place,
     cell: Cell,
-    sides: Sequence[FieldValues],
-    not_compared: list[NotCompared],
-) -> tuple[_Readable, ...] | None:
-    """Every side's cell read as numbers, in the order given, or None with the
-    reason listed."""
-    return _readable(
-        place, cell, [read_cell(side, cell) for side in sides], not_compared
-    )
-
-
-def _readable(
-    place: Place,
-    cell: Cell,
     cells: Sequence[ReadCell | None],
     not_compared: list[NotCompared],
 ) -> tuple[_Readable, ...] | None:
-    """The cells already read, as numbers, in the order given, or None with
-    the reason listed: absent as `_carried` lists it, else each side the
+    """Every side's cell as numbers, in the order given, or None with the
+    reason listed: absent as `_carried` lists it, else each side the
     normalizer cannot read in full as unreadable."""
     carried = _carried(place, cell, cells, not_compared)
     if carried is None:
