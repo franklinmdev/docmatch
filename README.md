@@ -426,10 +426,11 @@ type is at or above where it stood at
 [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) but for
 two cells, whose causes a probe on #102 has. Price variance recall goes 0.998
 to 0.991: lowering a price is exactly what makes the right pair less close,
-so nine more injections land on a line the tiebreak crossed. Unit variant precision goes 0.997 to 0.990, five false
-alarms on pairs crossed between invoice lines alike on every cell pairing
-reads; the unit is not one of those cells, so two lines the matcher cannot
-tell apart may still be counted differently.
+so nine more injections land on a line the tiebreak crossed. Unit variant
+precision goes 0.997 to 0.990, five false alarms on pairs crossed between
+invoice lines alike on every cell pairing reads; the unit is not one of those
+cells, so two lines the matcher cannot tell apart may still be counted
+differently.
 
 What is left is pairing, and the row splits it. Of the 6,860 crossed pairs,
 6,503 are between two invoice lines alike on every cell pairing reads, where
