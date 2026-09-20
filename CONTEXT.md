@@ -76,12 +76,20 @@ _Avoid_: orphan, unmatched line
 The lowest similarity at which a code, or a description, counts as agreement in pairing; below it the two lines are no evidence of being the same item. Codes and descriptions each have their own. It is set from lines known to be unrelated, never from the readings the benchmark scores.
 _Avoid_: threshold (on its own), cutoff, match score
 
+**Floor cost**:
+What the pairing floors cost one backend's readings: of the reading lines the line-item metric pairs with a labeled line, how many the matcher's own pairing left without a partner because their best candidate agreed below a floor. Counted over one clean case per document, reported beside the floors and never tuned against.
+_Avoid_: floor loss, left below a floor, unpaired rate
+
 **Pairing key**:
 Which invoice line each purchase-order line answers, as the generator built the case. It is written when the case is built and read only when the case is scored, never by the matcher, so pairing stays the matcher's own job and a wrong partner is counted rather than hidden. It is partial: a purchase-order line a missing line added answers a line from another seed, and an invoice line that is an extra line answers none.
 _Avoid_: line id, ground-truth pairing, link
 
+**Crossed pair**:
+A line the matcher paired with a partner other than the one the pairing key names. It is no finding of its own: it shows up as a discrepancy on the line next door, or as nothing at all, so it is counted against the key to make what pairing cost visible before any rule ran. A crossing between two invoice lines alike on every cell pairing reads is counted apart, since nothing pairing computes tells those two apart and which one the assignment takes is arbitrary.
+_Avoid_: mispair, wrong match, swap
+
 **Discrepancy type**:
-One way an invoice can disagree with its purchase order and receiving record: price variance, short-ship, over-ship, extra line, missing line, unit-of-measure variant, or tax mismatch. Only disagreement against docmatch's interest counts: billing less than was ordered or received is not a discrepancy. An invoice that repeats another invoice is not a discrepancy type; that is a separate control.
+One way an invoice can disagree with its purchase order and receiving record: price variance, short-ship, over-ship, extra line, missing line, unit variant, or tax mismatch. Unit variant is the short form of unit-of-measure variant, and the one the report and the README use. Only disagreement against docmatch's interest counts: billing less than was ordered or received is not a discrepancy. An invoice that repeats another invoice is not a discrepancy type; that is a separate control.
 _Avoid_: exception, error, mismatch (on its own)
 
 **Hold**:
@@ -93,7 +101,7 @@ The severity that reports a discrepancy and leaves approval open. Only missing l
 _Avoid_: warning, info
 
 **Tolerance**:
-How far an invoice may go above its purchase order or receiving record before the matcher reports a discrepancy. A price or a tax amount may go over by a percentage of the purchase order's value, and always by a cent; a quantity may not go over at all; a unit of measure must read the same after the text normalization, since there is no conversion table. Only one set of tolerances exists at a time, and a finding's explanation quotes the one applied.
+How far an invoice may go above its purchase order or receiving record before the matcher reports a discrepancy. A price or a tax amount may go over by a percentage of the purchase order's value, and always by a cent; a quantity may not go over at all; a unit of measure must read the same after the text normalization, since there is no conversion table. The margin is that percentage of the value compared against, in money, and a finding's explanation quotes it beside the tolerance applied. Only one set of tolerances exists at a time.
 _Avoid_: threshold, allowance, variance limit
 
 **Rounding drift**:
@@ -117,5 +125,5 @@ A clean line built to tempt the matcher: rounding drift, a variance just inside 
 _Avoid_: near miss, decoy
 
 **End-to-end row**:
-Matching measured with a backend's reading as the invoice, against the purchase order and receiving record derived from the same document's labels. Truth is always the generator's: a finding caused by a misread value is a false alarm, and an injected discrepancy the reading hides is a miss. A control row takes the labels as the invoice on the same cases, so the gap to it is what extraction costs.
-_Avoid_: pipeline score, compound score
+Matching measured with a backend's reading as the invoice, against the purchase order and receiving record derived from the same document's labels. Truth is always the generator's: a finding caused by a misread value is a false alarm, and an injected discrepancy the reading hides is a miss. The labels control takes the labels as the invoice on the same cases, so the gap to it is what extraction costs.
+_Avoid_: pipeline score, compound score, control row
