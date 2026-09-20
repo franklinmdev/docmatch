@@ -245,7 +245,7 @@ def _crossed(case: Case, result: MatchResult) -> CrossedPairs:
     keyed = [
         (answers, each.invoice_line)
         for each in result.pairings
-        if (answers := _answers(case.pairing_key, each.po_line)) is not None
+        if (answers := case.pairing_key[each.po_line]) is not None
     ]
     crossed = [(answers, paired) for answers, paired in keyed if answers != paired]
     lines = case.invoice.lines
@@ -257,12 +257,6 @@ def _crossed(case: Case, result: MatchResult) -> CrossedPairs:
             for answers, paired in crossed
         ),
     )
-
-
-def _answers(key: Sequence[int | None], po_line: int) -> int | None:
-    """The invoice line the key says a purchase-order line answers, or None
-    when it names none and when the case carries no key at all."""
-    return key[po_line] if po_line < len(key) else None
 
 
 def _hard_negative_places(

@@ -37,7 +37,12 @@ SPLIT = "train"
 """The split the floors are measured on, never the fixed subset's (#77)."""
 
 SEED = 77
-"""The random seed the pairs are drawn with, pinned before the first draw."""
+"""The random seed the pairs are drawn with, pinned before the first draw. The
+number is arbitrary and no reason for it is recorded on #88: only its being
+fixed before the first draw matters. The draw is `random.Random` on Python
+3.12, whose Mersenne Twister stream CPython promises, and `uv.lock` pins the
+interpreter the measured floors were produced with, as the generator's seed
+does for its cases."""
 
 PAIRS = 10_000
 """How many pairs of lines each cell's floor is measured on."""

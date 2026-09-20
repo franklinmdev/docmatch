@@ -34,7 +34,7 @@ EMPTY = Record(header={}, lines=())
 
 
 def case(*truth: Injected) -> Case:
-    return Case("made-up", EMPTY, EMPTY, ReceivingRecord(()), truth)
+    return Case("made-up", EMPTY, EMPTY, ReceivingRecord(()), truth, ())
 
 
 def injected(line: int) -> Injected:
@@ -176,7 +176,9 @@ def received(po: Record) -> ReceivingRecord:
 
 
 def a_case(invoice: Record, po: Record, *truth: Injected) -> Case:
-    return Case("made-up", invoice, po, received(po), truth)
+    """A case whose key names no invoice line, so nothing it pairs is counted
+    as crossed; `keyed` writes one where a test reads the crossings."""
+    return Case("made-up", invoice, po, received(po), truth, (None,) * len(po.lines))
 
 
 def rows(table: Table) -> dict[str, TypeScore]:
@@ -320,10 +322,6 @@ def test_a_po_line_the_key_names_no_invoice_line_for_is_not_counted() -> None:
     table = score([keyed(THREE, 0, None, 1)], [paired((0, 0), (2, 1), (1, 2))])
 
     assert table.crossed_pairs == CrossedPairs(keyed=2, crossed=0, alike=0)
-
-
-def test_a_case_with_no_pairing_key_counts_no_pair() -> None:
-    assert score([case()], [paired((0, 0))]).crossed_pairs == CrossedPairs(0, 0, 0)
 
 
 def test_a_reading_is_counted_against_the_key_at_the_labeled_line_it_reads() -> None:
