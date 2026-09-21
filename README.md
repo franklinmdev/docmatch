@@ -372,18 +372,18 @@ findings of a type, and documents is how many seeds could carry it.
 
 | Discrepancy type | Precision | Recall | n | Documents | Commit |
 |---|---|---|---|---|---|
-| price variance | 0.984 | 0.991 | 1,165 | 4,956 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
-| short-ship | 0.978 | 0.998 | 819 | 2,500 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
-| over-ship | 0.998 | 0.989 | 811 | 2,463 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
-| extra line | 0.977 | 0.977 | 1,089 | 4,750 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
-| missing line | 1.000 | 1.000 | 1,930 | 5,325 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
-| unit variant | 0.990 | 1.000 | 576 | 334 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
-| tax mismatch | 1.000 | 1.000 | 546 | 253 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
+| price variance | 0.984 | 0.991 | 1,165 | 4,956 | [`5eb8a55`](https://github.com/franklinmdev/docmatch/commit/5eb8a55) |
+| short-ship | 0.978 | 0.998 | 819 | 2,500 | [`5eb8a55`](https://github.com/franklinmdev/docmatch/commit/5eb8a55) |
+| over-ship | 0.998 | 0.990 | 811 | 2,463 | [`5eb8a55`](https://github.com/franklinmdev/docmatch/commit/5eb8a55) |
+| extra line | 0.977 | 0.977 | 1,089 | 4,750 | [`5eb8a55`](https://github.com/franklinmdev/docmatch/commit/5eb8a55) |
+| missing line | 1.000 | 1.000 | 1,930 | 5,325 | [`5eb8a55`](https://github.com/franklinmdev/docmatch/commit/5eb8a55) |
+| unit variant | 1.000 | 1.000 | 576 | 334 | [`5eb8a55`](https://github.com/franklinmdev/docmatch/commit/5eb8a55) |
+| tax mismatch | 1.000 | 1.000 | 546 | 253 | [`5eb8a55`](https://github.com/franklinmdev/docmatch/commit/5eb8a55) |
 
 **Clean-case false-positive rate: 0.007**, 7 of 1,000 clean cases that draw a
 finding. The seed pool is 5,180 train and 500 val documents, 38,678
 lines, and the 355 documents with no labeled line seed nothing. Produced at
-[`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) by
+[`5eb8a55`](https://github.com/franklinmdev/docmatch/commit/5eb8a55) by
 
 ```bash
 uv run docmatch match --run data/runs/gemini --run data/runs/azure --run data/runs/openai
@@ -400,20 +400,21 @@ procedure measures on train over 10,000 cross-document pairs each.
 
 | Hard negative on a clean line | Placed | False alarms |
 |---|---|---|
-| rounding drift, one cent | 5,746 | 8 |
-| just inside, 90 to 100 percent of the margin | 5,255 | 5 |
+| rounding drift, one cent | 5,746 | 6 |
+| just inside, 90 to 100 percent of the margin | 5,255 | 3 |
 | billed below the purchase order or the receiving record | 5,972 | 34 |
 
-Beside the table the same report counts **23** more false alarms on no hard
+Beside the table the same report counts **21** more false alarms on no hard
 negative, and the lines paired with a partner other than the one the
-generator's pairing key names: **6,860 of 29,009** keyed pairs, **6,503** of
-them between two invoice lines alike on every cell pairing reads.
+generator's pairing key names: **6,855 of 29,009** keyed pairs, **6,498** of
+them between two invoice lines alike on code, description, quantity, unit
+price and amount, the cells that decide a pair.
 
 | Discrepancy type | Near recall | n | Far recall | n |
 |---|---|---|---|---|
 | price variance | 0.995 | 583 | 0.988 | 582 |
 | short-ship | 0.995 | 410 | 1.000 | 409 |
-| over-ship | 0.990 | 406 | 0.988 | 405 |
+| over-ship | 0.993 | 406 | 0.988 | 405 |
 | tax mismatch | 1.000 | 273 | 1.000 | 273 |
 
 The headline recall is that half-and-half mix of near the edge and far past
@@ -425,21 +426,24 @@ by how close the values come rather than by their being equal (#102) took
 those from 242 to 47 and the clean-case rate from 0.025 to 0.007, and every
 type is at or above where it stood at
 [`52406af`](https://github.com/franklinmdev/docmatch/commit/52406af) but for
-two cells, whose causes a probe on #102 has. Price variance recall goes 0.998
+one cell, whose cause a probe on #102 has. Price variance recall goes 0.998
 to 0.991: lowering a price is exactly what makes the right pair less close,
-so nine more injections land on a line the tiebreak crossed. Unit variant
-precision goes 0.997 to 0.990, five false alarms on pairs crossed between
-invoice lines alike on every cell pairing reads; the unit is not one of those
-cells, so two lines the matcher cannot tell apart may still be counted
-differently.
+so nine more injections land on a line the tiebreak crossed. The other cell
+that fell there, unit variant precision at 0.990, was five false alarms on
+pairs crossed between invoice lines alike on every cell that decides a pair
+and differing only in their unit; reading the unit as one more tiebreak
+(#118, #124), one whole agreement of closeness when both lines list the same
+one and never deciding whether two lines pair, put it back at 1.000 and took
+two false alarms off each of the first two hard negatives, with no cell
+falling and the pinned draw untouched.
 
-What is left is pairing, and the row splits it. Of the 6,860 crossed pairs,
-6,503 are between two invoice lines alike on every cell pairing reads, where
-the matcher has nothing to choose by and either answer is as good. That share
-is a coin toss and moves with the weights, so what a tiebreak can reach is the
-other **357**. The comment on #102 holds what the old rule crossed on the same
-cases, and enumerates the 357 by cause; the row did not exist before this
-commit.
+What is left is pairing, and the row splits it. Of the 6,855 crossed pairs,
+6,498 are between two invoice lines alike on code, description, quantity,
+unit price and amount, where the matcher has nothing to choose by and either
+answer is as good. That share is a coin toss and moves with the weights, so
+what a tiebreak can reach is the other **357**. The comment on #102 holds
+what the old rule crossed on the same cases, and enumerates the 357 by cause;
+the row did not exist before that commit.
 
 ### Matching, end to end
 
@@ -451,10 +455,10 @@ nothing. The labels control is the same cases with the labels as the invoice.
 
 | Invoice | Precision | Recall | Clean-case false-positive rate | Floor cost | Commit |
 |---|---|---|---|---|---|
-| labels control | 1.000 | 0.999 | 0.000 | | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a) |
-| `gemini-3.1-flash-lite` reading | 0.520 | 0.806 | 0.453 | 11 of 297 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a), run at [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
-| Azure `prebuilt-invoice` reading | 0.540 | 0.814 | 0.506 | 9 of 306 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a), run at [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
-| `gpt-5.6-luna` reading | 0.504 | 0.833 | 0.366 | 18 of 312 | [`645f04a`](https://github.com/franklinmdev/docmatch/commit/645f04a), run at [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) |
+| labels control | 1.000 | 0.999 | 0.000 | | [`5eb8a55`](https://github.com/franklinmdev/docmatch/commit/5eb8a55) |
+| `gemini-3.1-flash-lite` reading | 0.520 | 0.806 | 0.453 | 11 of 297 | [`5eb8a55`](https://github.com/franklinmdev/docmatch/commit/5eb8a55), run at [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
+| Azure `prebuilt-invoice` reading | 0.540 | 0.814 | 0.506 | 9 of 306 | [`5eb8a55`](https://github.com/franklinmdev/docmatch/commit/5eb8a55), run at [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
+| `gpt-5.6-luna` reading | 0.504 | 0.833 | 0.366 | 18 of 312 | [`5eb8a55`](https://github.com/franklinmdev/docmatch/commit/5eb8a55), run at [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) |
 
 Precision and recall are over all findings of every type, the clean-case rate
 over 1,000 clean cases, each run from the extraction command in its own row
@@ -476,7 +480,7 @@ them.
 when matching precision and recall are above 0.99 on every type at first
 attempt. The per-type table is not, though #102 brought it close: extra line
 is 0.977 and 0.977, short-ship precision 0.978, price variance precision
-0.984 and over-ship recall 0.989. The labels control does clear 0.99 on every
+0.984 and over-ship recall 0.990. The labels control does clear 0.99 on every
 type, but it is 93 documents and the row the end-to-end rows are read
 against, while the trigger names the per-type table, the one built over every
 label. The end-to-end rows are near 0.5 precision. No earlier report met the
@@ -700,7 +704,8 @@ value the floor procedure measures on train), the per-type table
 carrying it, and the clean-case false-positive rate over 1,000 clean cases),
 the diagnostic table (false alarms by the hard negative they sat on, the lines
 paired with a partner other than the one the generator's pairing key names
-beside how many of those the matcher had nothing to tell apart, and recall
+beside how many of those are between two lines alike on every cell that
+decides a pair, and recall
 near the edge and far past it), and a labels control over cases from the
 fixed subset, the row every end-to-end row is read against. Both
 splits are required; a missing one is an error, so a partial download cannot
