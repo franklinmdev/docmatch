@@ -163,7 +163,7 @@ One of the four ways a reading differs from its label that the noisy variants im
 _Avoid_: typo, corruption, error type
 
 **Arm**:
-One way to resolve a query: one indexed query against the catalog in Postgres plus a deterministic ordering applied in code, score then SKU ascending at every rank and at the cut, returning exactly five entries so top-5 means the same thing in every row. Four arms are measured: trigram only, vector only, hybrid, and hybrid plus rerank.
+One way to resolve a query: one indexed query against the catalog in Postgres plus a deterministic ordering applied in code, score then SKU ascending at every rank and at the cut, returning exactly five entries so top-5 means the same thing in every row. Three arms are measured: trigram only, vector only, and hybrid. A fourth, hybrid plus rerank, was measured once and deleted under the keep-or-drop rule.
 _Avoid_: method, strategy, retriever
 
 **Headline**:
@@ -183,13 +183,13 @@ The queries of the other four fifths of the entries and of the out-of-catalog dr
 _Avoid_: test set, holdout, evaluation set
 
 **Separability diagnostic**:
-Per arm, how well its top-1 score tells an answerable query from an out-of-catalog one: the share of out-of-catalog queries rejected at each of three cuts that keep a fixed high share of the answerable, plus the AUROC, the area under the receiver operating characteristic curve, with answerable positive. Each cut anchors to the arm's own answerable quantile, which is what makes four incommensurable scores comparable. It chooses no operating threshold, that point is Phase 4's, and it is printed beside the keep-or-drop verdict and never weighed in it.
+Per arm, how well its top-1 score tells an answerable query from an out-of-catalog one: the share of out-of-catalog queries rejected at each of three cuts that keep a fixed high share of the answerable, plus the AUROC, the area under the receiver operating characteristic curve, with answerable positive. Each cut anchors to the arm's own answerable quantile, which is what makes the arms' incommensurable scores comparable. It chooses no operating threshold, that point is Phase 4's, and it was printed beside the keep-or-drop verdict and never weighed in it.
 _Avoid_: threshold, cutoff, rejection rate
 
 **Depth sweep**:
-The procedure that sets the two depth constants on the development slice: d, the rows each hybrid half keeps before fusion, over its grid on the hybrid arm first, then N, the pairs sent to the reranker, over its grid at the winning d. The rule picks the smallest value whose development top-5 is within one point of the grid's best, ties to the cheaper. The constants live in code, and every run repeats the sweep and prints the procedure's value beside each constant, the pairing-floor pattern.
+The procedure that sets the depth constant on the development slice: d, the rows each hybrid half keeps before fusion, over its grid on the hybrid arm. The rule picks the smallest value whose development top-5 is within one point of the grid's best, ties to the cheaper. The constant lives in code, and every run repeats the sweep and prints the procedure's value beside the constant, the pairing-floor pattern. A second sweep, N, the pairs sent to the reranker, ran by the same rule until the reranker was dropped.
 _Avoid_: hyperparameter search, tuning, grid search
 
 **Keep-or-drop rule**:
-ADR 0001's rule on the reranker, fixed before any arm was measured: kept when its headline top-1 at the swept N clears the hybrid's by at least a pinned margin and its p95 latency per query on the named machine stays at or under a pinned ceiling, dropped otherwise. Top-1 alone decides. The two thresholds are constants in code beside d and N, and the command prints the verdict with both measurements against both. Kept means hybrid plus rerank is the arm Phase 4 resolves with; dropped means the arm and its N sweep are deleted after the row lands.
+ADR 0001's rule on the reranker, fixed before any arm was measured: kept when its headline top-1 at the swept N clears the hybrid's by at least a pinned margin and its p95 latency per query on the named machine stays at or under a pinned ceiling, dropped otherwise. Top-1 alone decides. Kept would have made hybrid plus rerank the arm Phase 4 resolves with; dropped means the arm and its N sweep are deleted after the row lands. It was applied once: the verdict was dropped at `27bc70d`, the README records it, and the arm, its N sweep and the rule's two thresholds are gone from the command, so Phase 4 resolves with the hybrid.
 _Avoid_: ablation (on its own), go/no-go, success criterion
