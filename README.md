@@ -745,15 +745,15 @@ uv run docmatch resolve
 
 This is the command the resolution table comes from. It needs no model call
 that costs money: the embedder and the reranker are open-weight models that
-run on the CPU, `sentence-transformers/all-MiniLM-L6-v2` and the
-cross-encoder `cross-encoder/ms-marco-MiniLM-L6-v2`, each pinned to its full
-commit and loaded through `sentence-transformers`, with torch installed from
-PyTorch's CPU index so no CUDA library is pulled in, and the first run
-downloads the weights into the Hugging Face cache. It needs a Postgres with the `vector` and `pg_trgm`
-extensions already created: `--database-url`, else `DOCMATCH_DATABASE_URL`,
-else `postgresql:///docmatch`, the socket a local cluster offers. Both
-extensions are required to exist, and a missing one is reported without a
-traceback. Nothing is written to disk.
+run on the CPU, `sentence-transformers/all-MiniLM-L6-v2` and the cross-encoder
+`cross-encoder/ms-marco-MiniLM-L6-v2`, each pinned to its full commit and
+loaded through `sentence-transformers`, with torch installed from PyTorch's
+CPU index so no CUDA library is pulled in, and the first run downloads the
+weights into the Hugging Face cache. It needs a Postgres with the `vector` and
+`pg_trgm` extensions already created: `--database-url`, else
+`DOCMATCH_DATABASE_URL`, else `postgresql:///docmatch`, the socket a local
+cluster offers. Both extensions are required to exist, and a missing one is
+reported without a traceback. Nothing is written to disk.
 
 It builds the catalog from the train labels by one rule with no draw and no
 size parameter, every normalized description that appears in two or more
@@ -812,32 +812,31 @@ out-of-catalog queries per slice (exact, noisy, queries) with the share drawn
 against its target, the noise model's kind shares and similarity bands beside
 their measured targets, the headline table (top-1 and top-5 per arm over the
 scored slice, the exact queries and the noisy variants weighted at the exact
-weight, a constant in code printed beside the table), the keep-or-drop
-verdict on the reranker under the rule [ADR 0001](docs/adr/0001-reranker-keep-or-drop-rule.md)
-fixed before any arm was measured (kept when the rerank arm's headline top-1
-is at least 1.0 point above the hybrid's and its p95 per query is at most
-500 ms, both constants in code, printed with both measurements against them
-and what each verdict does), the separability
-diagnostic per arm (from each scored query's top-1 score, the share of
-out-of-catalog queries rejected at the cuts that keep 0.99, 0.95 and 0.90 of
-the arm's own answerable scores, and AUROC, both populations weighted at the
-exact weight; a reporting device, no threshold is chosen), per arm the rank-1
-tie rate, p50 and p95 latency per query and what the over-fetch check found,
-what was paid once outside the latency (the embedder's load, the reranker's
-load, catalog embedding, HNSW build), each sweep's development top-5 at each
-value with the constant, the procedure's value and the rule, the same scored queries regrouped by kind
-with top-1 and top-5 per arm, a diagnostic that never reaches this README,
-and a provenance block read at run time: the
-Postgres, pgvector and pg_trgm versions and the `hnsw.ef_search` in effect
-from the server, the embedder and the reranker with their revisions, the
-`sentence-transformers`
-and torch versions and the torch thread count from the process, and the
-CPU, logical CPUs, memory and kernel
-from the OS, since latency is a property of a named machine. No description
-is ever printed. CI runs the command on the same synthetic corpus against a
-pinned `pgvector/pgvector` container with the real models cached by their
-revisions; its latency means nothing, and the README's numbers come from the
-command run locally.
+weight, a constant in code printed beside the table), the keep-or-drop verdict
+on the reranker under the rule [ADR
+0001](docs/adr/0001-reranker-keep-or-drop-rule.md) fixed before any arm was
+measured (kept when the rerank arm's headline top-1 is at least 1.0 point
+above the hybrid's and its p95 per query is at most 500 ms, both constants in
+code, printed with both measurements against them and what each verdict does),
+the separability diagnostic per arm (from each scored query's top-1 score, the
+share of out-of-catalog queries rejected at the cuts that keep 0.99, 0.95 and
+0.90 of the arm's own answerable scores, and AUROC, both populations weighted
+at the exact weight; a reporting device, no threshold is chosen), per arm the
+rank-1 tie rate, p50 and p95 latency per query and what the over-fetch check
+found, what was paid once outside the latency (the embedder's load, the
+reranker's load, catalog embedding, HNSW build), each sweep's development
+top-5 at each value with the constant, the procedure's value and the rule, the
+same scored queries regrouped by kind with top-1 and top-5 per arm, a
+diagnostic that never reaches this README, and a provenance block read at run
+time: the Postgres, pgvector and pg_trgm versions and the `hnsw.ef_search` in
+effect from the server, the embedder and the reranker with their revisions,
+the `sentence-transformers` and torch versions and the torch thread count from
+the process, and the CPU, logical CPUs, memory and kernel from the OS, since
+latency is a property of a named machine. No description is ever printed. CI
+runs the command on the same synthetic corpus against a pinned
+`pgvector/pgvector` container with the real models cached by their revisions;
+its latency means nothing, and the README's numbers come from the command run
+locally.
 
 ### The baseline run
 

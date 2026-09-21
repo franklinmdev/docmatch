@@ -283,8 +283,9 @@ class Measured:
     versions: ServerVersions
     models: ModelVersions
     embedder_load_s: float
+    """Loading the embedder, once, outside any query's latency."""
     reranker_load_s: float
-    """Loading each model, once, outside any query's latency."""
+    """Loading the reranker, the same way."""
     build: Build
     machine: Machine
 
@@ -339,40 +340,33 @@ def resolve(
             rerank_sweep = sweep(
                 "N", RERANK_DEPTH, RERANK_DEPTHS, rerank_at, development
             )
-            arms = (
-                measure(
-                    "trigram", lambda text: trigram(store, text), scored, out_of_catalog
-                ),
-                measure(
-                    "vector",
-                    lambda text: vector(store, embedder, text),
-                    scored,
-                    out_of_catalog,
-                ),
-                measure(
-                    "hybrid",
-                    hybrid_at(DEPTH),
-                    scored,
-                    out_of_catalog,
-                    higher_first=True,
-                ),
-                measure(
-                    "rerank",
-                    rerank_at(RERANK_DEPTH),
-                    scored,
-                    out_of_catalog,
-                    higher_first=True,
-                ),
+            by_trigram = measure(
+                "trigram", lambda text: trigram(store, text), scored, out_of_catalog
             )
-            reranked, fused = arms[3], arms[2]
+            by_vector = measure(
+                "vector",
+                lambda text: vector(store, embedder, text),
+                scored,
+                out_of_catalog,
+            )
+            by_hybrid = measure(
+                "hybrid", hybrid_at(DEPTH), scored, out_of_catalog, higher_first=True
+            )
+            by_rerank = measure(
+                "rerank",
+                rerank_at(RERANK_DEPTH),
+                scored,
+                out_of_catalog,
+                higher_first=True,
+            )
             return ResolveResult(
                 catalog.counts,
                 query_set,
                 Measured(
-                    arms,
+                    (by_trigram, by_vector, by_hybrid, by_rerank),
                     depth_sweep,
                     rerank_sweep,
-                    Verdict(reranked.top1, fused.top1, reranked.p95_ms),
+                    Verdict(by_rerank.top1, by_hybrid.top1, by_rerank.p95_ms),
                     store.versions(),
                     loaded.versions,
                     loaded.embedder_load_s,

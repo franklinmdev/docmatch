@@ -13,7 +13,7 @@ from docmatch.resolution.arms import (
     TOP,
     Answer,
     fuse,
-    fused,
+    fused_list,
     hybrid,
     ordered,
     reorder,
@@ -513,11 +513,11 @@ def test_reorder_over_an_empty_fused_list_asks_the_reranker_nothing() -> None:
     assert reranker.calls == []
 
 
-def test_fused_is_the_whole_fused_list_that_fuse_cuts_to_five() -> None:
+def test_fused_list_is_the_whole_fused_list_that_fuse_cuts_to_five() -> None:
     trigram_half = [(f"SKU-{index}", index / 10) for index in range(8)]
     vector_half = [("SKU-9", 0.1), ("SKU-3", 0.2)]
 
-    listed, check = fused(trigram_half, vector_half, depth=25)
+    listed, check = fused_list(trigram_half, vector_half, depth=25)
 
     assert len(listed) == 9
     assert fuse(trigram_half, vector_half, depth=25).answers == listed[:TOP]

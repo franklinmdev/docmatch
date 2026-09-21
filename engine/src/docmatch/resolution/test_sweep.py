@@ -112,7 +112,8 @@ def test_a_p95_over_the_ceiling_drops_the_reranker_whatever_it_gains() -> None:
     assert verdict.kept is False
 
 
-def test_no_headline_on_either_arm_gives_no_verdict() -> None:
+def test_no_headline_on_either_arm_drops_the_reranker() -> None:
+    """The rule has two outcomes: dropped otherwise."""
     assert Verdict(None, 0.917, 100.0).gain is None
-    assert Verdict(None, 0.917, 100.0).kept is None
-    assert Verdict(0.917, None, 100.0).kept is None
+    assert Verdict(None, 0.917, 100.0).kept is False
+    assert Verdict(0.917, None, 100.0).kept is False

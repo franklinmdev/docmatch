@@ -112,6 +112,7 @@ class Loaded:
     embedder_load_s: float
     """Loading the embedder, torch's import and thread setting with it."""
     reranker_load_s: float
+    """Loading the reranker, after the embedder."""
 
 
 ModelLoader = Callable[[], Loaded]

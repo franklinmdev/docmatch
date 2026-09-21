@@ -1260,7 +1260,7 @@ def _verdict(verdict: resolution_sweep.Verdict) -> list[str]:
                 ),
             ],
         ),
-        "  verdict: " + {True: "kept", False: "dropped", None: "none"}[verdict.kept],
+        f"  verdict: {'kept' if verdict.kept else 'dropped'}",
         "  kept means hybrid plus rerank is the arm Phase 4 resolves with",
         "  dropped means the rerank arm and its N sweep are deleted after the "
         "README row lands",
@@ -1269,8 +1269,8 @@ def _verdict(verdict: resolution_sweep.Verdict) -> list[str]:
     ]
 
 
-def _holds(holds: bool | None) -> str:
-    return {True: "yes", False: "no", None: "none"}[holds]
+def _holds(holds: bool) -> str:
+    return "yes" if holds else "no"
 
 
 def _sweep(sweep: resolution_sweep.Sweep, what: str) -> list[str]:

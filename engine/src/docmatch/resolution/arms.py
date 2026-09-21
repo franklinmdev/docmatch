@@ -130,11 +130,11 @@ def fuse(
     trigram_half: Sequence[Row], vector_half: Sequence[Row], depth: int
 ) -> Fetched:
     """The hybrid's five: the fused list cut to five."""
-    listed, check = fused(trigram_half, vector_half, depth)
+    listed, check = fused_list(trigram_half, vector_half, depth)
     return Fetched(listed[:TOP], check)
 
 
-def fused(
+def fused_list(
     trigram_half: Sequence[Row], vector_half: Sequence[Row], depth: int
 ) -> tuple[tuple[Answer, ...], OverFetchOutcome]:
     """The whole fused list from the two halves as the statement returned
@@ -235,7 +235,7 @@ def rerank(
     """The rerank arm's five for a query: the hybrid's fused list at depth
     `depth`, its first `reranked` candidates reordered by the reranker."""
     trigram_half, vector_half, descriptions = _halves(store, embedder, query, depth)
-    listed, check = fused(trigram_half, vector_half, depth)
+    listed, check = fused_list(trigram_half, vector_half, depth)
     reordered = reorder(query, listed, descriptions, reranker, reranked)
     return Fetched(reordered[:TOP], check)
 

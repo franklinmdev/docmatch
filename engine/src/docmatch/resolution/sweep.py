@@ -114,9 +114,10 @@ class Verdict:
         return self.rerank_top1 - self.hybrid_top1
 
     @property
-    def clears_margin(self) -> bool | None:
+    def clears_margin(self) -> bool:
+        """At least one point of gain; no headline to compare clears nothing."""
         gain = self.gain
-        return None if gain is None else gain >= MARGIN - _ROUNDING
+        return gain is not None and gain >= MARGIN - _ROUNDING
 
     @property
     def under_ceiling(self) -> bool:
@@ -124,8 +125,6 @@ class Verdict:
         return self.p95_ms <= CEILING_MS
 
     @property
-    def kept(self) -> bool | None:
-        """Kept when both hold, dropped otherwise, None when there is no
-        headline to compare."""
-        clears = self.clears_margin
-        return None if clears is None else clears and self.under_ceiling
+    def kept(self) -> bool:
+        """Kept when both hold, dropped otherwise, as ADR 0001 has it."""
+        return self.clears_margin and self.under_ceiling
