@@ -779,9 +779,17 @@ scores the answers against the SKU each query was generated from. The
 trigram arm asks pg_trgm for the 25 nearest descriptions; the vector arm
 embeds the query and asks the HNSW index for the 25 nearest embeddings by
 cosine; every arm orders what it got by distance then SKU in code and cuts
-to five. A query's latency is everything it pays on arrival, the embedding
-included; loading the model, embedding the catalog and building the index
-are paid once and reported once.
+to five. The hybrid arm asks both indexes in one statement for d + 25 rows
+each, ranks each half the way its single arm would and cuts it to d, and
+fuses the two by reciprocal rank fusion, each entry scoring `1/(60 + rank)`
+summed over the halves it is in, then orders by fused score then SKU and
+cuts to five. d is a constant in code; before the table, every run sweeps d
+over 25, 50 and 100 on the development slice and prints the value its rule
+gives (the smallest d whose development top-5 is within one point of the
+grid's best) beside the constant, and the scored slice is always measured at
+the constant. A query's latency is everything it pays on arrival, the
+embedding included; loading the model, embedding the catalog and building
+the index are paid once and reported once.
 
 It prints the catalog counts (documents, lines, distinct descriptions,
 entries), the query set per slice (entries, exact, noisy, queries), the noise
@@ -790,8 +798,9 @@ headline table (top-1 and top-5 per arm over the scored slice, the exact
 queries and the noisy variants weighted at the exact weight, a constant in
 code printed beside the table), per arm the rank-1 tie rate, p50 and p95
 latency per query and what the over-fetch check found, what was paid once
-outside the latency (model load, catalog embedding, HNSW build), the same
-scored queries regrouped by kind with top-1 and top-5 per arm, a diagnostic
+outside the latency (model load, catalog embedding, HNSW build), the sweep's
+development top-5 at each d with the constant, the procedure's value and the
+rule, the same scored queries regrouped by kind with top-1 and top-5 per arm, a diagnostic
 that never reaches this README, and a provenance block read at run time: the
 Postgres, pgvector and pg_trgm versions and the `hnsw.ef_search` in effect
 from the server, the embedder and its revision, the `sentence-transformers`
