@@ -616,6 +616,74 @@ def test_two_nameless_pairs_that_agree_outrank_one_that_is_merely_close() -> Non
     ]
 
 
+def test_the_unit_breaks_a_tie_between_nameless_lines_alike_on_every_value() -> None:
+    """The two invoice lines agree on quantity, unit price and amount and
+    differ only in their unit, and a cent of drift on one purchase-order copy
+    leaves the values with nothing to choose by. The unit is one more
+    tiebreak, worth one whole agreement of closeness, so each line pairs with
+    its own copy and no unit variant fires (#118, #124)."""
+    result = matched(
+        record(
+            line(
+                quantity="10",
+                unit_price_gross="1.00",
+                amount_gross="10.00",
+                units_of_measure="hrs",
+            ),
+            line(
+                quantity="10",
+                unit_price_gross="1.00",
+                amount_gross="10.00",
+                units_of_measure="ea",
+            ),
+        ),
+        record(
+            line(
+                quantity="10",
+                unit_price_gross="1.00",
+                amount_gross="10.00",
+                units_of_measure="EA",
+            ),
+            line(
+                quantity="10",
+                unit_price_gross="1.01",
+                amount_gross="10.00",
+                units_of_measure="HRS",
+            ),
+        ),
+    )
+
+    assert [(each.invoice_line, each.po_line) for each in result.pairings] == [
+        (0, 1),
+        (1, 0),
+    ]
+    assert result.findings == ()
+
+
+def test_two_nameless_lines_sharing_only_a_unit_do_not_pair() -> None:
+    """Sharing `ea` is no evidence of the same item: the unit is never an
+    exact agreement that lets two nameless lines pair, only a tiebreak among
+    lines that pair on something else (#118, #124)."""
+    result = matched(
+        record(line(quantity="2", units_of_measure="ea")),
+        record(line(quantity="5", units_of_measure="ea")),
+    )
+
+    assert result.pairings == ()
+    assert result.findings == (
+        UnpairedFinding(
+            "extra line",
+            Place("invoice line", 0),
+            Candidate(0, None, None, "no agreement"),
+        ),
+        UnpairedFinding(
+            "missing line",
+            Place("po line", 0),
+            Candidate(0, None, None, "no agreement"),
+        ),
+    )
+
+
 def test_a_code_scores_beside_the_description_and_is_none_when_a_side_lacks_one() -> (
     None
 ):
