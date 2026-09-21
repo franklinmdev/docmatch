@@ -79,7 +79,7 @@ Measurement before modeling.
 - A catalog of minted SKUs and canonical descriptions, every description that appears in two or more DocILE train documents, and a query set of exact queries and noisy variants that imitate how the saved readings differ from their labels, plus out-of-catalog queries.
 - Postgres with `pgvector` and `pg_trgm`. Hybrid retrieval with reciprocal rank fusion.
 - Cross-encoder reranking over the hybrid's candidates, kept or dropped by a rule written before the number.
-- A separability diagnostic per arm, how well its top-1 score tells an answerable query from an out-of-catalog one; the threshold that routes a line to review is Phase 4's.
+- A separability diagnostic per arm, how well its top-1 score tells an answerable query from an out-of-catalog one; the operating threshold that routes a line to review is Phase 4's.
 
 **The number:** top-1 and top-5 for trigram only, vector only, hybrid, and hybrid plus rerank, with latency per query.
 **Exit:** the table, and a documented keep-or-drop decision on the reranker.
@@ -541,7 +541,7 @@ constant in code.
 The separability diagnostic, from the same run: from each scored query's top-1
 score, the share of the 813 out-of-catalog queries rejected at the cut that
 keeps 0.99, 0.95 and 0.90 of the arm's own answerable scores, and the AUROC,
-both populations weighted at the exact weight. It chooses no threshold; where
+both populations weighted at the exact weight. It chooses no operating threshold; where
 Phase 4 cuts is Phase 4's decision.
 
 **The verdict on the reranker: dropped.** The rule was fixed before any arm was
