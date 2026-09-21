@@ -17,10 +17,12 @@ from collections.abc import Sequence
 import pytest
 
 from docmatch.metrics.normalization import normalize_text
+from docmatch.resolution import queries
 from docmatch.resolution.catalog import (
     Catalog,
     CatalogCounts,
     Entry,
+    ResolutionError,
     build_catalog,
     mint,
 )
@@ -266,6 +268,22 @@ def test_the_extra_words_bleed_never_draws_from_a_catalog_entry() -> None:
 
     assert 14 <= statistics.median(growth) <= 32
     assert abs(fragments - numeric) <= 0.1 * (fragments + numeric)
+
+
+def test_a_bleed_that_carries_an_entry_is_a_rejected_draw_never_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Added text carrying an entry's description is redrawn like a text that
+    is an entry, and a kind that never gets clear is given up: with one draw
+    per kind and every singleton an entry, the fragment bleed can never get
+    clear, so the run says so rather than keeping the entry it carries."""
+    entries = [f"{word} widget" for word in ("alpha", "bravo", "delta", "echo")]
+    entries += [f"{word} gadget" for word in ("kilo", "lima", "mike", "oscar")]
+    catalog = catalog_of(*entries, singletons=entries)
+    monkeypatch.setattr(queries, "ATTEMPTS", 1)
+
+    with pytest.raises(ResolutionError, match="differs from every entry"):
+        build_query_set(catalog)
 
 
 def test_a_catalog_without_singletons_bleeds_numeric_cells_only() -> None:

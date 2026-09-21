@@ -40,10 +40,27 @@ def test_measure_scores_top_1_and_top_5_against_the_query_truth() -> None:
 
     result = measure("fake", lambda text: answers[text], queries)
 
-    assert result.kinds == (KindScore("exact", 4, 1, 2),)
+    assert result.kinds[0] == KindScore("exact", 4, 1, 2)
     assert result.top1 == 0.25
     assert result.top5 == 0.5
     assert result.queries == 4
+
+
+def test_measure_lists_every_kind_with_n_0_for_one_the_slice_does_not_carry() -> None:
+    """The by-kind table has five rows whatever the slice carries, so a small
+    catalog prints the same shape as the real one."""
+    queries = [Query("one", "SKU-1", "exact"), Query("one x", "SKU-1", "extra words")]
+
+    result = measure("fake", lambda text: answering("SKU-1"), queries)
+
+    assert result.kinds == (
+        KindScore("exact", 1, 1, 1),
+        KindScore("extra words", 1, 1, 1),
+        KindScore("letters substituted", 0, 0, 0),
+        KindScore("digits dropped", 0, 0, 0),
+        KindScore("punctuation", 0, 0, 0),
+    )
+    assert result.kinds[2].top1_rate is None
 
 
 def test_measure_counts_ties_at_rank_1_and_what_the_over_fetch_check_found() -> None:

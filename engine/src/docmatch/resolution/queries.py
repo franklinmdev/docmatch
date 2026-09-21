@@ -165,8 +165,9 @@ FRAGMENT_WORDS = (5, 14)
 when the bleed is page text, inclusive bounds, capped at the singleton's."""
 
 ATTEMPTS = 50
-"""How many strength draws a kind gets, and how many kinds a variant gets,
-before the run gives up on its entry."""
+"""How many strength draws a kind gets, an extra-words bleed that carries an
+entry counted as one, and how many kinds a variant gets, before the run
+gives up on its entry."""
 
 
 @dataclass(frozen=True)
@@ -233,12 +234,12 @@ def build_query_set(catalog: Catalog, seed: int = SEED) -> QuerySet:
     rng = random.Random(seed)
     order = list(catalog.entries)
     rng.shuffle(order)
-    development = frozenset(
+    development_skus = frozenset(
         each.sku for each in order[: len(order) // DEVELOPMENT_ONE_IN]
     )
     noise = _Noise(rng, catalog)
     scored: list[Query] = []
-    held_out: list[Query] = []
+    development: list[Query] = []
     variants: list[tuple[Entry, Query]] = []
     for entry in catalog.entries:
         own = [Query(entry.description, entry.sku, "exact")]
@@ -246,10 +247,10 @@ def build_query_set(catalog: Catalog, seed: int = SEED) -> QuerySet:
             variant = noise.variant(entry)
             variants.append((entry, variant))
             own.append(variant)
-        (held_out if entry.sku in development else scored).extend(own)
+        (development if entry.sku in development_skus else scored).extend(own)
     return QuerySet(
         Slice("scored", tuple(scored)),
-        Slice("development", tuple(held_out)),
+        Slice("development", tuple(development)),
         _kind_shares(variants),
         _band_shares(variants),
     )
@@ -380,13 +381,16 @@ class _Noise:
         return text
 
     def _extra_words(self, text: str) -> str:
-        for _ in range(ATTEMPTS):
-            if not self.singletons or self.rng.random() < 0.5:
-                added, in_front = self._numeric(), False
-            else:
-                added, in_front = self._fragment(), self.rng.random() < 0.5
-            if not self._carries_entry(added):
-                break
+        """The text with the bleed added, or the text unchanged when the
+        added text carries an entry: unchanged is an entry's description, so
+        `variant` rejects the draw and redraws the strength, and a bleed that
+        never gets clear gives the kind up, like every other collision."""
+        if not self.singletons or self.rng.random() < 0.5:
+            added, in_front = self._numeric(), False
+        else:
+            added, in_front = self._fragment(), self.rng.random() < 0.5
+        if self._carries_entry(added):
+            return text
         return f"{added} {text}" if in_front else f"{text} {added}"
 
     def _numeric(self) -> str:

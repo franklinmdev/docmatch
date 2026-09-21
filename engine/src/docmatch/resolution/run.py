@@ -93,7 +93,9 @@ class ArmResult:
 
     name: str
     kinds: tuple[KindScore, ...]
-    """One row per kind the slice carries, in the report's order."""
+    """One row per kind, exact and the four noise kinds, in the report's
+    order, n 0 for a kind the slice does not carry, so the table keeps its
+    five rows on a catalog of any size."""
     queries: int
     tied_at_1: int
     """Queries whose first two answers shared a score."""
@@ -193,14 +195,12 @@ def measure(name: str, arm: Arm, queries: Sequence[Query]) -> ArmResult:
         fetched = arm(query.text)
         latencies.append((time.perf_counter() - started) * 1000)
         answered.append((query, fetched))
-    present = {query.kind for query in queries}
     outcomes = Counter(fetched.over_fetch for _, fetched in answered)
     return ArmResult(
         name=name,
         kinds=tuple(
             _score(kind, [each for each in answered if each[0].kind == kind])
             for kind in QUERY_KINDS
-            if kind in present
         ),
         queries=len(queries),
         tied_at_1=sum(fetched.tied_at_1 for _, fetched in answered),
