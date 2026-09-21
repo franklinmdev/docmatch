@@ -13,13 +13,16 @@ from docmatch.resolution.arms import (
     TOP,
     Answer,
     fuse,
+    fused,
     hybrid,
     ordered,
+    reorder,
+    rerank,
     trigram,
     vector,
 )
 from docmatch.resolution.catalog import Entry, mint
-from docmatch.resolution.conftest import BucketEmbedder
+from docmatch.resolution.conftest import BucketEmbedder, WordReranker
 from docmatch.resolution.store import Store
 
 
@@ -437,3 +440,126 @@ def test_hybrid_asks_for_a_search_list_as_wide_as_its_fetch(
     hybrid(asking, embedder, "widget", depth=25)
 
     assert asking.asked == [100 + FETCH, 25 + FETCH]
+
+
+def candidates(*descriptions: str) -> tuple[tuple[Answer, ...], dict[str, str]]:
+    """A fused list in the order given, at falling fused scores, and the
+    description each SKU stands for."""
+    listed = tuple(
+        Answer(mint(each), 1 / (RRF_K + rank))
+        for rank, each in enumerate(descriptions, start=1)
+    )
+    return listed, {mint(each): each for each in descriptions}
+
+
+def test_reorder_reranks_the_first_n_and_leaves_every_candidate_past_n_in_place() -> (
+    None
+):
+    """Twelve candidates at N = 10: the exact description, fused tenth, comes
+    first; the two past N keep the fused order and the fused score, though
+    one of them is exact too."""
+    words = [f"widget {letter}" for letter in string.ascii_lowercase[:9]]
+    listed, descriptions = candidates(*words, "widget", "gadget", "widget")
+    listed = (*listed[:11], Answer("SKU-past", listed[11].score))
+    descriptions["SKU-past"] = "widget"
+    reranker = WordReranker()
+
+    reordered = reorder("widget", listed, descriptions, reranker, reranked=10)
+
+    assert reordered[0] == Answer(mint("widget"), 0.0)
+    assert reordered[10:] == listed[10:]
+    assert {each.sku for each in reordered[:10]} == {each.sku for each in listed[:10]}
+    assert reranker.calls == [
+        tuple(("widget", descriptions[each.sku]) for each in listed[:10])
+    ]
+
+
+def test_reorder_reranks_a_fused_list_shorter_than_n_whole() -> None:
+    listed, descriptions = candidates("widget a b", "widget a", "widget")
+    reranker = WordReranker()
+
+    reordered = reorder("widget", listed, descriptions, reranker, reranked=10)
+
+    assert [each.sku for each in reordered] == [
+        mint("widget"),
+        mint("widget a"),
+        mint("widget a b"),
+    ]
+    assert [each.score for each in reordered] == [0.0, -1.0, -2.0]
+    assert len(reranker.calls) == 1
+    assert len(reranker.calls[0]) == 3
+
+
+def test_reorder_breaks_a_tie_in_reranker_score_by_sku() -> None:
+    """Six candidates each one word off the query tie at -1.0; they come
+    back by SKU ascending whatever order the fusion put them in."""
+    words = [f"widget {letter}" for letter in "abcdef"]
+    listed, descriptions = candidates(*words)
+    backwards, _ = candidates(*reversed(words))
+
+    reordered = reorder("widget", listed, descriptions, WordReranker(), reranked=10)
+
+    assert [each.sku for each in reordered] == sorted(mint(each) for each in words)
+    assert reordered == reorder(
+        "widget", backwards, descriptions, WordReranker(), reranked=10
+    )
+    assert {each.score for each in reordered} == {-1.0}
+
+
+def test_reorder_over_an_empty_fused_list_asks_the_reranker_nothing() -> None:
+    reranker = WordReranker()
+
+    assert reorder("widget", (), {}, reranker, reranked=10) == ()
+    assert reranker.calls == []
+
+
+def test_fused_is_the_whole_fused_list_that_fuse_cuts_to_five() -> None:
+    trigram_half = [(f"SKU-{index}", index / 10) for index in range(8)]
+    vector_half = [("SKU-9", 0.1), ("SKU-3", 0.2)]
+
+    listed, check = fused(trigram_half, vector_half, depth=25)
+
+    assert len(listed) == 9
+    assert fuse(trigram_half, vector_half, depth=25).answers == listed[:TOP]
+    assert check == "short"
+
+
+def test_rerank_is_the_hybrid_fused_list_reordered_by_the_reranker(
+    store: Store, embedder: BucketEmbedder
+) -> None:
+    """The query `widget`: the hybrid ranks every two-word widget above the
+    exact entry's neighbours as the halves put them, and the reranker, fed
+    the catalog's own descriptions, puts the exact entry first and the rest
+    by how many words they miss, then by SKU."""
+    catalog = entries("widget", "blue widget", "widget blu", "red widget", "gadget")
+    catalog += entries("widget blue red")
+    store.rebuild(catalog, embedder)
+    reranker = WordReranker()
+    del embedder.calls[:]
+
+    fetched = rerank(store, embedder, reranker, "widget", depth=25, reranked=10)
+
+    assert embedder.calls == [("widget",)]
+    assert len(reranker.calls) == 1
+    asked = reranker.calls[0]
+    assert sorted(description for _, description in asked) == sorted(
+        each.description for each in catalog
+    ), "six entries, a fused list shorter than N, reranked whole"
+    assert {query for query, _ in asked} == {"widget"}
+    assert fetched.answers[0] == Answer(mint("widget"), 0.0)
+    assert [each.score for each in fetched.answers] == [0.0, -1.0, -1.0, -1.0, -2.0]
+    assert [each.sku for each in fetched.answers[1:4]] == sorted(
+        mint(each) for each in ("blue widget", "widget blu", "red widget")
+    )
+    assert fetched.over_fetch == hybrid(store, embedder, "widget", depth=25).over_fetch
+
+
+def test_rerank_asks_for_a_search_list_as_wide_as_the_hybrids(
+    store: Store, embedder: BucketEmbedder
+) -> None:
+    asking = Asking(store.connection, store.schema)
+    asking.rebuild(entries("blue widget"), embedder)
+
+    rerank(asking, embedder, WordReranker(), "widget", depth=100, reranked=10)
+
+    assert asking.asked == [100 + FETCH]

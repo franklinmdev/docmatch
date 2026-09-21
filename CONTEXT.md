@@ -191,5 +191,5 @@ The procedure that sets the two depth constants on the development slice: d, the
 _Avoid_: hyperparameter search, tuning, grid search
 
 **Keep-or-drop rule**:
-ADR 0001's rule on the reranker, fixed before any arm was measured: kept when its headline top-1 at the swept N clears the hybrid's by at least a pinned margin and its p95 latency per query on the named machine stays under a pinned ceiling, dropped otherwise. Top-1 alone decides. The two thresholds are constants in code beside d and N, and the command prints the verdict with both measurements against both. Kept means hybrid plus rerank is the arm Phase 4 resolves with; dropped means the arm and its N sweep are deleted after the row lands.
+ADR 0001's rule on the reranker, fixed before any arm was measured: kept when its headline top-1 at the swept N clears the hybrid's by at least a pinned margin and its p95 latency per query on the named machine stays at or under a pinned ceiling, dropped otherwise. Top-1 alone decides. The two thresholds are constants in code beside d and N, and the command prints the verdict with both measurements against both. Kept means hybrid plus rerank is the arm Phase 4 resolves with; dropped means the arm and its N sweep are deleted after the row lands.
 _Avoid_: ablation (on its own), go/no-go, success criterion

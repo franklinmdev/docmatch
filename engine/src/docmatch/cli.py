@@ -1128,6 +1128,8 @@ def render_resolve(result: resolution.ResolveResult) -> str:
             ],
         ),
         "",
+        *_verdict(measured.verdict),
+        "",
         f"Separability, top-1 score, {len(queries.scored.queries)} answerable "
         f"against {len(queries.scored.out_of_catalog)} out of catalog, both "
         "weighted by w",
@@ -1180,12 +1182,18 @@ def render_resolve(result: resolution.ResolveResult) -> str:
         "",
         "Paid once, outside the latency",
         *_rows(
-            ("model load", f"{measured.load_s:.2f} s"),
+            ("embedder load", f"{measured.embedder_load_s:.2f} s"),
+            ("reranker load", f"{measured.reranker_load_s:.2f} s"),
             ("catalog embedding", f"{measured.build.embedding_s:.2f} s"),
             ("hnsw build", f"{measured.build.index_s:.2f} s"),
         ),
         "",
         *_sweep(measured.depth_sweep, "per hybrid half"),
+        "",
+        *_sweep(
+            measured.rerank_sweep,
+            f"pairs to the reranker at the constant d, {measured.depth_sweep.constant}",
+        ),
         "",
         "By kind, the same scored queries regrouped, report only",
         *_by_kind(measured.arms),
@@ -1198,6 +1206,8 @@ def render_resolve(result: resolution.ResolveResult) -> str:
             ("hnsw ef_search", measured.versions.ef_search),
             ("embedder", measured.models.embedder),
             ("embedder revision", measured.models.embedder_revision),
+            ("reranker", measured.models.reranker),
+            ("reranker revision", measured.models.reranker_revision),
             ("sentence-transformers", measured.models.sentence_transformers),
             ("torch", measured.models.torch),
             ("torch threads", str(measured.models.torch_threads)),
@@ -1225,6 +1235,42 @@ def _out_of_catalog_row(one: Slice) -> tuple[str, str, str, str]:
 
 def _rate(rate: float | None) -> str:
     return "none" if rate is None else f"{rate:.3f}"
+
+
+def _verdict(verdict: resolution_sweep.Verdict) -> list[str]:
+    """ADR 0001's rule: both measurements against both constants, the
+    verdict, and what each verdict does, printed whatever it is."""
+    gain = verdict.gain
+    return [
+        "Keep-or-drop verdict on the reranker, ADR 0001, over the scored slice",
+        *_table(
+            ("measurement", "value", "constant", "holds"),
+            [
+                (
+                    "rerank top-1 less hybrid top-1",
+                    "none" if gain is None else f"{gain:+.3f}",
+                    f"at least {resolution_sweep.MARGIN:.3f}",
+                    _holds(verdict.clears_margin),
+                ),
+                (
+                    "rerank p95 per query",
+                    f"{verdict.p95_ms:.2f} ms",
+                    f"at most {resolution_sweep.CEILING_MS:.0f} ms",
+                    _holds(verdict.under_ceiling),
+                ),
+            ],
+        ),
+        "  verdict: " + {True: "kept", False: "dropped", None: "none"}[verdict.kept],
+        "  kept means hybrid plus rerank is the arm Phase 4 resolves with",
+        "  dropped means the rerank arm and its N sweep are deleted after the "
+        "README row lands",
+        "  top-1 alone decides; the separability below is printed beside it "
+        "and never weighed",
+    ]
+
+
+def _holds(holds: bool | None) -> str:
+    return {True: "yes", False: "no", None: "none"}[holds]
 
 
 def _sweep(sweep: resolution_sweep.Sweep, what: str) -> list[str]:

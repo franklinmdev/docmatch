@@ -38,16 +38,27 @@ in use inside the CTEs, checked with `EXPLAIN` on the real catalog, and
 the HNSW search list is widened to `d + FETCH` for the statement when that
 is past its pin, since the index returns at most that many rows. Each half
 runs the over-fetch check at its own cut, d, and a tie group reaching
-either half's boundary is the arm's. The rerank arm joins in #131.
+either half's boundary is the arm's. The statement also returns each row's
+canonical description, which the hybrid does not read and the rerank arm
+sends to the reranker, so both arms run the one statement.
+
+Rerank: the hybrid's statement and fusion, then the fused list's first N
+candidates sent to the reranker as (query, canonical description) pairs in
+one call, their new order by reranker score descending then SKU replacing
+the first N of the fused order, and the first five the arm's answer (#120,
+#131). N is capped at the fused list's length, so a shorter list is
+reranked whole, and the grid never goes below 10, so the five always come
+from reranked candidates. The over-fetch check is the hybrid's, since the
+candidates are.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
 from psycopg import sql
 
-from docmatch.resolution.models import Embedder
+from docmatch.resolution.models import Embedder, Reranker
 from docmatch.resolution.store import Store, StoreError, vector_literal
 
 TOP = 5
@@ -118,19 +129,50 @@ def ordered(rows: Sequence[Row]) -> Fetched:
 def fuse(
     trigram_half: Sequence[Row], vector_half: Sequence[Row], depth: int
 ) -> Fetched:
-    """The hybrid's five from its two halves as the statement returned them,
-    each fetched at `depth + FETCH` rows: each half ranked and cut to
+    """The hybrid's five: the fused list cut to five."""
+    listed, check = fused(trigram_half, vector_half, depth)
+    return Fetched(listed[:TOP], check)
+
+
+def fused(
+    trigram_half: Sequence[Row], vector_half: Sequence[Row], depth: int
+) -> tuple[tuple[Answer, ...], OverFetchOutcome]:
+    """The whole fused list from the two halves as the statement returned
+    them, each fetched at `depth + FETCH` rows: each half ranked and cut to
     `depth`, the reciprocal ranks summed per SKU over both, then fused score
-    descending, then SKU ascending, cut to five."""
+    descending, then SKU ascending; with both halves' over-fetch check."""
     halves = (_ranked(trigram_half), _ranked(vector_half))
-    fused: dict[str, float] = {}
+    scores: dict[str, float] = {}
     for half in halves:
         for rank, (sku, _) in enumerate(half[:depth], start=1):
-            fused[sku] = fused.get(sku, 0.0) + 1 / (RRF_K + rank)
-    ranked = sorted(fused.items(), key=lambda item: (-item[1], item[0]))
-    answers = tuple(Answer(sku, score) for sku, score in ranked[:TOP])
+            scores[sku] = scores.get(sku, 0.0) + 1 / (RRF_K + rank)
+    ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     checks = [_check(half, depth, depth + FETCH) for half in halves]
-    return Fetched(answers, min(checks, key=_WORST_FIRST.index))
+    return (
+        tuple(Answer(sku, score) for sku, score in ranked),
+        min(checks, key=_WORST_FIRST.index),
+    )
+
+
+def reorder(
+    query: str,
+    listed: Sequence[Answer],
+    descriptions: Mapping[str, str],
+    reranker: Reranker,
+    reranked: int,
+) -> tuple[Answer, ...]:
+    """The fused list with its first `reranked` candidates scored by the
+    reranker in one call and ordered by that score descending, then SKU;
+    every candidate past them keeps its place and its fused score."""
+    head = listed[:reranked]
+    if not head:
+        return ()
+    scores = reranker.score([(query, descriptions[each.sku]) for each in head])
+    rescored = sorted(
+        (Answer(each.sku, score) for each, score in zip(head, scores, strict=True)),
+        key=lambda answer: (-answer.score, answer.sku),
+    )
+    return (*rescored, *listed[reranked:])
 
 
 def _ranked(rows: Sequence[Row]) -> list[Row]:
@@ -178,6 +220,31 @@ def vector(store: Store, embedder: Embedder, query: str) -> Fetched:
 def hybrid(store: Store, embedder: Embedder, query: str, depth: int) -> Fetched:
     """The hybrid arm's five for a query at depth `depth` per half: embedded
     once, both halves fetched in one statement, fused in code."""
+    trigram_half, vector_half, _ = _halves(store, embedder, query, depth)
+    return fuse(trigram_half, vector_half, depth)
+
+
+def rerank(
+    store: Store,
+    embedder: Embedder,
+    reranker: Reranker,
+    query: str,
+    depth: int,
+    reranked: int,
+) -> Fetched:
+    """The rerank arm's five for a query: the hybrid's fused list at depth
+    `depth`, its first `reranked` candidates reordered by the reranker."""
+    trigram_half, vector_half, descriptions = _halves(store, embedder, query, depth)
+    listed, check = fused(trigram_half, vector_half, depth)
+    reordered = reorder(query, listed, descriptions, reranker, reranked)
+    return Fetched(reordered[:TOP], check)
+
+
+def _halves(
+    store: Store, embedder: Embedder, query: str, depth: int
+) -> tuple[list[Row], list[Row], dict[str, str]]:
+    """The hybrid's one statement: the query embedded once, both halves
+    fetched at `depth + FETCH` rows, and every returned SKU's description."""
     (embedded,) = embedder.embed([query])
     literal = vector_literal(embedded)
     table = sql.Identifier(store.schema, "catalog")
@@ -186,21 +253,26 @@ def hybrid(store: Store, embedder: Embedder, query: str, depth: int) -> Fetched:
         rows = store.connection.execute(
             sql.SQL(
                 "WITH trigram AS ("
-                "SELECT sku, description <-> %(query)s AS distance FROM {table} "
+                "SELECT sku, description, description <-> %(query)s AS distance "
+                "FROM {table} "
                 "ORDER BY description <-> %(query)s LIMIT %(fetch)s), "
                 "vector AS ("
-                "SELECT sku, embedding <=> %(embedded)s::vector AS distance "
+                "SELECT sku, description, "
+                "embedding <=> %(embedded)s::vector AS distance "
                 "FROM {table} "
                 "ORDER BY embedding <=> %(embedded)s::vector LIMIT %(fetch)s) "
-                "SELECT 'trigram', sku, distance FROM trigram "
-                "UNION ALL SELECT 'vector', sku, distance FROM vector"
+                "SELECT 'trigram', sku, distance, description FROM trigram "
+                "UNION ALL SELECT 'vector', sku, distance, description FROM vector"
             ).format(table=table),
             {"query": query, "embedded": literal, "fetch": fetch},
         ).fetchall()
     halves: dict[str, list[Row]] = {"trigram": [], "vector": []}
-    for half, sku, distance in rows:
-        halves[str(half)].append(_row(sku, distance))
-    return fuse(halves["trigram"], halves["vector"], depth)
+    descriptions: dict[str, str] = {}
+    for half, sku, distance, description in rows:
+        row = _row(sku, distance)
+        halves[str(half)].append(row)
+        descriptions[row[0]] = str(description)
+    return halves["trigram"], halves["vector"], descriptions
 
 
 def _row(sku: object, distance: object) -> tuple[str, float]:

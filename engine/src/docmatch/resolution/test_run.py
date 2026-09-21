@@ -9,7 +9,12 @@ import pytest
 
 from docmatch.resolution.arms import FETCH, Answer, Fetched, ordered
 from docmatch.resolution.catalog import Entry, build_catalog, mint
-from docmatch.resolution.conftest import FAKE_VERSIONS, BucketEmbedder, fake_loader
+from docmatch.resolution.conftest import (
+    FAKE_VERSIONS,
+    BucketEmbedder,
+    WordReranker,
+    fake_loader,
+)
 from docmatch.resolution.models import Loaded, Vector
 from docmatch.resolution.queries import Query, QueryKind
 from docmatch.resolution.run import (
@@ -26,7 +31,15 @@ from docmatch.resolution.run import (
     sweep,
 )
 from docmatch.resolution.store import StoreError
-from docmatch.resolution.sweep import DEPTH, DEPTHS, Point, Sweep
+from docmatch.resolution.sweep import (
+    DEPTH,
+    DEPTHS,
+    RERANK_DEPTH,
+    RERANK_DEPTHS,
+    Point,
+    Sweep,
+    Verdict,
+)
 from docmatch.resolution.test_catalog import described
 
 
@@ -170,13 +183,18 @@ def test_an_arm_over_no_queries_has_no_rates() -> None:
 class Loader:
     """A loader that counts its calls and hands out the fake."""
 
-    def __init__(self, embedder: BucketEmbedder | None = None) -> None:
+    def __init__(
+        self,
+        embedder: BucketEmbedder | None = None,
+        reranker: WordReranker | None = None,
+    ) -> None:
         self.calls = 0
         self.embedder = embedder or BucketEmbedder()
+        self.reranker = reranker or WordReranker()
 
     def __call__(self) -> Loaded:
         self.calls += 1
-        return fake_loader(self.embedder, load_s=0.5)
+        return fake_loader(self.embedder, self.reranker)
 
 
 def test_resolve_over_an_empty_catalog_touches_no_database_and_loads_nothing() -> None:
@@ -216,9 +234,9 @@ def test_resolve_answers_every_exact_query_with_its_own_entry_first_on_every_arm
     result = resolve(catalog, database_url, loader, schema="resolution_test")
 
     assert result.measured is not None
-    trigram, vector, hybrid = result.measured.arms
-    assert (trigram.name, vector.name, hybrid.name) == ("trigram", "vector", "hybrid")
-    for arm in (trigram, vector, hybrid):
+    arms = result.measured.arms
+    assert [each.name for each in arms] == ["trigram", "vector", "hybrid", "rerank"]
+    for arm in arms:
         assert arm.kinds[0] == KindScore("exact", 3, 3, 3)
         assert arm.queries == 9, "three exact and six variants, no development entry"
         assert sum(each.n for each in arm.kinds[1:]) == 6
@@ -227,22 +245,30 @@ def test_resolve_answers_every_exact_query_with_its_own_entry_first_on_every_arm
     assert result.measured.depth_sweep == Sweep(
         "d", DEPTH, tuple(Point(value, None, 0) for value in DEPTHS)
     )
+    assert result.measured.rerank_sweep == Sweep(
+        "N", RERANK_DEPTH, tuple(Point(value, None, 0) for value in RERANK_DEPTHS)
+    )
+    assert result.measured.verdict == Verdict(
+        arms[3].top1, arms[2].top1, arms[3].p95_ms
+    )
     assert result.measured.versions.pg_trgm
     assert result.measured.models == FAKE_VERSIONS
-    assert result.measured.load_s == 0.5
+    assert result.measured.embedder_load_s == 0.5
+    assert result.measured.reranker_load_s == 0.25
     assert result.measured.build.embedding_s >= 0
     assert result.measured.build.index_s >= 0
     assert result.measured.machine.logical_cpus >= 1
     assert loader.calls == 1
 
 
-def test_the_embedding_arms_pay_for_the_embedding_and_not_for_the_load(
+def test_the_model_arms_pay_for_their_models_and_not_for_the_load(
     database_url: str,
 ) -> None:
-    """A query's latency is everything it pays on arrival: the vector and
-    hybrid arms' p50 carry the embedder's time, the trigram arm's does not,
-    and the load is reported once as what the loader said. The gap between
-    arms is asserted rather than either arm's own bound, so a slow runner
+    """A query's latency is everything it pays on arrival: the vector,
+    hybrid and rerank arms' p50 carry the embedder's time, the trigram
+    arm's does not, the rerank arm's carries the reranker's on top, and each
+    load is reported once as what the loader said. The gaps between arms
+    are asserted rather than either arm's own bound, so a slow runner
     cannot fail it."""
 
     class Slow(BucketEmbedder):
@@ -250,15 +276,49 @@ def test_the_embedding_arms_pay_for_the_embedding_and_not_for_the_load(
             time.sleep(0.02)
             return super().embed(texts)
 
+    class SlowReranker(WordReranker):
+        def score(self, pairs: Sequence[tuple[str, str]]) -> tuple[float, ...]:
+            time.sleep(0.02)
+            return super().score(pairs)
+
     catalog = build_catalog([described("Blue widget"), described("Blue widget")])
 
-    result = resolve(catalog, database_url, Loader(Slow()), schema="resolution_test")
+    result = resolve(
+        catalog,
+        database_url,
+        Loader(Slow(), SlowReranker()),
+        schema="resolution_test",
+    )
 
     assert result.measured is not None
-    trigram, vector, hybrid = result.measured.arms
+    trigram, vector, hybrid, rerank = result.measured.arms
     assert vector.p50_ms - trigram.p50_ms >= 15
     assert hybrid.p50_ms - trigram.p50_ms >= 15
-    assert result.measured.load_s == 0.5
+    assert rerank.p50_ms - hybrid.p50_ms >= 15
+    assert result.measured.embedder_load_s == 0.5
+    assert result.measured.reranker_load_s == 0.25
+
+
+def test_the_rerank_arm_is_measured_at_the_constants_and_sends_n_pairs(
+    database_url: str,
+) -> None:
+    """Twelve entries, so a fused list longer than the smallest N: every
+    scored query sends the reranker at most the constant N pairs, and the
+    sweep over the development slice sends each N of the grid."""
+    names = [f"Widget {letter}" for letter in "abcdefghijkl"]
+    catalog = build_catalog([described(*names), described(*names)])
+    reranker = WordReranker()
+
+    result = resolve(
+        catalog, database_url, Loader(reranker=reranker), schema="resolution_test"
+    )
+
+    assert result.measured is not None
+    sizes = {len(each) for each in reranker.calls}
+    assert sizes == {min(RERANK_DEPTH, len(names))} | {
+        min(value, len(names)) for value in RERANK_DEPTHS
+    }
+    assert result.measured.arms[3].name == "rerank"
 
 
 def test_a_statement_the_server_refuses_is_reported_not_raised(
