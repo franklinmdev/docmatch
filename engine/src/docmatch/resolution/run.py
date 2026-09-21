@@ -12,23 +12,26 @@ arm wins and never reaches the README.
 
 The table is produced once over the scored slice, queries no knob was set on.
 The development slice is where the depth sweep runs, before the table: the
-hybrid arm at every d of the grid, scored by its development headline top-5,
-and the rule in `sweep` applied to the result. The scored slice is then
-measured at the constant d in code, never at the swept value, so a
-disagreement between the two is printed rather than silently moving the table
-(#130). The sweep is scored and not timed. Latency is everything a query pays
-on arrival, measured one query at a time on one connection, after a discarded
-warmup pass over the same queries, as p50 and p95 over the scored pass,
-answerable and out of catalog alike, since a line pays the same whether it is
-in the catalog or not (#120, #132). For the trigram arm that is the SQL and
-the ordering; for the vector and hybrid arms the embedding of the query too,
-and the warmup pass covers the model with it; for the hybrid the one
-statement and the fusion. The rerank joins the count with its arm. Model
-load, embedding the catalog and building the HNSW index are each timed once
-and reported beside the table, never per query. The models are loaded through
-the loader given, after the database has answered with both extensions and
-only when there is something to resolve, so a database that does not answer,
-or one missing an extension, is reported without loading anything.
+hybrid arm at every d of the grid, then the rerank arm at every N of its
+grid over the constant d, each scored by its development headline top-5,
+and the rule in `sweep` applied to each. The scored slice is then measured
+at the constants in code, never at the swept values, so a disagreement
+between the two is printed rather than silently moving the table (#130,
+#131). The sweep is scored and not timed. The keep-or-drop verdict is ADR
+0001's rule over the scored slice's rerank and hybrid rows. Latency is
+everything a query pays on arrival, measured one query at a time on one
+connection, after a discarded warmup pass over the same queries, as p50 and
+p95 over the scored pass, answerable and out of catalog alike, since a line
+pays the same whether it is in the catalog or not (#120, #132). For the
+trigram arm that is the SQL and the ordering; for the vector and hybrid arms
+the embedding of the query too, and the warmup pass covers the model with
+it; for the hybrid the one statement and the fusion; for the rerank arm the
+hybrid's cost and the reranker's one call. Each model's load, embedding the
+catalog and building the HNSW index are each timed once and reported beside
+the table, never per query. The models are loaded through the loader given,
+after the database has answered with both extensions and only when there is
+something to resolve, so a database that does not answer, or one missing an
+extension, is reported without loading anything.
 
 The run also tallies what the over-fetch check found: on how many full
 fetches the score at the fetched boundary equalled the score at the cut, and
@@ -42,15 +45,15 @@ The out-of-catalog queries never enter the headline, the tie rate or the
 table by kind; they feed one diagnostic per arm, how well its top-1 score
 tells a query in the catalog from one that is not (#119). Scores enter as
 distances, lower first, as the index arms order them; the hybrid's fused
-score is higher first (#130) and enters negated, so beyond a cut means the
-same thing on every arm, and a query an arm answered with nothing counts as
-farthest either way. The four arms' scores are not commensurable, so each cut
-anchors to the arm's own answerable distribution: the smallest score that
-keeps `KEPT` of answerable at or under it, and the share of out-of-catalog
-queries beyond it. The cut is a reporting device; no threshold is chosen,
-which is Phase 4 routing's call. Beside it AUROC, answerable positive, the
-chance an out-of-catalog query sits farther than an answerable one with ties
-at half, which is rank based and so scale free.
+score and the reranker's are higher first (#130, #131) and enter negated, so
+beyond a cut means the same thing on every arm, and a query an arm answered
+with nothing counts as farthest either way. The four arms' scores are not
+commensurable, so each cut anchors to the arm's own answerable distribution:
+the smallest score that keeps `KEPT` of answerable at or under it, and the
+share of out-of-catalog queries beyond it. The cut is a reporting device; no
+threshold is chosen, which is Phase 4 routing's call. Beside it AUROC,
+answerable positive, the chance an out-of-catalog query sits farther than an
+answerable one with ties at half, which is rank based and so scale free.
 
 Both populations are weighted the way the headline is: the exact queries
 carry `w` of their population and the noisy ones the rest. scipy 1.18's
@@ -70,7 +73,7 @@ import psycopg
 from scipy.stats import mannwhitneyu
 
 from docmatch.metrics.score import percentile_of, share_of
-from docmatch.resolution.arms import Fetched, hybrid, trigram, vector
+from docmatch.resolution.arms import Fetched, hybrid, rerank, trigram, vector
 from docmatch.resolution.catalog import Catalog, CatalogCounts
 from docmatch.resolution.models import ModelLoader, ModelVersions
 from docmatch.resolution.queries import (
@@ -90,7 +93,15 @@ from docmatch.resolution.store import (
     connect,
     machine,
 )
-from docmatch.resolution.sweep import DEPTH, DEPTHS, Point, Sweep
+from docmatch.resolution.sweep import (
+    DEPTH,
+    DEPTHS,
+    RERANK_DEPTH,
+    RERANK_DEPTHS,
+    Point,
+    Sweep,
+    Verdict,
+)
 
 EXACT_WEIGHT = 2 / 3
 """The share of a headline the exact queries carry, inside #116's 0.65 to
@@ -265,10 +276,16 @@ class Measured:
     depth_sweep: Sweep
     """The depth sweep on the development slice, beside the constant the
     hybrid arm was measured at."""
+    rerank_sweep: Sweep
+    """The N sweep at the constant d, beside the constant the rerank arm was
+    measured at."""
+    verdict: Verdict
     versions: ServerVersions
     models: ModelVersions
-    load_s: float
-    """Loading the models, once, outside any query's latency."""
+    embedder_load_s: float
+    """Loading the embedder, once, outside any query's latency."""
+    reranker_load_s: float
+    """Loading the reranker, the same way."""
     build: Build
     machine: Machine
 
@@ -306,43 +323,54 @@ def resolve(
             # cluster missing one is reported without paying for the load.
             store.versions()
             loaded = load()
-            embedder = loaded.embedder
+            embedder, reranker = loaded.embedder, loaded.reranker
             build = store.rebuild(catalog.entries, embedder)
+            development = query_set.development.queries
             out_of_catalog = query_set.scored.out_of_catalog
 
             def hybrid_at(depth: int) -> Arm:
                 return lambda text: hybrid(store, embedder, text, depth)
 
-            depth_sweep = sweep(
-                "d", DEPTH, DEPTHS, hybrid_at, query_set.development.queries
+            def rerank_at(reranked: int) -> Arm:
+                return lambda text: rerank(
+                    store, embedder, reranker, text, DEPTH, reranked
+                )
+
+            depth_sweep = sweep("d", DEPTH, DEPTHS, hybrid_at, development)
+            rerank_sweep = sweep(
+                "N", RERANK_DEPTH, RERANK_DEPTHS, rerank_at, development
             )
-            arms = (
-                measure(
-                    "trigram", lambda text: trigram(store, text), scored, out_of_catalog
-                ),
-                measure(
-                    "vector",
-                    lambda text: vector(store, embedder, text),
-                    scored,
-                    out_of_catalog,
-                ),
-                measure(
-                    "hybrid",
-                    hybrid_at(DEPTH),
-                    scored,
-                    out_of_catalog,
-                    higher_first=True,
-                ),
+            by_trigram = measure(
+                "trigram", lambda text: trigram(store, text), scored, out_of_catalog
+            )
+            by_vector = measure(
+                "vector",
+                lambda text: vector(store, embedder, text),
+                scored,
+                out_of_catalog,
+            )
+            by_hybrid = measure(
+                "hybrid", hybrid_at(DEPTH), scored, out_of_catalog, higher_first=True
+            )
+            by_rerank = measure(
+                "rerank",
+                rerank_at(RERANK_DEPTH),
+                scored,
+                out_of_catalog,
+                higher_first=True,
             )
             return ResolveResult(
                 catalog.counts,
                 query_set,
                 Measured(
-                    arms,
+                    (by_trigram, by_vector, by_hybrid, by_rerank),
                     depth_sweep,
+                    rerank_sweep,
+                    Verdict(by_rerank.top1, by_hybrid.top1, by_rerank.p95_ms),
                     store.versions(),
                     loaded.versions,
-                    loaded.load_s,
+                    loaded.embedder_load_s,
+                    loaded.reranker_load_s,
                     build,
                     machine(),
                 ),
