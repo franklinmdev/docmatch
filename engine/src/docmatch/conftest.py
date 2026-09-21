@@ -6,11 +6,14 @@ here touches `data/`, which is how the suite stays runnable in CI.
 """
 
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from docmatch.docile.annotation import Annotation
+from docmatch.resolution.catalog import ResolutionError
+from docmatch.resolution.store import Store, connect, resolve_database_url
 
 FIXTURES = Path(__file__).parent / "docile" / "fixtures"
 SYNTHETIC_ANNOTATION = FIXTURES / "synthetic_annotation.json"
@@ -54,3 +57,32 @@ def synthetic_subset() -> Path:
     real document content, so it is committed and CI needs no dataset.
     """
     return SYNTHETIC_SUBSET
+
+
+TEST_SCHEMA = "resolution_test"
+"""Where the tests build their catalogs, so a run's `resolution` schema is
+left for inspection."""
+
+
+@pytest.fixture
+def database_url() -> str:
+    """The database the resolution tests run against, at the command's own
+    precedence, or a skip when none answers: CI has the container and the
+    named machine has the socket, and a machine without either is not a
+    broken engine, the corpus pattern."""
+    url = resolve_database_url(None)
+    try:
+        connect(url).close()
+    except ResolutionError as error:
+        pytest.skip(str(error))
+    return url
+
+
+@pytest.fixture
+def store(database_url: str) -> Iterator[Store]:
+    """One connection to that database, on the test schema, closed after."""
+    connection = connect(database_url)
+    try:
+        yield Store(connection, TEST_SCHEMA)
+    finally:
+        connection.close()
