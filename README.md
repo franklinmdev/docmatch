@@ -553,8 +553,9 @@ gain of -0.029 against the required +0.010; its p95 is 82.53 ms against the
 500 ms ceiling, which holds. Top-1 alone decides, so Phase 4 resolves with the
 hybrid arm, and the rerank arm and its N sweep are deleted from the command
 (#143); this row stays reachable at [`27bc70d`](https://github.com/franklinmdev/docmatch/commit/27bc70d).
-The arm was deleted in #143, so `docmatch resolve` now prints three rows, no
-N sweep and no verdict.
+The arm was deleted in #143 at
+[`4946061`](https://github.com/franklinmdev/docmatch/commit/4946061), so
+`docmatch resolve` now prints three rows, no N sweep and no verdict.
 
 **What the table says.** Trigram only leads the headline, and at p50 it
 answers in under a millisecond, thirteen times faster than the vector arm,
