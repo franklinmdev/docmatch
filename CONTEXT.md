@@ -136,18 +136,18 @@ _Avoid_: product, item, master data
 
 **SKU**:
 The identifier a catalog entry is minted with: `SKU-` and the first eight hex characters of the SHA-256 of its canonical description. It depends on that description alone, so it never shifts when the catalog changes; a collision raises, and DocILE's own line codes play no part in it. It is the truth an answerable query is scored against.
-_Avoid_: id, code
+_Avoid_: id, code (on its own)
 
 **Query**:
 One normalized description sent to an arm to be resolved, and nothing else: no code, no quantity, no price. It never carries two entries. Every query is either answerable or out of catalog.
 _Avoid_: search, lookup
 
 **Answerable query**:
-A query generated from a catalog entry and carrying that entry's SKU as its truth. Every entry carries three, one exact query and two noisy variants, and only answerable queries enter the headline.
+A query generated from a catalog entry and carrying that entry's SKU as its truth. Every entry carries three, one exact query and two noisy variants.
 _Avoid_: positive query, known query
 
 **Out-of-catalog query**:
-A query drawn from a train description that appears in one document only and whose nearest catalog entry is below 0.95 normalized Levenshtein, so it has no entry and carries no SKU. It is 0.150 of the set, it never enters the headline, and it exists for the separability diagnostic.
+A query drawn from a train description that appears in one document only and whose nearest catalog entry sits below a pinned similarity, so it has no entry and carries no SKU. It is a fixed share of the set, it never enters the headline, and it exists for the separability diagnostic.
 _Avoid_: negative query, distractor, unknown query
 
 **Exact query**:
@@ -168,28 +168,28 @@ _Avoid_: method, strategy, retriever
 
 **Headline**:
 An arm's top-1 or top-5 over the scored answerable queries, the exact queries and the noisy variants each scored on their own and combined at the exact weight. It is the number the README's resolution table shows; out-of-catalog queries never enter it.
-_Avoid_: accuracy (on its own), score
+_Avoid_: accuracy (on its own), score (on its own)
 
 **Exact weight**:
-The share of a headline the exact queries carry, `w = 2/3`, pinned in code inside the measured band of exact readings, printed beside the table and the same for every arm. It carries the exact-reading rate as a weight rather than as duplicated queries, since an entry has one exact form.
+The share of a headline the exact queries carry, pinned in code at the measured share of exact readings, about two in three, printed beside the table and the same for every arm. It carries the exact-reading rate as a weight rather than as duplicated queries, since an entry has one exact form.
 _Avoid_: mixture rate, prior, exact ratio
 
 **Development slice**:
-The queries of the entries that one pinned 80/20 split set aside for choosing knobs, the depth sweep among them. Nothing measured on it appears in the README. The catalog stays whole on both slices.
+The queries of the one fifth of entries that one pinned 80/20 split set aside for choosing knobs, the depth sweep among them, plus the same fifth of the out-of-catalog draw. No accuracy or latency number measured on it appears in the README; the depths it chose do. The catalog stays whole on both slices.
 _Avoid_: validation set, dev set, tuning set
 
 **Scored slice**:
-The queries of the other four fifths of the entries, measured once, after every knob is set, to produce the table. No knob is chosen on it.
+The queries of the other four fifths of the entries and of the out-of-catalog draw, measured once, after every knob is set, to produce the table and the separability diagnostic. No knob is chosen on it.
 _Avoid_: test set, holdout, evaluation set
 
 **Separability diagnostic**:
-Per arm, how well its top-1 score tells an answerable query from an out-of-catalog one: the share of out-of-catalog queries rejected at the cut that keeps 0.99, 0.95 and 0.90 of the answerable, plus the AUROC, the area under the receiver operating characteristic curve, with answerable positive. Each cut anchors to the arm's own answerable quantile, which is what makes four incommensurable scores comparable. It chooses no operating threshold, that point is Phase 4's, and it is printed beside the verdict and never weighed in it.
+Per arm, how well its top-1 score tells an answerable query from an out-of-catalog one: the share of out-of-catalog queries rejected at each of three cuts that keep a fixed high share of the answerable, plus the AUROC, the area under the receiver operating characteristic curve, with answerable positive. Each cut anchors to the arm's own answerable quantile, which is what makes four incommensurable scores comparable. It chooses no operating threshold, that point is Phase 4's, and it is printed beside the keep-or-drop verdict and never weighed in it.
 _Avoid_: threshold, cutoff, rejection rate
 
 **Depth sweep**:
-The procedure that sets the two depth constants on the development slice: d, the rows each hybrid half fetches, over 25, 50 and 100 on the hybrid arm first, then N, the pairs sent to the reranker, over 10, 25 and 50 at the winning d. The rule picks the smallest value whose development top-5 is within one point of the grid's best, ties to the cheaper. The constants live in code, and every run repeats the sweep and prints the procedure's value beside each constant, the pairing-floor pattern.
+The procedure that sets the two depth constants on the development slice: d, the rows each hybrid half keeps before fusion, over its grid on the hybrid arm first, then N, the pairs sent to the reranker, over its grid at the winning d. The rule picks the smallest value whose development top-5 is within one point of the grid's best, ties to the cheaper. The constants live in code, and every run repeats the sweep and prints the procedure's value beside each constant, the pairing-floor pattern.
 _Avoid_: hyperparameter search, tuning, grid search
 
 **Keep-or-drop rule**:
-ADR 0001's rule on the reranker, fixed before any arm was measured: kept when its headline top-1 at the swept N is at least 1.0 point above the hybrid's and its p95 latency per query on the named machine is at most 500 ms, dropped otherwise. Top-1 alone decides. The two thresholds are constants in code beside d and N, and the command prints the verdict with both measurements against both. Kept means hybrid plus rerank is the arm Phase 4 resolves with; dropped means the arm and its N sweep are deleted after the row lands.
-_Avoid_: ablation, go/no-go, success criterion
+ADR 0001's rule on the reranker, fixed before any arm was measured: kept when its headline top-1 at the swept N clears the hybrid's by at least a pinned margin and its p95 latency per query on the named machine stays under a pinned ceiling, dropped otherwise. Top-1 alone decides. The two thresholds are constants in code beside d and N, and the command prints the verdict with both measurements against both. Kept means hybrid plus rerank is the arm Phase 4 resolves with; dropped means the arm and its N sweep are deleted after the row lands.
+_Avoid_: ablation (on its own), go/no-go, success criterion
