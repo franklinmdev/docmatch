@@ -117,11 +117,13 @@ class CrossedPairs:
     crossed: int
     """Of those, the ones whose invoice line is not the one the key names."""
     alike: int
-    """Of the crossed, the ones between two invoice lines alike on every cell
-    pairing reads. Nothing pairing computes tells those two apart, so which of
-    them the assignment takes is arbitrary and moves with the weights; they
-    are counted apart so that the crossings a tiebreak can reach, the rest,
-    read on their own (#102)."""
+    """Of the crossed, the ones between two invoice lines alike on every
+    pairing cell: code, description, quantity, unit price and amount. Nothing
+    that decides a pair tells those two apart, so which of them the assignment
+    takes is arbitrary and moves with the weights; they are counted apart so
+    that the crossings a tiebreak can reach, the rest, read on their own
+    (#102). The unit, a tiebreak and not a pairing cell, is not read: a
+    crossing it alone could have prevented still counts here (#124)."""
 
 
 @dataclass(frozen=True)
@@ -241,7 +243,7 @@ def _crossed_pairs(
 def _crossed(case: Case, result: MatchResult) -> CrossedPairs:
     """One case's pairings against its key: the ones the key names an invoice
     line for, how many took another line instead, and how many of those two
-    lines nothing pairing reads tells apart."""
+    lines alike on every pairing cell."""
     keyed = [
         (answers, each.invoice_line)
         for each in result.pairings

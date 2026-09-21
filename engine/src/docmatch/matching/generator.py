@@ -61,10 +61,10 @@ order a labeled line from another seed in the same pool, with its code and
 description, at a random position, so the unrelated line the pairing floor
 was set on is the one it meets (#65, #77); a donor line with neither is not
 given, since it would meet no floor. Neither has a band. A line alike
-on every cell pairing reads, once normalized, to another line of the records
+on every pairing cell, once normalized, to another line of the records
 it would join or leave is never the one removed or added: the matcher could
 not say which of the two was injected, so the truth could not be scored.
-Nor is a line that carries no cell pairing reads, which the matcher does not
+Nor is a line that carries no pairing cell, which the matcher does not
 compare at all.
 
 Short-ship lowers the receiving record's quantity below the invoice's, which
@@ -584,7 +584,7 @@ def _lines_to_give(seed: Seed, donor: Seed) -> list[FieldValues]:
 
 
 def _still_pairs(line: FieldValues, changed: Collection[Cell]) -> bool:
-    """Whether the line keeps a cell pairing reads once `changed` are moved on
+    """Whether the line keeps a pairing cell once `changed` are moved on
     its purchase-order copy: without one, nothing ties the two together."""
     return any(
         cell_values(line, cell) is not None
@@ -732,7 +732,7 @@ ORDERED_CELLS: tuple[LineCell, ...] = ("quantity",)
 
 def _unit_varies(line: FieldValues) -> bool:
     """Whether a unit variant can be injected on the line: it labels a unit
-    another can replace, it keeps a cell pairing reads once its counts are
+    another can replace, it keeps a pairing cell once its counts are
     recounted, and its counts can be recounted."""
     return (
         bool(listed_units(line))
@@ -837,9 +837,9 @@ def _on_lines(carried: Callable[[FieldValues], bool]) -> Positions:
 
 
 def _unlike_every_other(seed: Seed, pool: Sequence[Seed]) -> tuple[int, ...]:
-    """Where an extra line can be taken from: a line pairing reads that is
-    unlike every other line of the seed, so the matcher could say which one
-    was removed."""
+    """Where an extra line can be taken from: a line carrying a pairing cell
+    that is unlike every other line of the seed, so the matcher could say
+    which one was removed."""
     lines = seed.invoice.lines
     keys = [pairing_cells(line) for line in lines]
     return tuple(

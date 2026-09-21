@@ -309,7 +309,7 @@ def test_a_line_paired_with_another_partner_than_the_keys_is_crossed() -> None:
 def test_a_crossing_between_lines_nothing_tells_apart_is_counted_apart() -> None:
     """The two lines carry the same description, quantity and amount, so no
     tiebreak could have preferred one of them: the crossing is counted, and
-    counted again as one nothing pairing reads separates (#102)."""
+    counted again as one alike on every pairing cell (#102)."""
     twins = labeled(HEX_KEYS, dict(HEX_KEYS), GLOVES)
 
     table = score([keyed(twins, 0, 1, 2)], [paired((1, 0), (0, 1), (2, 2))])

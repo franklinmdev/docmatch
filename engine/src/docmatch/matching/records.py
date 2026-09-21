@@ -141,15 +141,22 @@ def cell_values(line: FieldValues, cell: Cell) -> CellValues | None:
     return None
 
 
-def listed_units(line: FieldValues) -> frozenset[str]:
-    """The units the line lists, as a unit variant compares them: after the
-    text normalization, so case and spacing never make two units differ;
-    empty when it lists none. The generator picks a unit outside them by the
-    same rule the matcher fires on."""
-    values = cell_values(line, "unit")
+def listed(line: FieldValues, cell: Cell) -> frozenset[str]:
+    """The texts the line lists for a cell after the text normalization, so
+    case and spacing never make two listings differ; empty when it lists
+    none. Two lines list the same thing when the sets are equal, which is
+    how the unit variant rule and the pairing tiebreak both read the unit."""
+    values = cell_values(line, cell)
     if values is None:
         return frozenset()
     return frozenset(normalize_text(text) for text in values.texts)
+
+
+def listed_units(line: FieldValues) -> frozenset[str]:
+    """The units the line lists, as a unit variant compares them. The
+    generator picks a unit outside them by the same rule the matcher fires
+    on."""
+    return listed(line, "unit")
 
 
 PRICE_CELLS: tuple[LineCell, ...] = ("unit price", "amount")

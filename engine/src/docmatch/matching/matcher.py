@@ -33,6 +33,13 @@ that identity decides and values only break ties (#63, #102):
   assignment, so any identity difference outranks any amount of value
   closeness, and values only separate lines whose identity ties, such as
   lines sharing a description.
+- The unit of measure is one more tiebreak beside the three values (#118):
+  two lines listing the same unit after the text normalization, the way the
+  unit variant rule compares them, are one whole agreement closer, and two
+  that do not, or a side listing none, are no closer. It never decides
+  whether two lines pair: 9.1 percent of unrelated pairs share a unit, so
+  the floor procedure gives it no floor and it is no identity, and it is not
+  counted among the exact agreements nameless lines pair on.
 - Lines that carry neither a code nor a description, on either side, pair
   by values alone, and there exact agreement keeps the job identity has
   elsewhere: how many of the three cells agree exactly decides whether the
@@ -47,7 +54,7 @@ that identity decides and values only break ties (#63, #102):
   nothing to say they are the same item.
 - A pair worth nothing is no pair, and both lines are reported unpaired with
   their best candidate and why it was not taken.
-- A line that carries none of the cells pairing reads, a row labeled with
+- A line that carries no pairing cell, a row labeled with
   only a date or a position, is not an item: it takes no part in pairing,
   is nobody's candidate, and is listed as not compared rather than reported
   unpaired, the way a rule with nothing comparable finds nothing (#76).
@@ -129,6 +136,7 @@ from docmatch.matching.records import (
     ReceivingRecord,
     Record,
     cell_values,
+    listed,
     listed_units,
     read_cell,
 )
@@ -159,6 +167,12 @@ TYPES: tuple[DiscrepancyType, ...] = get_args(DiscrepancyType)
 VALUE_CELLS: tuple[LineCell, ...] = ("quantity", "unit price", "amount")
 """The cells pairing scores closeness on, one each, to break identity ties."""
 
+TIEBREAK_CELLS: tuple[LineCell, ...] = ("unit",)
+"""The cells that break ties beside the values, each worth one whole agreement
+of closeness when both lines list the same normalized value and nothing
+otherwise. They are never identity and never an exact agreement nameless
+lines pair on: sharing a unit is no evidence of the same item (#118)."""
+
 THOUSANDTHS = 1000
 """What one whole agreement is worth. Identity and value closeness are both
 summed in thousandths, so a pair's worth is an integer and the assignment
@@ -168,7 +182,11 @@ IDENTITY_CELLS: tuple[LineCell, ...] = ("code", "description")
 """The cells identity is graded on, each against its floor in `FLOORS`."""
 
 PAIRING_CELLS: tuple[LineCell, ...] = (*IDENTITY_CELLS, *VALUE_CELLS)
-"""Every cell pairing reads: identity, then the values that break its ties."""
+"""The cells that decide whether two lines pair: identity, then the values
+that break its ties. A line carrying none of them is not an item, and two
+lines alike on all of them are the ones the generator never injects on and
+the scorer counts crossed apart. The unit is read as a tiebreak only, so it
+is not one of them: adding it would move the pinned draw (#124)."""
 
 SUPPRESSED_CELLS: tuple[LineCell, ...] = (*PRICE_CELLS, "quantity")
 """What a unit variant leaves uncompared on its line: a price or a quantity
@@ -444,8 +462,9 @@ class _Comparison:
     code: float | None
     description: float | None
     values: int
-    """How close the two come on quantity, unit price and amount: each the
-    smaller over the larger in thousandths, summed over the three (#102)."""
+    """How close the two come on quantity, unit price and amount, each the
+    smaller over the larger in thousandths, summed over the three (#102),
+    plus one whole agreement when they list the same unit (#118)."""
     agreements: int
     """How many of the value cells the two agree on exactly, counted only
     when neither line carries a code or a description. That is the one case
@@ -474,7 +493,8 @@ class _Comparison:
     @property
     def ranking(self) -> tuple[float, int]:
         """What a best candidate is picked by: similarity with the floors
-        ignored, then how close the values come (#102)."""
+        ignored, then how close the values come, the unit counted with them
+        (#102, #124)."""
         return ((self.code or 0.0) + (self.description or 0.0), self.values)
 
     def worth(self, scale: int) -> int:
@@ -511,8 +531,8 @@ def _nothing_to_pair_on(
 
 
 def pairable(line: FieldValues) -> bool:
-    """Whether the line carries any cell pairing reads; one that does not is
-    left out of pairing."""
+    """Whether the line carries any pairing cell; one that does not is left
+    out of pairing."""
     return any(cell_values(line, cell) is not None for cell in PAIRING_CELLS)
 
 
@@ -531,8 +551,8 @@ where the line lacks the cell."""
 def pairing_cells(line: FieldValues) -> PairingCells:
     """The line as pairing sees it.
 
-    Two lines with the same one are alike to every comparison pairing makes,
-    so nothing pairing reads tells them apart and which of the two an
+    Two lines with the same one are alike on every cell that decides a pair,
+    so nothing but a tiebreak could tell them apart and which of the two an
     assignment takes is arbitrary. The generator never removes or adds one of
     such a pair, since the truth could not be scored, and the scorer counts a
     crossing between them apart from the rest (#102).
@@ -581,7 +601,8 @@ def _pair_items(invoice: Sequence[FieldValues], po: Sequence[FieldValues]) -> _P
     compared = [[_compare(one, other) for other in po] for one in invoice]
     # Larger than everything closeness can sum to over a whole assignment, so
     # no amount of value closeness buys a thousandth of identity.
-    scale = len(VALUE_CELLS) * THOUSANDTHS * min(len(invoice), len(po)) + 1
+    closeness_cells = len(VALUE_CELLS) + len(TIEBREAK_CELLS)
+    scale = closeness_cells * THOUSANDTHS * min(len(invoice), len(po)) + 1
     assigned: dict[int, int] = {}
     if invoice and po:
         worth = [[each.worth(scale) for each in row] for row in compared]
@@ -636,7 +657,10 @@ def _compare(one: FieldValues, other: FieldValues) -> _Comparison:
     return _Comparison(
         code=_identity(one, other, "code"),
         description=_identity(one, other, "description"),
-        values=sum(_close(one, other, cell) for cell in VALUE_CELLS),
+        values=sum(_close(one, other, cell) for cell in VALUE_CELLS)
+        + sum(
+            THOUSANDTHS for cell in TIEBREAK_CELLS if _same_listing(one, other, cell)
+        ),
         # Only a nameless pair pairs on exact agreement, so only a nameless
         # pair pays for reading the values a second way.
         agreements=sum(_agree(one, other, cell) for cell in VALUE_CELLS)
@@ -650,8 +674,10 @@ def _best[V, S: float](
 ) -> S:
     """The closest any one of a cell's values comes to any one of the other
     side's, by the measure given. A line that lists several values is as close
-    as its best one, which is how pairing reads every cell: a reading that
-    disagrees with itself still pairs on the value that agrees."""
+    as its best one, which is how pairing grades identity and closeness: a
+    reading that disagrees with itself still pairs on the value that agrees.
+    The unit tiebreak is the one comparison read another way, whole listings
+    against each other, as the unit variant rule reads them."""
     return max(measure(left, right) for left in one for right in other)
 
 
@@ -672,6 +698,14 @@ def alike(one: CellValues, other: CellValues) -> float:
         [normalize_text(text) for text in other.texts],
         similarity,
     )
+
+
+def _same_listing(one: FieldValues, other: FieldValues, cell: LineCell) -> bool:
+    """Whether both carry the cell and list the same normalized texts, the
+    comparison the unit variant rule makes through `listed_units`, so pairing
+    and the rule never disagree about two units: a line listing two units
+    against one listing one of them is no closer, and the rule fires on it."""
+    return bool(listed(one, cell)) and listed(one, cell) == listed(other, cell)
 
 
 def _agree(one: FieldValues, other: FieldValues, cell: LineCell) -> bool:

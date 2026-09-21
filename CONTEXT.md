@@ -65,7 +65,7 @@ A labeled invoice that a purchase order and a receiving record are derived from,
 _Avoid_: base invoice, template, source invoice
 
 **Pairing**:
-Deciding which invoice line answers which purchase-order line, one to one, by how closely their codes and descriptions agree, with quantities and prices only breaking ties, and breaking them by how close the values come rather than by their being equal. Receiving-record lines name their purchase-order line, so they need no pairing.
+Deciding which invoice line answers which purchase-order line, one to one, by how closely their codes and descriptions agree, with quantities, prices and the unit only breaking ties, and breaking them by how close the values come rather than by their being equal. Receiving-record lines name their purchase-order line, so they need no pairing.
 _Avoid_: line matching, alignment, reconciliation (on its own)
 
 **Unpaired line**:
@@ -85,7 +85,7 @@ Which invoice line each purchase-order line answers, as the generator built the 
 _Avoid_: line id, ground-truth pairing, link
 
 **Crossed pair**:
-A line the matcher paired with a partner other than the one the pairing key names. It is no finding of its own: it shows up as a discrepancy on the line next door, or as nothing at all, so it is counted against the key to make what pairing cost visible before any rule ran. A crossing between two invoice lines alike on every cell pairing reads is counted apart, since nothing pairing computes tells those two apart and which one the assignment takes is arbitrary.
+A line the matcher paired with a partner other than the one the pairing key names. It is no finding of its own: it shows up as a discrepancy on the line next door, or as nothing at all, so it is counted against the key to make what pairing cost visible before any rule ran. A crossing between two invoice lines alike on code, description, quantity, unit price and amount is counted apart, since nothing that decides a pair tells those two apart and which one the assignment takes is arbitrary.
 _Avoid_: mispair, wrong match, swap
 
 **Discrepancy type**:
