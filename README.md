@@ -737,6 +737,39 @@ left without a partner because they fell below a pairing floor, over one clean
 case per document. CI runs the command with
 `--run` on the same synthetic corpus as the eval, at the real sizes.
 
+### Resolution
+
+```bash
+uv run docmatch resolve
+```
+
+This is the command the resolution table comes from. It needs no model call
+that costs money, but it needs a Postgres with the `vector` and `pg_trgm`
+extensions already created: `--database-url`, else `DOCMATCH_DATABASE_URL`,
+else `postgresql:///docmatch`, the socket a local cluster offers. Both
+extensions are required to exist, and a missing one is reported without a
+traceback. Nothing is written to disk.
+
+It builds the catalog from the train labels by one rule with no draw and no
+size parameter, every normalized description that appears in two or more
+train documents, minted as `SKU-` plus eight hex characters of the SHA-256 of
+that description; val is out entirely. It drops and recreates schema
+`resolution` in the database, loads the catalog with a GiST trigram index and
+leaves it there for inspection, then sends every query through every arm one
+at a time on one connection, after a discarded warmup pass, and scores the
+answers against the SKU each query was generated from.
+
+It prints the catalog counts (documents, lines, distinct descriptions,
+entries), the query counts per slice, the headline table (top-1 and top-5 per
+arm at the exact weight, a constant in code printed beside the table), per
+arm the rank-1 tie rate, p50 and p95 latency per query and what the over-fetch
+check found, and a provenance block read at run time: the Postgres, pgvector
+and pg_trgm versions from the server, and the CPU, logical CPUs, memory and
+kernel from the OS, since latency is a property of a named machine. No
+description is ever printed. CI runs the command on the same synthetic corpus
+against a pinned `pgvector/pgvector` container; its latency means nothing, and
+the README's numbers come from the command run locally.
+
 ### The baseline run
 
 `docmatch eval` scores a predictions file. `docmatch extract` is what produces
@@ -901,12 +934,13 @@ docmatch/
     src/docmatch/      extraction, validation, resolution, matching, metrics
       evals/           the pinned subset, the run that scores it, the corpus survey
       matching/        records, pairing, the rules, the case generator, the scorer
-    tests/evals/       the synthetic corpus CI runs the eval and the match on
+      resolution/      the catalog, the Postgres working space, the arms, the run
+    tests/evals/       the synthetic corpus CI runs the eval, the match and the resolve on
   apps/review/         Next.js review inbox, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
   docs/                decision records
   scripts/             the markdown-location check CI runs
-  .github/workflows/   CI: ruff, mypy and pytest on every push; a PR judge that only comments
+  .github/workflows/   CI: ruff, mypy and pytest against a pgvector container on every push; a PR judge that only comments
 ```
 
 Tests live next to the code they test, so `src/docmatch/docile/dataset.py` is
