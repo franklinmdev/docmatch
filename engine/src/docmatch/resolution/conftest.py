@@ -48,47 +48,19 @@ class BucketEmbedder:
         return len(self._vocabulary) + digest % (DIMENSIONS - len(self._vocabulary))
 
 
-class WordReranker:
-    """A deterministic reranker built to tie: a pair scores minus the number
-    of words one of its texts carries and the other does not, so a
-    description equal to the query scores 0.0, the highest there is, and
-    `widget a` and `widget b` tie against `widget`, exactly."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[tuple[str, str], ...]] = []
-        """Every batch of pairs asked for, in order."""
-
-    def score(self, pairs: Sequence[tuple[str, str]]) -> tuple[float, ...]:
-        self.calls.append(tuple(pairs))
-        return tuple(
-            -float(len(set(query.split()) ^ set(description.split())))
-            for query, description in pairs
-        )
-
-
 FAKE_VERSIONS = ModelVersions(
     embedder="fake/bucket-embedder",
     embedder_revision="0000000000000000000000000000000000000000",
-    reranker="fake/word-reranker",
-    reranker_revision="1111111111111111111111111111111111111111",
     sentence_transformers="0.0.0",
     torch="0.0.0",
     torch_threads=1,
 )
 
 
-def fake_loader(
-    embedder: BucketEmbedder | None = None, reranker: WordReranker | None = None
-) -> Loaded:
-    """What the run gets in place of `load_models`: the fakes, made-up
-    versions and made-up load times."""
-    return Loaded(
-        embedder or BucketEmbedder(),
-        reranker or WordReranker(),
-        FAKE_VERSIONS,
-        embedder_load_s=0.5,
-        reranker_load_s=0.25,
-    )
+def fake_loader(embedder: BucketEmbedder | None = None, load_s: float = 0.5) -> Loaded:
+    """What the run gets in place of `load_models`: the fake, made-up versions
+    and a made-up load time."""
+    return Loaded(embedder or BucketEmbedder(), FAKE_VERSIONS, load_s)
 
 
 @pytest.fixture

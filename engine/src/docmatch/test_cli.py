@@ -46,7 +46,7 @@ from docmatch.resolution.queries import (
     SliceName,
 )
 from docmatch.resolution.store import Build, Machine, ServerVersions
-from docmatch.resolution.sweep import Point, Sweep, Verdict
+from docmatch.resolution.sweep import Point, Sweep
 
 EXPECTED_SHOW_OUTPUT = "\n".join(
     [
@@ -2023,7 +2023,6 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  trigram  0.922  0.980  4608",
         "  vector   0.946  0.989  4608",
         "  hybrid   0.947  0.992  4608",
-        "  rerank   0.959  0.994  4608",
         "",
         "Separability, top-1 score, 4608 answerable against 813 out of catalog, "
         "both weighted by w",
@@ -2031,7 +2030,6 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  trigram             0.101             0.352             0.498  0.874",
         "  vector              0.050             0.210             0.330  0.795",
         "  hybrid              0.080             0.301             0.440  0.851",
-        "  rerank              0.200             0.450             0.600  0.900",
         "  each cut keeps that share of the arm's own answerable scores; a "
         "reporting device, no threshold is chosen",
         "",
@@ -2044,16 +2042,13 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "                    0              0",
         "  hybrid             0.033   14.95   23.46          4608  "
         "                    2              0",
-        "  rerank             0.004   98.77  340.50          4608  "
-        "                    2              0",
         "  latency over every scored query, answerable and out of catalog; "
         "fetches over the answerable ones",
         "  a boundary equal to the cut means a tie group may reach past the "
         "fetched rows; a short fetch has nothing past them",
         "",
         "Paid once, outside the latency",
-        "  embedder load      2.71 s",
-        "  reranker load      0.19 s",
+        "  model load         2.71 s",
         "  catalog embedding  1.23 s",
         "  hnsw build         0.46 s",
         "",
@@ -2067,46 +2062,19 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  rule: the smallest d whose development top-5 is within 0.010 of the "
         "grid's best, the smaller on a tie",
         "",
-        "Sweep over N pairs to the reranker at the constant d, 50, development "
-        "top-5 at each value",
-        "  N   top-5     n",
-        "  10  0.980  1152",
-        "  25  0.995  1152",
-        "  50  0.996  1152",
-        "  constant N, the scored slice's  25",
-        "  procedure's N                   25",
-        "  rule: the smallest N whose development top-5 is within 0.010 of the "
-        "grid's best, the smaller on a tie",
-        "",
         "By kind, the same scored queries regrouped, report only",
         "  kind                    n  trigram top-1  trigram top-5  "
-        "vector top-1  vector top-5  hybrid top-1  hybrid top-5  "
-        "rerank top-1  rerank top-5",
+        "vector top-1  vector top-5  hybrid top-1  hybrid top-5",
         "  exact                1536          0.970          0.999  "
-        "       0.977         0.999         0.973         1.000  "
-        "       0.977         1.000",
+        "       0.977         0.999         0.973         1.000",
         "  extra words          1110          0.811          0.901  "
-        "       0.856         0.946         0.865         0.955  "
-        "       0.901         0.964",
+        "       0.856         0.946         0.865         0.955",
         "  letters substituted   744          0.941          0.995  "
-        "       0.968         0.997         0.974         0.999  "
-        "       0.981         0.999",
+        "       0.968         0.997         0.974         0.999",
         "  digits dropped        670          0.597          0.896  "
-        "       0.746         0.955         0.776         0.970  "
-        "       0.836         0.978",
+        "       0.746         0.955         0.776         0.970",
         "  punctuation           548          0.985          1.000  "
-        "       0.995         1.000         0.996         1.000  "
-        "       0.998         1.000",
-        "",
-        "Keep-or-drop verdict on the reranker, ADR 0001, over the scored slice",
-        "  measurement                         value        constant  holds",
-        "  rerank top-1 less hybrid top-1     +0.012  at least 0.010    yes",
-        "  rerank p95 per query            340.50 ms  at most 500 ms    yes",
-        "  verdict: kept",
-        "  kept means hybrid plus rerank is the arm Phase 4 resolves with",
-        "  dropped means the rerank arm and its N sweep are deleted after the "
-        "README row lands",
-        "  top-1 alone decides; the separability above is printed and never weighed",
+        "       0.995         1.000         0.996         1.000",
         "",
         "Provenance, read at run time",
         "  postgres               16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
@@ -2115,8 +2083,6 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  hnsw ef_search         100",
         "  embedder               sentence-transformers/all-MiniLM-L6-v2",
         "  embedder revision      1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
-        "  reranker               cross-encoder/ms-marco-MiniLM-L6-v2",
-        "  reranker revision      233902d25c440f23af6f7d6e94d2946bac0bee0a",
         "  sentence-transformers  6.1.0",
         "  torch                  2.14.0+cpu",
         "  torch threads          10",
@@ -2136,12 +2102,8 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
     0.826 at top-1 give 0.922, 0.999 and 0.942 at top-5 give 0.980 for the
     trigram arm; 0.977 and 0.884 give 0.946, 0.999 and 0.970 give 0.989 for
     the vector arm; 0.973 and 0.896 give 0.947, 1.000 and 0.977 give 0.992
-    for the hybrid; 0.977 and 0.924 give 0.959, 1.000 and 0.982 give 0.994
-    for the rerank arm, which clears the hybrid by 0.012 at a p95 of 340.50
-    ms, so the verdict is kept. The d sweep's constant is 50 and its
-    procedure 25, since 0.991 is within a point of 0.994, so the
-    disagreement shows; the N sweep's constant and procedure agree at 25,
-    0.980 being more than a point below 0.996."""
+    for the hybrid. The sweep's constant is 50 and its procedure 25, since
+    0.991 is within a point of 0.994, so the disagreement shows."""
     result = resolution.ResolveResult(
         CatalogCounts(documents=5180, lines=36147, distinct=8855, entries=1920),
         query_set_of(
@@ -2201,22 +2163,6 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
                     resolution.OverFetch(full=4608, equal=2, short=0),
                     resolution.Separability((0.0801, 0.3012, 0.4401), 0.8512),
                 ),
-                resolution.ArmResult(
-                    "rerank",
-                    (
-                        resolution.KindScore("exact", 1536, 1500, 1536),
-                        resolution.KindScore("extra words", 1110, 1000, 1070),
-                        resolution.KindScore("letters substituted", 744, 730, 743),
-                        resolution.KindScore("digits dropped", 670, 560, 655),
-                        resolution.KindScore("punctuation", 548, 547, 548),
-                    ),
-                    4608,
-                    20,
-                    98.765,
-                    340.5,
-                    resolution.OverFetch(full=4608, equal=2, short=0),
-                    resolution.Separability((0.2, 0.45, 0.6), 0.9),
-                ),
             ),
             Sweep(
                 "d",
@@ -2227,30 +2173,17 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
                     Point(100, 0.99401, 1152),
                 ),
             ),
-            Sweep(
-                "N",
-                25,
-                (
-                    Point(10, 0.98012, 1152),
-                    Point(25, 0.99523, 1152),
-                    Point(50, 0.99601, 1152),
-                ),
-            ),
-            Verdict(0.95888, 0.94737, 340.5),
             ServerVersions(
                 "16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)", "0.6.0", "1.6", "100"
             ),
             ModelVersions(
                 "sentence-transformers/all-MiniLM-L6-v2",
                 "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
-                "cross-encoder/ms-marco-MiniLM-L6-v2",
-                "233902d25c440f23af6f7d6e94d2946bac0bee0a",
                 "6.1.0",
                 "2.14.0+cpu",
                 10,
             ),
             2.714,
-            0.192,
             Build(embedding_s=1.234, index_s=0.456),
             Machine(
                 "AMD Ryzen 7 5800H with Radeon Graphics",
@@ -2372,10 +2305,10 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
     """The real path over the fixture, the one CI's Resolve step runs with
     the real models: the six descriptions the two train documents share are
     the catalog, the split leaves one development entry, the scored slice's
-    fifteen queries are measured on every arm, both depth sweeps run over
-    the development entry's three, and rule 6 holds on the output. The run is
+    fifteen queries are measured on every arm, the depth sweep runs over the
+    development entry's three, and rule 6 holds on the output. The run is
     pointed at the test schema so a real run's `resolution` is left for
-    inspection, and at the fake models so no weights are loaded; the
+    inspection, and at the fake embedder so no weights are loaded; the
     command itself has a flag for neither."""
     monkeypatch.setattr(
         resolution, "resolve", partial(resolution.resolve, schema=TEST_SCHEMA)
@@ -2422,15 +2355,10 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
         "a one-hot fake still puts the exact entry first"
     )
     assert "\n  hybrid   1.000  1.000  15\n" in out
-    assert "\n  rerank   1.000  1.000  15\n" in out
-    assert "\n  verdict: dropped\n" in out, "no gain over a perfect hybrid"
     assert "\n  25   1.000  3\n" in out, "the sweep runs over the one development entry"
     assert "\n  procedure's d                   25\n" in out
     assert "\n  exact                5          1.000          1.000" in out
-    assert "\n  embedder load      0.50 s\n" in out
-    assert "\n  reranker load      0.25 s\n" in out
-    assert "\n  procedure's N                   10\n" in out
-    assert f"\n  reranker               {FAKE_VERSIONS.reranker}\n" in out
+    assert "\n  model load         0.50 s\n" in out
     assert "Provenance, read at run time" in out
     assert f"\n  embedder               {FAKE_VERSIONS.embedder}\n" in out
     assert "\n  torch threads          1\n" in out
