@@ -11,9 +11,7 @@ from docmatch.resolution.catalog import (
     CatalogCounts,
     CollisionError,
     Entry,
-    Query,
     build_catalog,
-    exact_queries,
     mint,
 )
 
@@ -129,22 +127,23 @@ def test_a_sku_collision_raises_rather_than_merging_two_entries(
         )
 
 
-def test_a_pool_with_no_repeats_yields_an_empty_catalog() -> None:
+def test_a_pool_with_no_repeats_yields_an_empty_catalog_of_singletons() -> None:
     catalog = build_catalog([described("Blue widget"), described("Red widget")])
 
     assert catalog.entries == ()
-    assert exact_queries(catalog) == ()
+    assert catalog.singletons == ("blue widget", "red widget")
 
 
-def test_each_entry_yields_one_exact_query_carrying_its_sku() -> None:
+def test_the_catalog_carries_the_singletons_the_bleed_and_the_draw_come_from() -> None:
+    """A description in exactly one document is no entry, but it is the pool
+    the extra-words bleed and the out-of-catalog draw take text from, so the
+    catalog carries them, sorted, never as entries."""
     catalog = build_catalog(
         [
-            described("Blue widget", "Red widget"),
-            described("Blue widget", "Red widget"),
+            described("Blue widget", "Red widget", "Zebra print"),
+            described("Blue widget", "Apple crate"),
         ]
     )
 
-    assert exact_queries(catalog) == tuple(
-        Query(each.description, each.sku, "exact") for each in catalog.entries
-    )
-    assert len(exact_queries(catalog)) == 2
+    assert catalog.singletons == ("apple crate", "red widget", "zebra print")
+    assert [each.description for each in catalog.entries] == ["blue widget"]
