@@ -118,6 +118,7 @@ from docmatch.metrics.line_items import (
 )
 from docmatch.metrics.score import Score, ratio
 from docmatch.resolution import run as resolution
+from docmatch.resolution import sweep as resolution_sweep
 from docmatch.resolution.catalog import (
     SPLIT as CATALOG_SPLIT,
 )
@@ -1146,6 +1147,8 @@ def render_resolve(result: resolution.ResolveResult) -> str:
             ("hnsw build", f"{measured.build.index_s:.2f} s"),
         ),
         "",
+        *_sweep(measured.depth, "per hybrid half"),
+        "",
         "By kind, the same scored queries regrouped, report only",
         *_by_kind(measured.arms),
         "",
@@ -1171,6 +1174,29 @@ def render_resolve(result: resolution.ResolveResult) -> str:
 
 def _rate(rate: float | None) -> str:
     return "none" if rate is None else f"{rate:.3f}"
+
+
+def _sweep(sweep: resolution_sweep.Sweep, what: str) -> list[str]:
+    """A sweep's grid on the development slice, the constant the scored slice
+    was measured at beside the procedure's value, and the rule, the way the
+    pairing floors print their constants beside their procedure."""
+    name = sweep.name
+    return [
+        f"Sweep over {name} {what}, development top-5 at each value",
+        *_table(
+            (name, "top-5", "n"),
+            [(str(each.value), _rate(each.top5), str(each.n)) for each in sweep.points],
+        ),
+        *_rows(
+            (f"constant {name}, the scored slice's", str(sweep.constant)),
+            (
+                f"procedure's {name}",
+                "none" if sweep.chosen is None else str(sweep.chosen),
+            ),
+        ),
+        f"  rule: the smallest {name} whose development top-5 is within "
+        f"{resolution_sweep.POINT:.3f} of the grid's best, the smaller on a tie",
+    ]
 
 
 def _by_kind(arms: Sequence[resolution.ArmResult]) -> list[str]:

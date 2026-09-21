@@ -23,7 +23,20 @@ Vector only: the query embedded through the embedder, pgvector HNSW with
 connection's `hnsw.ef_search` at 100 since the store set it (#120, probe 2).
 The embedding is part of what the query pays on arrival, so it sits inside
 the arm call the run times; the model load does not, and is reported once.
-The other arms join in #130 and #131.
+
+Hybrid: one statement with two CTEs, each the single arm's indexed query at
+`LIMIT d + FETCH`, the query embedded once for it (#113, #120). The
+statement returns both halves' rows with their distances, and the fusion is
+applied here: each half ordered by (distance, SKU) and cut to d, so the
+ranks inside a half are the single arm's ranks, then every SKU in either
+half, the full outer join, scored `1/(RRF_K + rank)` summed over the halves
+it is in, trigram first, and the fused list ordered by score descending
+then SKU and cut to five. The join and the sum sit in code rather than in
+the statement because the cut to d does: a rank taken before the (distance,
+SKU) ordering would be the index's order, not the arm's. Both indexes stay
+in use inside the CTEs, checked with `EXPLAIN` on the real catalog. Each
+half runs the over-fetch check at its own cut, d, and a tie group reaching
+either half's boundary is the arm's. The rerank arm joins in #131.
 """
 
 from collections.abc import Sequence
@@ -43,10 +56,17 @@ FETCH = 25
 straddling the cut is ordered in code rather than by the index."""
 
 
+RRF_K = 60
+"""The reciprocal rank fusion constant, `1/(RRF_K + rank)`: 60 as
+Cormack, Clarke and Buettcher set it and as #113 carried it into the
+statement."""
+
+
 @dataclass(frozen=True)
 class Answer:
     """One entry an arm returned, and its score: for an index arm the
-    distance the index measured, lower first."""
+    distance the index measured, lower first; for the hybrid its fused
+    score, higher first."""
 
     sku: str
     score: float
@@ -54,7 +74,7 @@ class Answer:
 
 OverFetchOutcome = Literal["distinct", "equal", "short"]
 """What the over-fetch check found for one query: the boundary score distinct
-from the cut's, equal to it, or a fetch short of `FETCH` rows where the
+from the cut's, equal to it, or a fetch short of its full rows where the
 check does not apply."""
 
 
@@ -63,33 +83,67 @@ class Fetched:
     """What an arm answered: its five, and whether the over-fetch was enough."""
 
     answers: tuple[Answer, ...]
-    rows: int
-    """How many rows the index returned, at most `FETCH`."""
-    boundary: float | None
-    """The score of the last row the index returned, or None when it returned
-    none."""
+    over_fetch: OverFetchOutcome
+    """Whether the score at the fetched boundary equals the score at the
+    cut, in which case a tie group may reach past what the index returned
+    and the five are only as pinned as the index's own order. Short when
+    the fetch came back under its full rows, where nothing lay beyond it."""
 
     @property
     def tied_at_1(self) -> bool:
         """Whether the first two answers share a score, which the SKU broke."""
         return len(self.answers) > 1 and self.answers[0].score == self.answers[1].score
 
-    @property
-    def over_fetch(self) -> OverFetchOutcome:
-        """Whether the score at the fetched boundary equals the score at the
-        cut, in which case a tie group may reach past what the index returned
-        and the five are only as pinned as the index's own order. Short when
-        the fetch came back under `FETCH` rows, where nothing lay beyond it."""
-        if self.rows < FETCH or self.boundary is None:
-            return "short"
-        return "equal" if self.boundary == self.answers[TOP - 1].score else "distinct"
+
+Row = tuple[str, float]
+"""One row as an index returned it: a SKU and its distance."""
 
 
-def ordered(rows: Sequence[tuple[str, float]]) -> Fetched:
-    """The ordering every arm applies: score, then SKU ascending, cut to five."""
-    ranked = sorted(rows, key=lambda row: (row[1], row[0]))
+def ordered(rows: Sequence[Row]) -> Fetched:
+    """The ordering every index arm applies: distance, then SKU ascending,
+    cut to five."""
+    ranked = _ranked(rows)
     answers = tuple(Answer(sku, score) for sku, score in ranked[:TOP])
-    return Fetched(answers, len(rows), ranked[-1][1] if ranked else None)
+    return Fetched(answers, _check(ranked, TOP, FETCH))
+
+
+def fuse(
+    trigram_half: Sequence[Row], vector_half: Sequence[Row], depth: int
+) -> Fetched:
+    """The hybrid's five from its two halves as the statement returned them,
+    each fetched at `depth + FETCH` rows: each half ranked and cut to
+    `depth`, the reciprocal ranks summed per SKU over both, then fused score
+    descending, then SKU ascending, cut to five."""
+    halves = (_ranked(trigram_half), _ranked(vector_half))
+    fused: dict[str, float] = {}
+    for half in halves:
+        for rank, (sku, _) in enumerate(half[:depth], start=1):
+            fused[sku] = fused.get(sku, 0.0) + 1 / (RRF_K + rank)
+    ranked = sorted(fused.items(), key=lambda item: (-item[1], item[0]))
+    answers = tuple(Answer(sku, score) for sku, score in ranked[:TOP])
+    checks = {_check(half, depth, depth + FETCH) for half in halves}
+    over_fetch: OverFetchOutcome = (
+        "equal"
+        if "equal" in checks
+        else "distinct"
+        if "distinct" in checks
+        else "short"
+    )
+    return Fetched(answers, over_fetch)
+
+
+def _ranked(rows: Sequence[Row]) -> list[Row]:
+    """Distance, then SKU ascending: the single arms' ranks."""
+    return sorted(rows, key=lambda row: (row[1], row[0]))
+
+
+def _check(ranked: Sequence[Row], cut: int, fetch: int) -> OverFetchOutcome:
+    """The over-fetch check on rows fetched `fetch` at a time and cut at
+    `cut`: whether the distance at the fetched boundary equals the one at
+    the cut."""
+    if len(ranked) < fetch:
+        return "short"
+    return "equal" if ranked[-1][1] == ranked[cut - 1][1] else "distinct"
 
 
 def trigram(store: Store, query: str) -> Fetched:
@@ -118,6 +172,31 @@ def vector(store: Store, embedder: Embedder, query: str) -> Fetched:
         (literal, literal, FETCH),
     ).fetchall()
     return ordered([_row(sku, distance) for sku, distance in rows])
+
+
+def hybrid(store: Store, embedder: Embedder, query: str, depth: int) -> Fetched:
+    """The hybrid arm's five for a query at depth `depth` per half: embedded
+    once, both halves fetched in one statement, fused in code."""
+    (embedded,) = embedder.embed([query])
+    literal = vector_literal(embedded)
+    table = sql.Identifier(store.schema, "catalog")
+    rows = store.connection.execute(
+        sql.SQL(
+            "WITH trigram AS ("
+            "SELECT sku, description <-> %(query)s AS distance FROM {table} "
+            "ORDER BY description <-> %(query)s LIMIT %(fetch)s), "
+            "vector AS ("
+            "SELECT sku, embedding <=> %(embedded)s::vector AS distance FROM {table} "
+            "ORDER BY embedding <=> %(embedded)s::vector LIMIT %(fetch)s) "
+            "SELECT 'trigram', sku, distance FROM trigram "
+            "UNION ALL SELECT 'vector', sku, distance FROM vector"
+        ).format(table=table),
+        {"query": query, "embedded": literal, "fetch": depth + FETCH},
+    ).fetchall()
+    halves: dict[str, list[Row]] = {"trigram": [], "vector": []}
+    for half, sku, distance in rows:
+        halves[str(half)].append(_row(sku, distance))
+    return fuse(halves["trigram"], halves["vector"], depth)
 
 
 def _row(sku: object, distance: object) -> tuple[str, float]:
