@@ -769,7 +769,12 @@ or a fragment of a train description that appears in one document only. The
 entries split one in five to a development slice and the rest to a scored
 slice under one seed pinned in code, the catalog whole in both; every knob is
 set on the development slice and the table is measured once on the scored
-slice. It drops and recreates schema `resolution` in the database, embeds
+slice. Out-of-catalog queries join them, 0.150 of the whole set: train
+descriptions that appear in one document only and sit below 0.95 normalized
+Levenshtein to every entry, drawn uniformly on the same seed, a third left
+exact and two thirds made noisy by the same noise model, split one in five
+to development the same way. They carry no SKU and never enter the headline.
+It drops and recreates schema `resolution` in the database, embeds
 every canonical description, loads the catalog with a GiST trigram index and
 an HNSW index over the embeddings (`vector_cosine_ops`, m 16, ef_construction
 64, `hnsw.ef_search` 100 on the connection) and leaves it there for
@@ -780,16 +785,23 @@ trigram arm asks pg_trgm for the 25 nearest descriptions; the vector arm
 embeds the query and asks the HNSW index for the 25 nearest embeddings by
 cosine; every arm orders what it got by distance then SKU in code and cuts
 to five. A query's latency is everything it pays on arrival, the embedding
-included; loading the model, embedding the catalog and building the index
-are paid once and reported once.
+included, over every scored query whether in the catalog or not; loading the
+model, embedding the catalog and building the index are paid once and
+reported once.
 
 It prints the catalog counts (documents, lines, distinct descriptions,
-entries), the query set per slice (entries, exact, noisy, queries), the noise
-model's kind shares and similarity bands beside their measured targets, the
-headline table (top-1 and top-5 per arm over the scored slice, the exact
-queries and the noisy variants weighted at the exact weight, a constant in
-code printed beside the table), per arm the rank-1 tie rate, p50 and p95
-latency per query and what the over-fetch check found, what was paid once
+entries), the query set per slice (entries, exact, noisy, queries), the
+out-of-catalog queries per slice (exact, noisy, queries) with the share drawn
+against its target, the noise model's kind shares and similarity bands
+beside their measured targets, the headline table (top-1 and top-5 per arm
+over the scored slice, the exact queries and the noisy variants weighted at
+the exact weight, a constant in code printed beside the table), the
+separability diagnostic per arm (from each scored query's top-1 score, the
+share of out-of-catalog queries rejected at the cuts that keep 0.99, 0.95 and
+0.90 of the arm's own answerable scores, and AUROC, both populations weighted
+at the exact weight; a reporting device, no threshold is chosen), per arm the
+rank-1 tie rate, p50 and p95 latency per query and what the over-fetch check
+found, what was paid once
 outside the latency (model load, catalog embedding, HNSW build), the same
 scored queries regrouped by kind with top-1 and top-5 per arm, a diagnostic
 that never reaches this README, and a provenance block read at run time: the
