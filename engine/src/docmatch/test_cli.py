@@ -5,6 +5,7 @@ directory, so the suite runs in CI with no dataset present.
 """
 
 import json
+import re
 import shutil
 from collections.abc import Sequence
 from dataclasses import replace
@@ -1945,25 +1946,33 @@ UNANSWERING = "postgresql://localhost:1/nothing"
 """A database url no server answers at: port 1 refuses at once."""
 
 
-def slice_of(name: SliceName, entries: int) -> Slice:
+def slice_of(name: SliceName, entries: int, out: tuple[int, int] = (0, 0)) -> Slice:
     """A slice of `entries` entries, each with its exact query and two
-    variants; the texts are placeholders, since the renderer prints none."""
+    variants, and `out` exact and noisy out-of-catalog queries; the texts
+    are placeholders, since the renderer prints none."""
     queries = []
     for index in range(entries):
         queries.append(Query("x", f"SKU-{index}", "exact"))
         queries.append(Query("x", f"SKU-{index}", "extra words"))
         queries.append(Query("x", f"SKU-{index}", "digits dropped"))
-    return Slice(name, tuple(queries))
+    exact, noisy = out
+    out_of_catalog = [Query("x", None, "exact")] * exact
+    out_of_catalog += [Query("x", None, "punctuation")] * noisy
+    return Slice(name, tuple(queries), tuple(out_of_catalog))
 
 
 def query_set_of(
-    scored: int, development: int, kinds: Sequence[int], bands: Sequence[int]
+    scored: int,
+    development: int,
+    kinds: Sequence[int],
+    bands: Sequence[int],
+    out: tuple[tuple[int, int], tuple[int, int]] = ((0, 0), (0, 0)),
 ) -> QuerySet:
     """A query set with the counts given, its shares over the noisy variants."""
     noisy = 2 * (scored + development)
     return QuerySet(
-        slice_of("scored", scored),
-        slice_of("development", development),
+        slice_of("scored", scored, out[0]),
+        slice_of("development", development, out[1]),
         tuple(
             Share(kind, count, count / noisy if noisy else None, KIND_SHARES[kind])
             for kind, count in zip(NOISE_KINDS, kinds, strict=True)
@@ -1989,6 +1998,12 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  scored          1536   1536   3072     4608",
         "  development      384    384    768     1152",
         "",
+        "Out of catalog, one train singleton each below 0.95 to every entry, "
+        "0.150 of the set against a target of 0.150",
+        "  slice        exact  noisy  queries",
+        "  scored         271    542      813",
+        "  development     68    135      203",
+        "",
         "Noise model, over every noisy variant, each share against its measured target",
         "  kind                 share  target",
         "  extra words          0.361   0.350",
@@ -2009,6 +2024,15 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  vector   0.946  0.989  4608",
         "  hybrid   0.947  0.992  4608",
         "",
+        "Separability, top-1 score, 4608 answerable against 813 out of catalog, "
+        "both weighted by w",
+        "  arm      rejected at 0.99  rejected at 0.95  rejected at 0.90  AUROC",
+        "  trigram             0.101             0.352             0.498  0.874",
+        "  vector              0.050             0.210             0.330  0.795",
+        "  hybrid              0.080             0.301             0.440  0.851",
+        "  each cut keeps that share of the arm's own answerable scores; a "
+        "reporting device, no threshold is chosen",
+        "",
         "Per arm",
         "  arm      rank-1 tie rate  p50 ms  p95 ms  full fetches  "
         "boundary equal to cut  short fetches",
@@ -2018,6 +2042,8 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "                    0              0",
         "  hybrid             0.033   14.95   23.46          4608  "
         "                    2              0",
+        "  latency over every scored query, answerable and out of catalog; "
+        "fetches over the answerable ones",
         "  a boundary equal to the cut means a tie group may reach past the "
         "fetched rows; a short fetch has nothing past them",
         "",
@@ -2081,7 +2107,11 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
     result = resolution.ResolveResult(
         CatalogCounts(documents=5180, lines=36147, distinct=8855, entries=1920),
         query_set_of(
-            1536, 384, kinds=(1388, 930, 837, 685), bands=(1380, 541, 311, 530, 1078)
+            1536,
+            384,
+            kinds=(1388, 930, 837, 685),
+            bands=(1380, 541, 311, 530, 1078),
+            out=((271, 542), (68, 135)),
         ),
         resolution.Measured(
             (
@@ -2099,6 +2129,7 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
                     0.412,
                     0.987,
                     resolution.OverFetch(full=4600, equal=3, short=8),
+                    resolution.Separability((0.1012, 0.3521, 0.4979), 0.8744),
                 ),
                 resolution.ArmResult(
                     "vector",
@@ -2114,6 +2145,7 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
                     14.212,
                     22.834,
                     resolution.OverFetch(full=4608, equal=0, short=0),
+                    resolution.Separability((0.05, 0.21, 0.33), 0.795),
                 ),
                 resolution.ArmResult(
                     "hybrid",
@@ -2129,6 +2161,7 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
                     14.953,
                     23.461,
                     resolution.OverFetch(full=4608, equal=2, short=0),
+                    resolution.Separability((0.0801, 0.3012, 0.4401), 0.8512),
                 ),
             ),
             Sweep(
@@ -2184,6 +2217,12 @@ def test_resolve_renders_an_empty_catalog_as_nothing_to_resolve() -> None:
             "  slice        entries  exact  noisy  queries",
             "  scored             0      0      0        0",
             "  development        0      0      0        0",
+            "",
+            "Out of catalog, one train singleton each below 0.95 to every entry, "
+            "none of the set against a target of 0.150",
+            "  slice        exact  noisy  queries",
+            "  scored           0      0        0",
+            "  development      0      0        0",
             "",
             "Noise model, over every noisy variant, each share against its "
             "measured target",
@@ -2294,11 +2333,21 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
                 "  scored             5      5     10       15",
                 "  development        1      1      2        3",
                 "",
+                "Out of catalog, one train singleton each below 0.95 to every "
+                "entry, 0.143 of the set against a target of 0.150",
+                "  slice        exact  noisy  queries",
+                "  scored           1      2        3",
+                "  development      0      0        0",
+                "",
                 "Noise model, over every noisy variant, each share against its "
                 "measured target",
             ]
         )
     )
+    separability = "Separability, top-1 score, 15 answerable against 3 out of catalog"
+    assert separability in out
+    for arm in ("trigram", "vector"):
+        assert re.search(rf"\n  {arm} +(\d\.\d{{3}} +){{3}}\d\.\d{{3}}\n", out), arm
     assert "\n  trigram  1.000  1.000  15\n" in out, (
         "every scored query finds its entry"
     )

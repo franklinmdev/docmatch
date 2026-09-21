@@ -116,7 +116,7 @@ from docmatch.metrics.line_items import (
     labeled_line_items,
     score_line_items,
 )
-from docmatch.metrics.score import Score, ratio
+from docmatch.metrics.score import Score, ratio, share_of
 from docmatch.resolution import run as resolution
 from docmatch.resolution import sweep as resolution_sweep
 from docmatch.resolution.catalog import (
@@ -124,7 +124,14 @@ from docmatch.resolution.catalog import (
 )
 from docmatch.resolution.catalog import ResolutionError, load_catalog
 from docmatch.resolution.models import load_models
-from docmatch.resolution.queries import DEVELOPMENT_ONE_IN, VARIANTS
+from docmatch.resolution.queries import (
+    DEVELOPMENT_ONE_IN,
+    GUARD,
+    OUT_OF_CATALOG_SHARE,
+    VARIANTS,
+    QuerySet,
+    Slice,
+)
 from docmatch.resolution.store import (
     DATABASE_URL_VARIABLE,
     DEFAULT_DATABASE_URL,
@@ -1073,6 +1080,14 @@ def render_resolve(result: resolution.ResolveResult) -> str:
             ],
         ),
         "",
+        f"Out of catalog, one train singleton each below {GUARD:.2f} to every "
+        f"entry, {_rate(_out_of_catalog_share(queries))} of the set against a "
+        f"target of {OUT_OF_CATALOG_SHARE:.3f}",
+        *_table(
+            ("slice", "exact", "noisy", "queries"),
+            [_out_of_catalog_row(each) for each in queries.slices],
+        ),
+        "",
         "Noise model, over every noisy variant, each share against its measured target",
         *_table(
             ("kind", "share", "target"),
@@ -1113,6 +1128,27 @@ def render_resolve(result: resolution.ResolveResult) -> str:
             ],
         ),
         "",
+        f"Separability, top-1 score, {len(queries.scored.queries)} answerable "
+        f"against {len(queries.scored.out_of_catalog)} out of catalog, both "
+        "weighted by w",
+        *_table(
+            (
+                "arm",
+                *(f"rejected at {keep:.2f}" for keep in resolution.KEPT),
+                "AUROC",
+            ),
+            [
+                (
+                    each.name,
+                    *(_rate(share) for share in each.separability.rejected),
+                    _rate(each.separability.auroc),
+                )
+                for each in measured.arms
+            ],
+        ),
+        "  each cut keeps that share of the arm's own answerable scores; a "
+        "reporting device, no threshold is chosen",
+        "",
         "Per arm",
         *_table(
             (
@@ -1137,6 +1173,8 @@ def render_resolve(result: resolution.ResolveResult) -> str:
                 for each in measured.arms
             ],
         ),
+        "  latency over every scored query, answerable and out of catalog; "
+        "fetches over the answerable ones",
         "  a boundary equal to the cut means a tie group may reach past the "
         "fetched rows; a short fetch has nothing past them",
         "",
@@ -1170,6 +1208,19 @@ def render_resolve(result: resolution.ResolveResult) -> str:
         ),
     ]
     return "\n".join([*lines, ""])
+
+
+def _out_of_catalog_share(queries: QuerySet) -> float | None:
+    """The share drawn, which falls short of the target when too few
+    singletons clear the guard."""
+    out = sum(len(each.out_of_catalog) for each in queries.slices)
+    return share_of(out, out + sum(len(each.queries) for each in queries.slices))
+
+
+def _out_of_catalog_row(one: Slice) -> tuple[str, str, str, str]:
+    exact = sum(each.kind == "exact" for each in one.out_of_catalog)
+    total = len(one.out_of_catalog)
+    return (one.name, str(exact), str(total - exact), str(total))
 
 
 def _rate(rate: float | None) -> str:

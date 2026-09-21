@@ -65,21 +65,46 @@ The entries split into a scored slice and a development slice, one entry in
 five to development, under one pinned seed, the catalog whole in both: every
 knob is set on the development slice and the table is measured once on the
 scored slice, so nothing is fitted on what the README shows. The same seed
-gives the same split and the same variants; the out-of-catalog draw joins
-the stream in #132.
+gives the same split and the same variants.
+
+Out of catalog
+--------------
+
+An out-of-catalog query is a train singleton, a description in one document
+only and so in no entry, and carries no SKU (#119). They are drawn one per
+description, uniformly over the singletons whose nearest entry sits below
+`GUARD`, enough that they are `OUT_OF_CATALOG_SHARE` of the whole set:
+1,016 of 6,776 on the real labels. The guard is loose on purpose: it keeps
+out a singleton that is an entry respelled, and keeps in the near misses,
+two descriptions that differ only in their digits being two items, since
+those are what the separability diagnostic exists to measure. The draw
+walks the singletons in a seeded order and takes each that clears the
+guard until it has enough, which is uniform over the eligible ones without
+comparing all 6,935 singletons to all 1,920 entries.
+
+A third of them stay exact and two thirds become noisy variants by the same
+noise model an entry's variants come from, so the exact weight applies to
+them as it does to the answerable queries; a noisy one must itself clear
+the guard, or it would be an entry respelled after all, and repeat no other
+out-of-catalog query's text. Each stratum splits
+one in five to development, rounded rather than truncated, which gives
+#119's 813 scored and 203 development, 271 and 68 of them exact. The draw
+comes last on the stream, after every entry's variants, so the answerable
+queries are the same with or without it.
 
 The draw is `random.Random` on Python 3.12, whose Mersenne Twister stream
 CPython promises; `uv.lock` pins the interpreter, as it does for the
 generator's cases (#62).
 """
 
+import bisect
 import random
 import string
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal, get_args
 
-from docmatch.matching.similarity import similarity
+from docmatch.matching.similarity import at_least, similarity
 from docmatch.metrics.normalization import normalize_text
 from docmatch.metrics.score import share_of
 from docmatch.resolution.catalog import Catalog, Entry, ResolutionError
@@ -164,6 +189,14 @@ FRAGMENT_WORDS = (5, 14)
 """How many consecutive words of a singleton an extra-words variant appends
 when the bleed is page text, inclusive bounds, capped at the singleton's."""
 
+OUT_OF_CATALOG_SHARE = 0.150
+"""The share of the whole set that is out of catalog, inside #114's 10 to 20
+percent band (#119)."""
+
+GUARD = 0.95
+"""A singleton at or above this normalized Levenshtein to any entry is an
+entry respelled and never an out-of-catalog query (#119)."""
+
 ATTEMPTS = 50
 """How many strength draws a kind gets, an extra-words bleed that carries an
 entry counted as one, and how many kinds a variant gets, before the run
@@ -173,10 +206,11 @@ gives up on its entry."""
 @dataclass(frozen=True)
 class Query:
     """One normalized description sent to an arm, and what the right answer
-    is: the SKU of the entry it was generated from."""
+    is: the SKU of the entry it was generated from, or None for an
+    out-of-catalog query, which has no right answer."""
 
     text: str
-    sku: str
+    sku: str | None
     kind: QueryKind
 
 
@@ -189,6 +223,8 @@ class Slice:
 
     name: SliceName
     queries: tuple[Query, ...]
+    """The answerable queries, the only ones the headline is over."""
+    out_of_catalog: tuple[Query, ...] = ()
 
     @property
     def entries(self) -> int:
@@ -244,16 +280,54 @@ def build_query_set(catalog: Catalog, seed: int = SEED) -> QuerySet:
     for entry in catalog.entries:
         own = [Query(entry.description, entry.sku, "exact")]
         for _ in range(VARIANTS):
-            variant = noise.variant(entry)
+            variant = noise.variant(entry.description, entry.sku)
             variants.append((entry, variant))
             own.append(variant)
         (development if entry.sku in development_skus else scored).extend(own)
+    out_of_catalog = _out_of_catalog(rng, noise, catalog)
     return QuerySet(
-        Slice("scored", tuple(scored)),
-        Slice("development", tuple(development)),
+        Slice("scored", tuple(scored), out_of_catalog["scored"]),
+        Slice("development", tuple(development), out_of_catalog["development"]),
         _kind_shares(variants),
         _band_shares(variants),
     )
+
+
+def _out_of_catalog(
+    rng: random.Random, noise: "_Noise", catalog: Catalog
+) -> dict[SliceName, tuple[Query, ...]]:
+    """The out-of-catalog queries of each slice: singletons clear of the
+    guard, a third exact and the rest noisy, each stratum split alike."""
+    answerable = (1 + VARIANTS) * len(catalog.entries)
+    wanted = round(OUT_OF_CATALOG_SHARE * answerable / (1 - OUT_OF_CATALOG_SHARE))
+    guard = _Guard(catalog)
+    order = list(catalog.singletons)
+    rng.shuffle(order)
+    drawn: list[str] = []
+    for text in order:
+        if len(drawn) == wanted:
+            break
+        if guard.clear(text):
+            drawn.append(text)
+    exact = round(len(drawn) / (1 + VARIANTS))
+    taken = set(drawn)
+
+    def fresh(text: str) -> bool:
+        """A noisy text clear of the guard and no other query's text."""
+        return text not in taken and guard.clear(text)
+
+    noisy = []
+    for text in drawn[exact:]:
+        variant = noise.variant(text, None, fresh)
+        taken.add(variant.text)
+        noisy.append(variant)
+    strata = ([Query(text, None, "exact") for text in drawn[:exact]], noisy)
+    split: dict[SliceName, tuple[Query, ...]] = {"scored": (), "development": ()}
+    for stratum in strata:
+        cut = round(len(stratum) / DEVELOPMENT_ONE_IN)
+        split["development"] += tuple(stratum[:cut])
+        split["scored"] += tuple(stratum[cut:])
+    return split
 
 
 def _kind_shares(variants: Sequence[tuple[Entry, Query]]) -> tuple[Share, ...]:
@@ -273,6 +347,31 @@ def _band_shares(variants: Sequence[tuple[Entry, Query]]) -> tuple[Share, ...]:
     )
 
 
+class _Guard:
+    """The out-of-catalog guard over one catalog, its entries indexed by
+    length so a text is compared only with those whose length lets them
+    reach `GUARD`."""
+
+    def __init__(self, catalog: Catalog) -> None:
+        self.by_length: dict[int, list[str]] = {}
+        for each in catalog.entries:
+            self.by_length.setdefault(len(each.description), []).append(
+                each.description
+            )
+        self.lengths = sorted(self.by_length)
+
+    def clear(self, text: str) -> bool:
+        """Whether the text sits below `GUARD` to every entry."""
+        slack = int((1 - GUARD) * len(text) / GUARD) + 1
+        low = bisect.bisect_left(self.lengths, len(text) - slack)
+        high = bisect.bisect_right(self.lengths, len(text) + slack)
+        return not any(
+            at_least(text, description, GUARD)
+            for length in self.lengths[low:high]
+            for description in self.by_length[length]
+        )
+
+
 class _Noise:
     """The noise model over one catalog, drawing on one stream."""
 
@@ -280,42 +379,46 @@ class _Noise:
         self.rng = rng
         self.descriptions = frozenset(each.description for each in catalog.entries)
         self.singletons = catalog.singletons
-        self.takes_digits = frozenset(
-            each.description
-            for each in catalog.entries
-            if any(
-                drop not in self.descriptions for drop in _digit_drops(each.description)
-            )
-        )
-        """The entries that can drop digits: at least one digit-bearing word
-        beside a plain one, and at least one of the drops leaving a text
-        that is no entry's description."""
-        takes = len(self.takes_digits)
+        takes = sum(self._takes_digits(each.description) for each in catalog.entries)
         self.digit_rate = (
             min(1.0, KIND_SHARES["digits dropped"] * len(catalog.entries) / takes)
             if takes
             else 0.0
         )
-        """How often a variant whose entry can drop digits does: the rate that
-        lands the kind's share over every variant on its target."""
+        """How often a variant whose text can drop digits does: the rate that
+        lands the kind's share over every entry's variants on its target,
+        applied alike to an out-of-catalog query's."""
 
-    def variant(self, entry: Entry) -> Query:
-        """One noisy variant of the entry: a kind drawn and kept, its text
-        normalized, different from every entry's description. A text that is
-        an entry's redraws the strength; a kind that never gets clear of the
-        entries in `ATTEMPTS` draws is given up and another drawn."""
+    def variant(
+        self, text: str, sku: str | None, accepts: Callable[[str], bool] | None = None
+    ) -> Query:
+        """One noisy variant of the text: a kind drawn and kept, normalized,
+        different from every entry's description and passing `accepts` when
+        given. A text that fails redraws the strength; a kind that never
+        passes in `ATTEMPTS` draws is given up and another drawn."""
         for _ in range(ATTEMPTS):
-            kind = self._kind(entry.description)
+            kind = self._kind(text)
             for _ in range(ATTEMPTS):
-                text = normalize_text(self._apply(kind, entry.description))
-                if text and text not in self.descriptions:
-                    return Query(text, entry.sku, kind)
+                noisy = normalize_text(self._apply(kind, text))
+                if (
+                    noisy
+                    and noisy not in self.descriptions
+                    and (accepts is None or accepts(noisy))
+                ):
+                    return Query(noisy, sku, kind)
         raise ResolutionError(
-            f"no variant of {entry.sku} differs from every entry after {ATTEMPTS} kinds"
+            f"no variant of {sku or 'an out-of-catalog query'} differs from every "
+            f"entry after {ATTEMPTS} kinds"
         )
 
+    def _takes_digits(self, text: str) -> bool:
+        """Whether the text can drop digits: a digit-bearing word beside a
+        plain one, and at least one of the drops leaving a text that is no
+        entry's description."""
+        return any(drop not in self.descriptions for drop in _digit_drops(text))
+
     def _kind(self, text: str) -> NoiseKind:
-        if text in self.takes_digits and self.rng.random() < self.digit_rate:
+        if self._takes_digits(text) and self.rng.random() < self.digit_rate:
             return "digits dropped"
         kinds = [
             kind
