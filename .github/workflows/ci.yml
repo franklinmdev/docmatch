@@ -17,6 +17,28 @@ jobs:
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name != github.repository
+    # The Postgres the resolution tests and the Resolve step run against:
+    # pgvector's own image at a pinned pair, so the versions on a CI row are
+    # never confused with the named machine's 16.15 and 0.6.0. The job runs
+    # on the runner rather than in a container, so the port is mapped and the
+    # host is localhost.
+    # Trust authentication, which the image documents as the way to run
+    # without a password: the container lives for one job on one runner,
+    # and a made-up password in the URL only trips secret scanners.
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      DOCMATCH_DATABASE_URL: postgresql://postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -39,6 +61,15 @@ jobs:
 
       - name: Typecheck
         run: uv run mypy
+
+      # Both extensions have to exist before a run; creating them is the
+      # cluster's business, not the command's, which only checks. The image
+      # ships both, and the runner image ships the client.
+      - name: Prepare the database
+        run: >-
+          psql "$DOCMATCH_DATABASE_URL"
+          -c "CREATE EXTENSION IF NOT EXISTS vector"
+          -c "CREATE EXTENSION IF NOT EXISTS pg_trgm"
 
       - name: Test
         run: uv run pytest
@@ -68,6 +99,17 @@ jobs:
           --data-dir engine/tests/evals/synthetic
           --manifest engine/tests/evals/synthetic/subset.json
           --run engine/tests/evals/synthetic
+
+      # The resolution report on the same fixture: the catalog its train
+      # split yields, rebuilt in the service container and answered by every
+      # arm, so the whole path from labels to report runs on every push. It
+      # only prints, and its latency means nothing here; the README's
+      # resolution numbers come from the same command run locally on the
+      # named machine.
+      - name: Resolve
+        run: >-
+          uv run docmatch resolve
+          --data-dir engine/tests/evals/synthetic
 
   docs-location:
     name: docs location

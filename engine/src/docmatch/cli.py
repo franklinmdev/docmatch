@@ -27,6 +27,11 @@ comes from. Each `--run` matches a saved run's readings as the invoices of
 the same cases, which is where the end-to-end rows come from. It prints and
 writes nothing.
 
+`docmatch resolve` builds the catalog from the train labels, rebuilds it in
+Postgres, sends every query through every arm and scores the answers, which
+is where the resolution table comes from. It prints and writes nothing to
+disk; the catalog is left in the database for inspection.
+
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
 """
@@ -112,6 +117,16 @@ from docmatch.metrics.line_items import (
     score_line_items,
 )
 from docmatch.metrics.score import Score, ratio
+from docmatch.resolution import run as resolution
+from docmatch.resolution.catalog import (
+    SPLIT as CATALOG_SPLIT,
+)
+from docmatch.resolution.catalog import ResolutionError, load_catalog
+from docmatch.resolution.store import (
+    DATABASE_URL_VARIABLE,
+    DEFAULT_DATABASE_URL,
+    resolve_database_url,
+)
 
 DATA_DIR_VARIABLE = "DOCMATCH_DATA_DIR"
 DEFAULT_DATA_DIR = Path("data/docile")
@@ -399,6 +414,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             "end-to-end row, and it can be given more than once"
         ),
     )
+    resolving = subcommands.add_parser(
+        "resolve",
+        parents=[dataset],
+        help="build the catalog from the labels, load it, and score every arm",
+    )
+    resolving.add_argument(
+        "--database-url",
+        default=None,
+        help=(
+            "the Postgres the catalog is rebuilt in "
+            f"(default: ${DATABASE_URL_VARIABLE}, else {DEFAULT_DATABASE_URL})"
+        ),
+    )
     counts = subcommands.add_parser(
         "corpus",
         parents=[dataset],
@@ -554,6 +582,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ExtractionError,
         PublicCopyError,
         GeneratorError,
+        ResolutionError,
     ) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
@@ -580,6 +609,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
         return _extract(arguments, dataset)
     if arguments.command == "match":
         return _match(arguments, dataset)
+    if arguments.command == "resolve":
+        return _resolve(arguments, dataset)
     if arguments.command == "eval":
         run = score_subset(
             dataset,
@@ -996,6 +1027,102 @@ def _diagnostic(table: Table) -> list[str]:
 
 def _clean_rate(table: Table) -> str:
     return f"{table.clean_false_positive_rate:.3f} of {table.clean_cases} cases"
+
+
+def _resolve(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
+    """The catalog from train, rebuilt in the database, every query through
+    every arm, scored and timed. The catalog is built before the database is
+    touched, so a missing split is reported before anything is dropped, and
+    a bad number is still a report, so it exits 0 whenever the report prints."""
+    catalog = load_catalog(dataset)
+    result = resolution.resolve(catalog, resolve_database_url(arguments.database_url))
+    return render_resolve(result), 0
+
+
+def render_resolve(result: resolution.ResolveResult) -> str:
+    """The resolution report as a block a human can paste anywhere: counts,
+    rates and milliseconds only, never a description."""
+    lines = [
+        f"Catalog, from {CATALOG_SPLIT}",
+        *_rows(
+            ("documents", str(result.catalog.documents)),
+            ("lines", str(result.catalog.lines)),
+            ("distinct descriptions", str(result.catalog.distinct)),
+            ("entries", str(result.catalog.entries)),
+        ),
+        "",
+        "Queries by kind",
+        *_table(
+            ("kind", "queries"),
+            [(each.kind, str(each.queries)) for each in result.kinds],
+        ),
+    ]
+    measured = result.measured
+    if measured is None:
+        return "\n".join(
+            [
+                *lines,
+                "",
+                "Nothing to resolve: no description appears in two or more "
+                "train documents, so the database was not touched.",
+                "",
+            ]
+        )
+    lines += [
+        "",
+        f"Headline, exact weight w = {resolution.EXACT_WEIGHT:.3f}, the exact "
+        "queries alone until the noisy variants exist",
+        *_table(
+            ("arm", "top-1", "top-5", "n"),
+            [
+                (each.name, _rate(each.top1), _rate(each.top5), str(each.queries))
+                for each in measured.arms
+            ],
+        ),
+        "",
+        "Per arm",
+        *_table(
+            (
+                "arm",
+                "rank-1 tie rate",
+                "p50 ms",
+                "p95 ms",
+                "full fetches",
+                "boundary equal to cut",
+                "short fetches",
+            ),
+            [
+                (
+                    each.name,
+                    _rate(each.tie_rate),
+                    f"{each.p50_ms:.2f}",
+                    f"{each.p95_ms:.2f}",
+                    str(each.over_fetch.full),
+                    str(each.over_fetch.equal),
+                    str(each.over_fetch.short),
+                )
+                for each in measured.arms
+            ],
+        ),
+        "  a boundary equal to the cut means a tie group may reach past the "
+        "fetched rows; a short fetch has nothing past them",
+        "",
+        "Provenance, read at run time",
+        *_rows(
+            ("postgres", measured.versions.postgres),
+            ("pgvector", measured.versions.pgvector),
+            ("pg_trgm", measured.versions.pg_trgm),
+            ("cpu", measured.machine.cpu),
+            ("logical cpus", str(measured.machine.logical_cpus)),
+            ("memory", f"{measured.machine.memory_gib:.1f} GiB"),
+            ("kernel", measured.machine.kernel),
+        ),
+    ]
+    return "\n".join([*lines, ""])
+
+
+def _rate(rate: float | None) -> str:
+    return "none" if rate is None else f"{rate:.3f}"
 
 
 def _corpus(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:

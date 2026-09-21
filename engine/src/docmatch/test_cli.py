@@ -8,11 +8,14 @@ import json
 import shutil
 from dataclasses import replace
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
 
 import pytest
 
-from docmatch.cli import main, render_extract
+from docmatch.cli import main, render_extract, render_resolve
+from docmatch.conftest import TEST_SCHEMA
+from docmatch.docile.dataset import DocileDataset
 from docmatch.evals import public
 from docmatch.evals.conftest import annotate
 from docmatch.evals.manifest import Manifest, load, rank, select, write
@@ -24,6 +27,10 @@ from docmatch.extraction.extractor import Usage
 from docmatch.extraction.run import DocumentRun, Run
 from docmatch.extraction.test_run import READING, FakeExtractor, a_subset
 from docmatch.metrics.fields import Prediction
+from docmatch.metrics.line_items import labeled_line_items
+from docmatch.resolution import run as resolution
+from docmatch.resolution.catalog import CatalogCounts
+from docmatch.resolution.store import Machine, ServerVersions
 
 EXPECTED_SHOW_OUTPUT = "\n".join(
     [
@@ -1576,74 +1583,74 @@ def matching(synthetic_subset: Path, *arguments: str) -> list[str]:
 
 
 MATCH_FLOORS = [
-    # The fixture's train split is its one document with a unit and a
-    # header tax, and one whose two lines nearly repeat each other; its
-    # val split is the five the manifest pins, one of which has no lines
-    # and seeds nothing. Only train's lines carry codes.
+    # The fixture's train split is two documents of eight lines, six of
+    # them the same item in both, the six entries the resolution catalog
+    # is derived from; its val split is the five the manifest pins, one
+    # of which has no lines and seeds nothing. Only train's first two
+    # lines per document carry codes, and only its lines carry units.
     "Seed pool",
     "  pool   documents  lines  without lines",
-    "  train          2      4              0",
+    "  train          2     16              0",
     "  val            5      7              1",
     "",
-    # The procedure pairs lines of different train documents only, so
-    # with two documents of two lines every pair is one of four per cell,
-    # each drawn about a quarter of the time. The closest codes, ST-120
-    # against HT-204 or HT-207, agree at exactly 0.5, which clears 0.5,
-    # so the code floor is 0.6; the closest descriptions agree at 0.370,
-    # so 0.4. HT-204 and HT-207 agree at 0.833 and the two socket sets at
-    # 0.905, so a draw that paired a document with itself would read 0.9
-    # or more on both.
+    # The procedure pairs lines of different train documents only, drawn
+    # from the lines carrying the cell. Four lines carry a code, two per
+    # document, so every code pair is one of four, each drawn about a
+    # quarter of the time: the closest, ST-120 against HT-204 or HT-207,
+    # agree at exactly 0.5, which clears 0.5, so the code floor is 0.6.
+    # Every line carries a description, and the six shared items pair
+    # identically about six times in sixty-four, far past the one percent
+    # a step may let clear, so no step holds and the procedure gives none.
     "Pairing floors, each constant and the procedure's value on train",
     "  cell         constant  procedure  pairs",
     "  code              0.5        0.6  10000",
-    "  description       0.4        0.4  10000",
+    "  description       0.4       none  10000",
 ]
 
 MATCH_TABLES = [
     "",
-    # Every fixture row carries an amount and none a unit price, so every
-    # price variance falls to the amount. Each type starts 500 cases and
-    # the discrepancies mixed into them take it past 500. A quantity of
-    # one unit carries no short-ship or over-ship, which leaves one
-    # document without either. Labels find every discrepancy but where a
-    # case removes an invoice line and adds a donor line whose code agrees
-    # with it at exactly 0.5, ST-120 against HT-204 or HT-207, which
-    # clears the 0.5 floor: the two pair, the extra line and the missing
-    # line are missed, and the pair's price and quantity are compared as
-    # if one line, which is where the price variance and short-ship false
-    # alarms come from.
+    # Every fixture row carries an amount, and the shared train lines a
+    # unit price too, so a price variance falls to the amount except on a
+    # pair of those. Each type starts 500 cases and the discrepancies
+    # mixed into them take it past 500. A quantity of one unit carries no
+    # short-ship or over-ship, which leaves one document without either.
+    # Labels find every discrepancy but where a case removes a shared
+    # train line and adds the same item from the other train document as
+    # the donor: the two pair on their identical description and agree on
+    # every number, so the extra line and the missing line are missed and
+    # nothing false fires.
     "Per-type table, over cases from train and val",
     "  type            precision  recall     n  documents",
-    "  price variance      0.993   1.000  1087          6",
-    "  short-ship          0.989   1.000   689          5",
-    "  over-ship           1.000   1.000   691          5",
-    "  extra line          1.000   0.986  1143          6",
-    "  missing line        1.000   0.991  1850          6",
-    # The one document labeling units and a header tax is train's, drawn
-    # afresh for every case it starts and every one it is mixed into.
-    "  unit variant        1.000   1.000   763          1",
-    "  tax mismatch        1.000   1.000   712          1",
+    "  price variance      1.000   1.000  1050          6",
+    "  short-ship          1.000   1.000   931          5",
+    "  over-ship           1.000   1.000   980          5",
+    "  extra line          1.000   0.998  1005          6",
+    "  missing line        1.000   0.999  1628          6",
+    # Both train documents label units and one a header tax, drawn afresh
+    # for every case they start and every one they are mixed into.
+    "  unit variant        1.000   1.000   798          2",
+    "  tax mismatch        1.000   1.000   590          1",
     "  clean-case false-positive rate  0.000 of 1000 cases",
     "",
-    # No hard negative fires on labels: the 16 false alarms are the
-    # paired extra and missing lines above, on no hard negative.
+    # No hard negative fires on labels, and nothing fires elsewhere: the
+    # one pairing that hides a finding agrees on every number.
     "Diagnostic table, over the same cases",
     "  hard negative   placed  false alarms",
-    "  rounding drift    1095             0",
-    "  just inside       1111             0",
-    "  billed below      1059             0",
-    "  false alarms on no hard negative   16",
-    # The code agreement above pairs a removed line with a donor line, which
-    # the key names no invoice line for, so it crosses no pair: every pair
-    # the key does name is the one the matcher made (#102).
-    "  lines paired with another partner  0 of 7594, 0 alike on code, description, "
+    "  rounding drift    4406             0",
+    "  just inside       3071             0",
+    "  billed below      4408             0",
+    "  false alarms on no hard negative   0",
+    # That pairing joins a removed line to its donor, which the key names
+    # no invoice line for, so it crosses no pair: every pair the key does
+    # name is the one the matcher made (#102).
+    "  lines paired with another partner  0 of 21362, 0 alike on code, description, "
     "quantity, unit price and amount",
     "",
     "  type            near recall    n  far recall    n",
-    "  price variance        1.000  544       1.000  543",
-    "  short-ship            1.000  345       1.000  344",
-    "  over-ship             1.000  346       1.000  345",
-    "  tax mismatch          1.000  356       1.000  356",
+    "  price variance        1.000  525       1.000  525",
+    "  short-ship            1.000  466       1.000  465",
+    "  over-ship             1.000  490       1.000  490",
+    "  tax mismatch          1.000  295       1.000  295",
     "  headline recall is the half-and-half mix of near and far",
     "",
     "Labels control, over cases from the fixed subset",
@@ -1913,3 +1920,214 @@ def test_match_writes_nothing(synthetic_subset: Path, tmp_path: Path) -> None:
 
     assert sorted(each.name for each in synthetic_subset.iterdir()) == before
     assert list(tmp_path.iterdir()) == []
+
+
+def resolving(data_dir: Path, *arguments: str) -> list[str]:
+    return ["resolve", "--data-dir", str(data_dir), *arguments]
+
+
+UNANSWERING = "postgresql://localhost:1/nothing"
+"""A database url no server answers at: port 1 refuses at once."""
+
+
+EXPECTED_RESOLVE_OUTPUT = "\n".join(
+    [
+        "Catalog, from train",
+        "  documents              5180",
+        "  lines                  36147",
+        "  distinct descriptions  8855",
+        "  entries                1920",
+        "",
+        "Queries by kind",
+        "  kind   queries",
+        "  exact     1920",
+        "",
+        "Headline, exact weight w = 0.667, the exact queries alone until the "
+        "noisy variants exist",
+        "  arm      top-1  top-5     n",
+        "  trigram  0.990  0.999  1920",
+        "",
+        "Per arm",
+        "  arm      rank-1 tie rate  p50 ms  p95 ms  full fetches  "
+        "boundary equal to cut  short fetches",
+        "  trigram            0.078    0.41    0.99          1900  "
+        "                    3             20",
+        "  a boundary equal to the cut means a tie group may reach past the "
+        "fetched rows; a short fetch has nothing past them",
+        "",
+        "Provenance, read at run time",
+        "  postgres      16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+        "  pgvector      0.6.0",
+        "  pg_trgm       1.6",
+        "  cpu           AMD Ryzen 7 5800H with Radeon Graphics",
+        "  logical cpus  10",
+        "  memory        11.7 GiB",
+        "  kernel        6.18.33.2-microsoft-standard-WSL2",
+        "",
+    ]
+)
+
+
+def test_resolve_renders_the_report_from_a_built_result() -> None:
+    """The `render_extract` pattern: the numbers are the run's, the block is
+    this module's, and the CLI tests need no database."""
+    result = resolution.ResolveResult(
+        CatalogCounts(documents=5180, lines=36147, distinct=8855, entries=1920),
+        (resolution.KindCount("exact", 1920),),
+        resolution.Measured(
+            (
+                resolution.ArmResult(
+                    "trigram",
+                    (resolution.KindScore("exact", 1920, 1901, 1918),),
+                    1920,
+                    150,
+                    0.412,
+                    0.987,
+                    resolution.OverFetch(full=1900, equal=3, short=20),
+                ),
+            ),
+            ServerVersions("16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)", "0.6.0", "1.6"),
+            Machine(
+                "AMD Ryzen 7 5800H with Radeon Graphics",
+                10,
+                11.68,
+                "6.18.33.2-microsoft-standard-WSL2",
+            ),
+        ),
+    )
+
+    assert render_resolve(result) == EXPECTED_RESOLVE_OUTPUT
+
+
+def test_resolve_renders_an_empty_catalog_as_nothing_to_resolve() -> None:
+    result = resolution.ResolveResult(
+        CatalogCounts(documents=2, lines=3, distinct=3, entries=0),
+        (resolution.KindCount("exact", 0),),
+        None,
+    )
+
+    assert render_resolve(result) == "\n".join(
+        [
+            "Catalog, from train",
+            "  documents              2",
+            "  lines                  3",
+            "  distinct descriptions  3",
+            "  entries                0",
+            "",
+            "Queries by kind",
+            "  kind   queries",
+            "  exact        0",
+            "",
+            "Nothing to resolve: no description appears in two or more train "
+            "documents, so the database was not touched.",
+            "",
+        ]
+    )
+
+
+def test_resolve_reports_a_missing_train_split_without_a_traceback(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The catalog seeds from train alone, so a partial download is an error
+    and not a smaller catalog; it is reported before the database is touched."""
+    partial = tmp_path / "docile"
+    shutil.copytree(synthetic_subset, partial)
+    (partial / "train.json").unlink()
+
+    exit_code = main(resolving(partial, "--database-url", UNANSWERING))
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "train.json" in captured.err
+
+
+def test_resolve_reports_a_database_that_does_not_answer_without_a_traceback(
+    synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = main(
+        resolving(
+            synthetic_subset,
+            "--database-url",
+            "postgresql://someone:secret@localhost:1/nothing",
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.startswith("docmatch: no database answers at ")
+    assert "dbname=nothing" in captured.err
+    assert "secret" not in captured.err
+
+
+def test_resolve_takes_the_database_url_from_the_flag_before_the_environment(
+    synthetic_subset: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("DOCMATCH_DATABASE_URL", "postgresql://localhost:1/fromenv")
+
+    main(resolving(synthetic_subset))
+    assert "dbname=fromenv" in capsys.readouterr().err
+
+    main(resolving(synthetic_subset, "--database-url", "postgresql://localhost:1/flag"))
+    assert "dbname=flag" in capsys.readouterr().err
+
+
+def test_resolve_prints_the_fixture_report_with_no_label_text(
+    synthetic_subset: Path,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The real path over the fixture, the one CI's Resolve step runs: the
+    six descriptions the two train documents share are the catalog, every
+    exact query finds its own entry first, and rule 6 holds on the output.
+    The run is pointed at the test schema so a real run's `resolution` is
+    left for inspection; the command itself has no flag for it."""
+    monkeypatch.setattr(
+        resolution, "resolve", partial(resolution.resolve, schema=TEST_SCHEMA)
+    )
+    exit_code = main(resolving(synthetic_subset, "--database-url", database_url))
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert out.startswith(
+        "\n".join(
+            [
+                "Catalog, from train",
+                "  documents              2",
+                "  lines                  16",
+                "  distinct descriptions  10",
+                "  entries                6",
+                "",
+                "Queries by kind",
+                "  kind   queries",
+                "  exact        6",
+                "",
+            ]
+        )
+    )
+    assert "  trigram  1.000  1.000  6\n" in out
+    assert "Provenance, read at run time" in out
+    assert_no_label_text(synthetic_subset, out)
+
+
+def assert_no_label_text(synthetic_subset: Path, out: str) -> None:
+    """No description the fixture's train split labels, entry or singleton,
+    and no word of one, appears in the output."""
+    dataset = DocileDataset(synthetic_subset)
+    descriptions = {
+        text
+        for document_id in dataset.document_ids("train")
+        for row in labeled_line_items(dataset.annotation(document_id))
+        for text in row.get("line_item_description", ())
+    }
+    assert len(descriptions) == 10
+    lowered = out.casefold()
+    for description in descriptions:
+        assert description.casefold() not in lowered
+        for word in description.replace(",", " ").split():
+            if len(word) > 3:
+                assert word.casefold() not in lowered, word

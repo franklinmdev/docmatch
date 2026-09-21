@@ -28,7 +28,6 @@ from docmatch.extraction.run import (
     DocumentRun,
     Run,
     extract_subset,
-    percentile_of,
     write_confidence,
     write_currency_symbols,
     write_manifest,
@@ -36,6 +35,7 @@ from docmatch.extraction.run import (
     write_record,
 )
 from docmatch.metrics.fields import Prediction
+from docmatch.metrics.score import percentile_of
 
 READING = Prediction(fields={"vendor_name": ["Northwind Trading Ltd"]})
 
