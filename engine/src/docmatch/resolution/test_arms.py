@@ -404,3 +404,24 @@ def test_hybrid_reports_a_tie_group_that_reaches_a_half_boundary(
     fetched = hybrid(store, embedder, "widget", depth=1)
 
     assert fetched.over_fetch == "equal"
+
+
+def test_hybrid_over_fetches_past_the_search_list_at_a_deep_half(
+    store: Store,
+) -> None:
+    """An HNSW scan returns at most `hnsw.ef_search` rows, pinned at 100, so
+    at depth 100 the vector half asks for 125 and would come back short of
+    them, with no row past its cut. 130 entries at one vector distance fill
+    the half to its boundary, so the tie group reaching it is the arm's; the
+    trigram half sits clear at its cut, since the fillers' lengths differ,
+    so the outcome is the vector half's or nothing. The planner scans 130
+    rows without the index, which the real catalog never is, so the test
+    asks for the index the way the real catalog gets it."""
+    fillers = [f"f{index}" for index in range(130)]
+    embedder = BucketEmbedder("widget", *fillers)
+    store.rebuild(entries(*(f"widget {filler}" for filler in fillers)), embedder)
+    store.connection.execute("SET enable_seqscan = off")
+
+    fetched = hybrid(store, embedder, "widget", depth=100)
+
+    assert fetched.over_fetch == "equal"

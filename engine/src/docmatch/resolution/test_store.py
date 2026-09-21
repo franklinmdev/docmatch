@@ -196,3 +196,28 @@ def test_versions_reads_the_server_and_both_extensions(store: Store) -> None:
     assert versions.postgres.split(".")[0].isdigit()
     assert versions.pgvector.count(".") == 2
     assert versions.pg_trgm.count(".") == 1
+
+
+def test_a_search_list_widened_for_a_statement_is_back_at_the_pin_after_it(
+    store: Store,
+) -> None:
+    """A hybrid half deeper than the pin needs more candidates for its one
+    statement; the vector arm after it runs at the pin again."""
+    with store.search_list(125):
+        (inside,) = store.connection.execute("SHOW hnsw.ef_search").fetchone() or (
+            None,
+        )
+
+    assert inside == "125"
+    assert store.versions().ef_search == str(EF_SEARCH)
+
+
+def test_a_search_list_already_wide_enough_is_left_at_the_pin(
+    store: Store,
+) -> None:
+    with store.search_list(50):
+        (inside,) = store.connection.execute("SHOW hnsw.ef_search").fetchone() or (
+            None,
+        )
+
+    assert inside == str(EF_SEARCH)

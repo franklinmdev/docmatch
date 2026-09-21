@@ -34,8 +34,10 @@ it is in, trigram first, and the fused list ordered by score descending
 then SKU and cut to five. The join and the sum sit in code rather than in
 the statement because the cut to d does: a rank taken before the (distance,
 SKU) ordering would be the index's order, not the arm's. Both indexes stay
-in use inside the CTEs, checked with `EXPLAIN` on the real catalog. Each
-half runs the over-fetch check at its own cut, d, and a tie group reaching
+in use inside the CTEs, checked with `EXPLAIN` on the real catalog, and
+the HNSW search list is widened to `d + FETCH` for the statement when that
+is past its pin, since the index returns at most that many rows. Each half
+runs the over-fetch check at its own cut, d, and a tie group reaching
 either half's boundary is the arm's. The rerank arm joins in #131.
 """
 
@@ -179,19 +181,22 @@ def hybrid(store: Store, embedder: Embedder, query: str, depth: int) -> Fetched:
     (embedded,) = embedder.embed([query])
     literal = vector_literal(embedded)
     table = sql.Identifier(store.schema, "catalog")
-    rows = store.connection.execute(
-        sql.SQL(
-            "WITH trigram AS ("
-            "SELECT sku, description <-> %(query)s AS distance FROM {table} "
-            "ORDER BY description <-> %(query)s LIMIT %(fetch)s), "
-            "vector AS ("
-            "SELECT sku, embedding <=> %(embedded)s::vector AS distance FROM {table} "
-            "ORDER BY embedding <=> %(embedded)s::vector LIMIT %(fetch)s) "
-            "SELECT 'trigram', sku, distance FROM trigram "
-            "UNION ALL SELECT 'vector', sku, distance FROM vector"
-        ).format(table=table),
-        {"query": query, "embedded": literal, "fetch": depth + FETCH},
-    ).fetchall()
+    fetch = depth + FETCH
+    with store.search_list(fetch):
+        rows = store.connection.execute(
+            sql.SQL(
+                "WITH trigram AS ("
+                "SELECT sku, description <-> %(query)s AS distance FROM {table} "
+                "ORDER BY description <-> %(query)s LIMIT %(fetch)s), "
+                "vector AS ("
+                "SELECT sku, embedding <=> %(embedded)s::vector AS distance "
+                "FROM {table} "
+                "ORDER BY embedding <=> %(embedded)s::vector LIMIT %(fetch)s) "
+                "SELECT 'trigram', sku, distance FROM trigram "
+                "UNION ALL SELECT 'vector', sku, distance FROM vector"
+            ).format(table=table),
+            {"query": query, "embedded": literal, "fetch": fetch},
+        ).fetchall()
     halves: dict[str, list[Row]] = {"trigram": [], "vector": []}
     for half, sku, distance in rows:
         halves[str(half)].append(_row(sku, distance))

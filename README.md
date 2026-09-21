@@ -780,16 +780,18 @@ trigram arm asks pg_trgm for the 25 nearest descriptions; the vector arm
 embeds the query and asks the HNSW index for the 25 nearest embeddings by
 cosine; every arm orders what it got by distance then SKU in code and cuts
 to five. The hybrid arm asks both indexes in one statement for d + 25 rows
-each, ranks each half the way its single arm would and cuts it to d, and
-fuses the two by reciprocal rank fusion, each entry scoring `1/(60 + rank)`
-summed over the halves it is in, then orders by fused score then SKU and
-cuts to five. d is a constant in code; before the table, every run sweeps d
-over 25, 50 and 100 on the development slice and prints the value its rule
-gives (the smallest d whose development top-5 is within one point of the
-grid's best) beside the constant, and the scored slice is always measured at
-the constant. A query's latency is everything it pays on arrival, the
-embedding included; loading the model, embedding the catalog and building
-the index are paid once and reported once.
+each, the HNSW search list widened to that many for the statement when d +
+25 is past its pin of 100, ranks each half the way its single arm would and
+cuts it to d, and fuses the two by reciprocal rank fusion, each entry
+scoring `1/(60 + rank)` summed over the halves it is in, then orders by
+fused score then SKU and cuts to five. d is a constant in code; before the
+table, every run sweeps d over 25, 50 and 100 on the development slice and
+prints the value its rule gives (the smallest d whose development top-5 is
+within one point of the grid's best, the smaller on a tie) beside the
+constant, and the scored slice is always measured at the constant. A
+query's latency is everything it pays on arrival, the embedding included;
+loading the model, embedding the catalog and building the index are paid
+once and reported once.
 
 It prints the catalog counts (documents, lines, distinct descriptions,
 entries), the query set per slice (entries, exact, noisy, queries), the noise
