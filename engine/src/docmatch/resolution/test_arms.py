@@ -1,11 +1,12 @@
-"""Tests for the trigram arm over a catalog in a real Postgres: seam 2 of the
-Phase 3 spec. Skipped, not failed, when no database answers. Every
-description is made up, and the catalogs are built to tie."""
+"""Tests for the arms over a catalog in a real Postgres: seam 2 of the Phase 3
+spec. Skipped, not failed, when no database answers. Every description is
+made up, the catalogs are built to tie, and the embedder is the fake."""
 
 import string
 
-from docmatch.resolution.arms import FETCH, TOP, Answer, ordered, trigram
+from docmatch.resolution.arms import FETCH, TOP, Answer, ordered, trigram, vector
 from docmatch.resolution.catalog import Entry, mint
+from docmatch.resolution.conftest import BucketEmbedder
 from docmatch.resolution.store import Store
 
 
@@ -14,8 +15,9 @@ def entries(*descriptions: str) -> list[Entry]:
 
 
 def widgets(count: int) -> list[Entry]:
-    """`count` descriptions at the same trigram distance from `widget`: one
-    letter each after it, so every one shares its trigrams and adds two."""
+    """`count` descriptions at the same distance from `widget` on both arms:
+    one letter each after it, so every one shares its trigrams and adds two,
+    and every one shares its one-hot dimension and adds one."""
     return entries(*(f"widget {letter}" for letter in string.ascii_lowercase[:count]))
 
 
@@ -56,10 +58,12 @@ def test_the_over_fetch_check_fires_when_a_tie_group_reaches_the_boundary() -> N
     assert ordered(clear).over_fetch == "distinct"
 
 
-def test_trigram_returns_five_ordered_by_distance_then_sku(store: Store) -> None:
+def test_trigram_returns_five_ordered_by_distance_then_sku(
+    store: Store, embedder: BucketEmbedder
+) -> None:
     catalog = entries("blue widget", "red widget", "green gadget", "widget")
     catalog += widgets(4)
-    store.rebuild(catalog)
+    store.rebuild(catalog, embedder)
 
     fetched = trigram(store, "widget")
 
@@ -75,7 +79,7 @@ def test_trigram_returns_five_ordered_by_distance_then_sku(store: Store) -> None
 
 
 def test_trigram_breaks_ties_by_sku_whatever_order_the_index_returned(
-    store: Store,
+    store: Store, embedder: BucketEmbedder
 ) -> None:
     """Eight entries at one distance from the query: the five are the five
     smallest SKUs, whichever order they were inserted in. What order the
@@ -84,9 +88,9 @@ def test_trigram_breaks_ties_by_sku_whatever_order_the_index_returned(
     tied = widgets(8)
     expected = sorted(each.sku for each in tied)[:TOP]
 
-    store.rebuild(tied)
+    store.rebuild(tied, embedder)
     forwards = trigram(store, "widget")
-    store.rebuild(list(reversed(tied)))
+    store.rebuild(list(reversed(tied)), embedder)
     backwards = trigram(store, "widget")
 
     assert [each.sku for each in forwards.answers] == expected
@@ -96,12 +100,12 @@ def test_trigram_breaks_ties_by_sku_whatever_order_the_index_returned(
 
 
 def test_trigram_reports_a_tie_group_that_reaches_the_fetched_boundary(
-    store: Store,
+    store: Store, embedder: BucketEmbedder
 ) -> None:
     """Twenty-six entries at one distance: the index returns 25 of them, the
     boundary's distance equals the cut's, and the run says so rather than
     trusting the index's own order."""
-    store.rebuild(widgets(26))
+    store.rebuild(widgets(26), embedder)
 
     fetched = trigram(store, "widget")
 
@@ -110,11 +114,11 @@ def test_trigram_reports_a_tie_group_that_reaches_the_fetched_boundary(
 
 
 def test_trigram_over_fetch_is_enough_when_the_cut_sits_clear_of_the_boundary(
-    store: Store,
+    store: Store, embedder: BucketEmbedder
 ) -> None:
     close = widgets(4)
     far = entries(*(f"gadget number {index} of many" for index in range(30)))
-    store.rebuild(close + far)
+    store.rebuild(close + far, embedder)
 
     fetched = trigram(store, "widget")
 
@@ -123,10 +127,110 @@ def test_trigram_over_fetch_is_enough_when_the_cut_sits_clear_of_the_boundary(
     assert {each.sku for each in fetched.answers} > {each.sku for each in close}
 
 
-def test_trigram_answers_fewer_than_five_over_a_smaller_catalog(store: Store) -> None:
-    store.rebuild(entries("blue widget", "red widget"))
+def test_trigram_answers_fewer_than_five_over_a_smaller_catalog(
+    store: Store, embedder: BucketEmbedder
+) -> None:
+    store.rebuild(entries("blue widget", "red widget"), embedder)
 
     fetched = trigram(store, "widget")
+
+    assert len(fetched.answers) == 2
+    assert fetched.over_fetch == "short"
+
+
+def test_vector_returns_five_ordered_by_distance_then_sku(
+    store: Store, embedder: BucketEmbedder
+) -> None:
+    """The query's own entry at cosine distance 0.0 first, then four of the
+    six two-word texts that carry `widget`, all at one shared distance, the
+    four smallest SKUs; `green gadget` shares nothing and sits last."""
+    two_words = entries("blue widget", "red widget") + widgets(4)
+    catalog = [*entries("green gadget", "widget"), *two_words]
+    store.rebuild(catalog, embedder)
+
+    fetched = vector(store, embedder, "widget")
+
+    assert len(fetched.answers) == TOP
+    assert fetched.answers[0].sku == mint("widget")
+    assert fetched.answers[0].score == 0.0
+    scores = [each.score for each in fetched.answers]
+    assert scores == sorted(scores)
+    for one, other in zip(fetched.answers, fetched.answers[1:], strict=False):
+        assert (one.score, one.sku) < (other.score, other.sku)
+    assert [each.sku for each in fetched.answers[1:]] == sorted(
+        each.sku for each in two_words
+    )[: TOP - 1]
+    assert len({each.score for each in fetched.answers[1:]}) == 1
+    assert not fetched.tied_at_1
+    assert fetched.rows == len(catalog)
+
+
+def test_vector_embeds_the_query_once_per_call(
+    store: Store, embedder: BucketEmbedder
+) -> None:
+    store.rebuild(entries("blue widget"), embedder)
+    del embedder.calls[:]
+
+    vector(store, embedder, "widget")
+    vector(store, embedder, "widget b")
+
+    assert embedder.calls == [("widget",), ("widget b",)]
+
+
+def test_vector_breaks_ties_by_sku_whatever_order_the_index_returned(
+    store: Store, embedder: BucketEmbedder
+) -> None:
+    tied = widgets(8)
+    expected = sorted(each.sku for each in tied)[:TOP]
+
+    store.rebuild(tied, embedder)
+    forwards = vector(store, embedder, "widget")
+    store.rebuild(list(reversed(tied)), embedder)
+    backwards = vector(store, embedder, "widget")
+
+    assert [each.sku for each in forwards.answers] == expected
+    assert forwards == backwards
+    assert forwards.tied_at_1
+    assert len({each.score for each in forwards.answers}) == 1
+
+
+def test_vector_reports_a_tie_group_that_reaches_the_fetched_boundary(
+    store: Store, embedder: BucketEmbedder
+) -> None:
+    store.rebuild(widgets(26), embedder)
+
+    fetched = vector(store, embedder, "widget")
+
+    assert fetched.rows == FETCH
+    assert fetched.over_fetch == "equal"
+
+
+def test_vector_over_fetch_is_enough_when_the_cut_sits_clear_of_the_boundary(
+    store: Store,
+) -> None:
+    """The far entries share `widget` and add two to thirty-one more words
+    each, so every one sits at its own distance and the boundary's differs
+    from the cut's. The fillers are in the vocabulary so no two share a
+    dimension by hash."""
+    fillers = [f"w{index}" for index in range(31)]
+    embedder = BucketEmbedder("widget", *string.ascii_lowercase, *fillers)
+    close = widgets(4)
+    far = entries(*("widget " + " ".join(fillers[:count]) for count in range(2, 32)))
+    store.rebuild(close + far, embedder)
+
+    fetched = vector(store, embedder, "widget")
+
+    assert fetched.rows == FETCH
+    assert fetched.over_fetch == "distinct"
+    assert {each.sku for each in fetched.answers} > {each.sku for each in close}
+
+
+def test_vector_answers_fewer_than_five_over_a_smaller_catalog(
+    store: Store, embedder: BucketEmbedder
+) -> None:
+    store.rebuild(entries("blue widget", "red widget"), embedder)
+
+    fetched = vector(store, embedder, "widget")
 
     assert len(fetched.answers) == 2
     assert fetched.over_fetch == "short"

@@ -16,8 +16,14 @@ in integers is neither punished nor favoured (#119).
 
 Trigram only: pg_trgm `gist_trgm_ops`, `description <-> query` ascending,
 `LIMIT 25`, signature length at the default, since the GiST top-5 measured
-exactly a sequential scan's five distances (#120, probe 4). The other arms
-join in #129, #130 and #131.
+exactly a sequential scan's five distances (#120, probe 4).
+
+Vector only: the query embedded through the embedder, pgvector HNSW with
+`vector_cosine_ops`, `embedding <=> query` ascending, `LIMIT 25`, the
+connection's `hnsw.ef_search` at 100 since the store set it (#120, probe 2).
+The embedding is part of what the query pays on arrival, so it sits inside
+the arm call the run times; the model load does not, and is reported once.
+The other arms join in #130 and #131.
 """
 
 from collections.abc import Sequence
@@ -26,7 +32,8 @@ from typing import Literal
 
 from psycopg import sql
 
-from docmatch.resolution.store import Store, StoreError
+from docmatch.resolution.models import Embedder
+from docmatch.resolution.store import Store, StoreError, vector_literal
 
 TOP = 5
 """How many entries every arm returns."""
@@ -94,6 +101,21 @@ def trigram(store: Store, query: str) -> Fetched:
             "ORDER BY description <-> %s LIMIT %s"
         ).format(table),
         (query, query, FETCH),
+    ).fetchall()
+    return ordered([_row(sku, distance) for sku, distance in rows])
+
+
+def vector(store: Store, embedder: Embedder, query: str) -> Fetched:
+    """The vector arm's five for a query: embedded, then searched by cosine."""
+    (embedded,) = embedder.embed([query])
+    literal = vector_literal(embedded)
+    table = sql.Identifier(store.schema, "catalog")
+    rows = store.connection.execute(
+        sql.SQL(
+            "SELECT sku, embedding <=> %s::vector FROM {} "
+            "ORDER BY embedding <=> %s::vector LIMIT %s"
+        ).format(table),
+        (literal, literal, FETCH),
     ).fetchall()
     return ordered([_row(sku, distance) for sku, distance in rows])
 

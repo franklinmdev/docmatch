@@ -6,9 +6,13 @@ import pytest
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from docmatch.resolution.catalog import Entry, mint
+from docmatch.resolution.conftest import BucketEmbedder
 from docmatch.resolution.store import (
     DEFAULT_DATABASE_URL,
     DIMENSIONS,
+    EF_SEARCH,
+    HNSW_EF_CONSTRUCTION,
+    HNSW_M,
     Store,
     StoreError,
     connect,
@@ -62,9 +66,13 @@ def test_machine_reports_what_the_os_gives() -> None:
     assert reported.cpu
 
 
-def test_rebuild_drops_what_the_last_run_left(store: Store) -> None:
-    store.rebuild([Entry(mint(each), each) for each in ("one", "two", "three")])
-    store.rebuild([Entry(mint("four"), "four")])
+def test_rebuild_drops_what_the_last_run_left(
+    store: Store, embedder: BucketEmbedder
+) -> None:
+    store.rebuild(
+        [Entry(mint(each), each) for each in ("one", "two", "three")], embedder
+    )
+    store.rebuild([Entry(mint("four"), "four")], embedder)
 
     (count,) = store.connection.execute(
         f"SELECT count(*) FROM {store.schema}.catalog"
@@ -72,34 +80,86 @@ def test_rebuild_drops_what_the_last_run_left(store: Store) -> None:
     assert count == 1
 
 
-def test_rebuild_leaves_the_table_with_a_null_vector_column_of_384(
-    store: Store,
+def test_rebuild_embeds_every_entry_into_the_vector_column_of_384(
+    store: Store, embedder: BucketEmbedder
 ) -> None:
-    store.rebuild([Entry(mint("one"), "one")])
+    """Every canonical description goes through the embedder in one batch at
+    build time, and what it gave is what the column holds."""
+    entries = [Entry(mint(each), each) for each in ("widget a", "widget b c")]
+
+    store.rebuild(entries, embedder)
 
     row = store.connection.execute(
         "SELECT atttypmod FROM pg_attribute "
         "WHERE attrelid = %s::regclass AND attname = 'embedding'",
         (f"{store.schema}.catalog",),
     ).fetchone()
-    (nulls,) = store.connection.execute(
-        f"SELECT count(*) FROM {store.schema}.catalog WHERE embedding IS NULL"
-    ).fetchone() or (None,)
-
     assert row == (DIMENSIONS,)
-    assert nulls == 1
+    assert embedder.calls == [("widget a", "widget b c")]
+    stored = {
+        str(sku): tuple(float(each) for each in str(text).strip("[]").split(","))
+        for sku, text in store.connection.execute(
+            f"SELECT sku, embedding::text FROM {store.schema}.catalog"
+        ).fetchall()
+    }
+    assert stored == {
+        entry.sku: vector
+        for entry, vector in zip(
+            entries, embedder.embed(["widget a", "widget b c"]), strict=True
+        )
+    }
 
 
-def test_rebuild_builds_the_gist_trigram_index(store: Store) -> None:
-    store.rebuild([Entry(mint("one"), "one")])
+def test_rebuild_builds_the_gist_trigram_index(
+    store: Store, embedder: BucketEmbedder
+) -> None:
+    store.rebuild([Entry(mint("one"), "one")], embedder)
 
+    definition = index_definition(store, "catalog_description_trgm")
+
+    assert "USING gist (description gist_trgm_ops)" in definition
+
+
+def test_rebuild_builds_the_hnsw_index_at_the_pinned_parameters(
+    store: Store, embedder: BucketEmbedder
+) -> None:
+    store.rebuild([Entry(mint("one"), "one")], embedder)
+
+    definition = index_definition(store, "catalog_embedding_hnsw")
+
+    assert "USING hnsw (embedding vector_cosine_ops)" in definition
+    assert f"m='{HNSW_M}'" in definition
+    assert f"ef_construction='{HNSW_EF_CONSTRUCTION}'" in definition
+    assert (HNSW_M, HNSW_EF_CONSTRUCTION) == (16, 64)
+
+
+def test_a_store_sets_the_search_list_on_its_connection_before_any_rebuild(
+    store: Store,
+) -> None:
+    """A fresh session would run the vector arm at pgvector's default 40;
+    making a store over the connection is what pins it at 100."""
+    (setting,) = store.connection.execute("SHOW hnsw.ef_search").fetchone() or (None,)
+
+    assert setting == str(EF_SEARCH) == "100"
+    assert store.versions().ef_search == "100"
+
+
+def test_rebuild_reports_what_embedding_and_indexing_cost(
+    store: Store, embedder: BucketEmbedder
+) -> None:
+    built = store.rebuild([Entry(mint("one"), "one")], embedder)
+
+    assert built.embedding_s >= 0
+    assert built.index_s >= 0
+
+
+def index_definition(store: Store, name: str) -> str:
     (definition,) = store.connection.execute(
         "SELECT indexdef FROM pg_indexes WHERE schemaname = %s AND indexname = %s",
-        (store.schema, "catalog_description_trgm"),
+        (store.schema, name),
     ).fetchone() or (None,)
-
-    assert isinstance(definition, str)
-    assert "USING gist (description gist_trgm_ops)" in definition
+    assert isinstance(definition, str), name
+    return definition
 
 
 def test_a_missing_extension_is_named_without_a_traceback(database_url: str) -> None:
@@ -125,7 +185,7 @@ def test_a_missing_extension_is_named_without_a_traceback(database_url: str) -> 
             pytest.skip("template1 has both extensions here")
 
         with pytest.raises(StoreError, match="is not installed") as caught:
-            bare.rebuild([Entry(mint("one"), "one")])
+            bare.rebuild([Entry(mint("one"), "one")], BucketEmbedder())
 
     assert "CREATE EXTENSION" in str(caught.value)
 

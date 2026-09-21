@@ -744,7 +744,11 @@ uv run docmatch resolve
 ```
 
 This is the command the resolution table comes from. It needs no model call
-that costs money, but it needs a Postgres with the `vector` and `pg_trgm`
+that costs money: the embedder is an open-weight model that runs on the CPU,
+`sentence-transformers/all-MiniLM-L6-v2` pinned to its full commit and loaded
+through `sentence-transformers`, with torch installed from PyTorch's CPU index
+so no CUDA library is pulled in, and the first run downloads the weights into
+the Hugging Face cache. It needs a Postgres with the `vector` and `pg_trgm`
 extensions already created: `--database-url`, else `DOCMATCH_DATABASE_URL`,
 else `postgresql:///docmatch`, the socket a local cluster offers. Both
 extensions are required to exist, and a missing one is reported without a
@@ -765,11 +769,19 @@ or a fragment of a train description that appears in one document only. The
 entries split one in five to a development slice and the rest to a scored
 slice under one seed pinned in code, the catalog whole in both; every knob is
 set on the development slice and the table is measured once on the scored
-slice. It drops and recreates schema `resolution` in the database, loads the
-catalog with a GiST trigram index and leaves it there for inspection, then
-sends every scored query through every arm one at a time on one connection,
-after a discarded warmup pass, and scores the answers against the SKU each
-query was generated from.
+slice. It drops and recreates schema `resolution` in the database, embeds
+every canonical description, loads the catalog with a GiST trigram index and
+an HNSW index over the embeddings (`vector_cosine_ops`, m 16, ef_construction
+64, `hnsw.ef_search` 100 on the connection) and leaves it there for
+inspection, then sends every scored query through every arm one at a time on
+one connection, after a discarded warmup pass that covers the model too, and
+scores the answers against the SKU each query was generated from. The
+trigram arm asks pg_trgm for the 25 nearest descriptions; the vector arm
+embeds the query and asks the HNSW index for the 25 nearest embeddings by
+cosine; every arm orders what it got by distance then SKU in code and cuts
+to five. A query's latency is everything it pays on arrival, the embedding
+included; loading the model, embedding the catalog and building the index
+are paid once and reported once.
 
 It prints the catalog counts (documents, lines, distinct descriptions,
 entries), the query set per slice (entries, exact, noisy, queries), the noise
@@ -777,14 +789,19 @@ model's kind shares and similarity bands beside their measured targets, the
 headline table (top-1 and top-5 per arm over the scored slice, the exact
 queries and the noisy variants weighted at the exact weight, a constant in
 code printed beside the table), per arm the rank-1 tie rate, p50 and p95
-latency per query and what the over-fetch check found, the same scored
-queries regrouped by kind with top-1 and top-5 per arm, a diagnostic that
-never reaches this README, and a provenance block read at run time: the
-Postgres, pgvector and pg_trgm versions from the server, and the CPU, logical
-CPUs, memory and kernel from the OS, since latency is a property of a named
-machine. No description is ever printed. CI runs the command on the same
-synthetic corpus against a pinned `pgvector/pgvector` container; its latency
-means nothing, and the README's numbers come from the command run locally.
+latency per query and what the over-fetch check found, what was paid once
+outside the latency (model load, catalog embedding, HNSW build), the same
+scored queries regrouped by kind with top-1 and top-5 per arm, a diagnostic
+that never reaches this README, and a provenance block read at run time: the
+Postgres, pgvector and pg_trgm versions and the `hnsw.ef_search` in effect
+from the server, the embedder and its revision, the `sentence-transformers`
+and torch versions and the torch thread count from the process, and the
+CPU, logical CPUs, memory and kernel
+from the OS, since latency is a property of a named machine. No description
+is ever printed. CI runs the command on the same synthetic corpus against a
+pinned `pgvector/pgvector` container with the real model cached by its
+revision; its latency means nothing, and the README's numbers come from the
+command run locally.
 
 ### The baseline run
 
@@ -950,7 +967,7 @@ docmatch/
     src/docmatch/      extraction, validation, resolution, matching, metrics
       evals/           the pinned subset, the run that scores it, the corpus survey
       matching/        records, pairing, the rules, the case generator, the scorer
-      resolution/      the catalog, the query set, the Postgres working space, the arms, the run
+      resolution/      the catalog, the query set, the models, the Postgres working space, the arms, the run
     tests/evals/       the synthetic corpus CI runs the eval, the match and the resolve on
   apps/review/         Next.js review inbox, from phase 4
   data/                ignored: datasets, generated fixtures, private sets

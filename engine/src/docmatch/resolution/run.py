@@ -15,8 +15,14 @@ no knob was set on, and the development slice waits for the depth sweep
 (#130). Latency is everything a query pays on arrival, measured one query at
 a time on one connection, after a discarded warmup pass over the same
 queries, as p50 and p95 over the scored pass (#120). For the trigram arm
-that is the SQL and the ordering; the embedding and the rerank join the
-count with their arms, and model load is reported once, never per query.
+that is the SQL and the ordering; for the vector arm the embedding of the
+query too, and the warmup pass covers the model with it. The rerank joins
+the count with its arm. Model load, embedding the catalog and building the
+HNSW index are each timed once and reported beside the table, never per
+query. The models are loaded through the loader given, after the database
+has answered with both extensions and only when there is something to
+resolve, so a database that does not answer, or one missing an extension,
+is reported without loading anything.
 
 The run also tallies what the over-fetch check found: on how many full
 fetches the score at the fetched boundary equalled the score at the cut, and
@@ -32,8 +38,9 @@ from dataclasses import dataclass
 import psycopg
 
 from docmatch.metrics.score import percentile_of, share_of
-from docmatch.resolution.arms import Fetched, trigram
+from docmatch.resolution.arms import Fetched, trigram, vector
 from docmatch.resolution.catalog import Catalog, CatalogCounts
+from docmatch.resolution.models import ModelLoader, ModelVersions
 from docmatch.resolution.queries import (
     QUERY_KINDS,
     Query,
@@ -43,6 +50,7 @@ from docmatch.resolution.queries import (
 )
 from docmatch.resolution.store import (
     SCHEMA,
+    Build,
     Machine,
     ServerVersions,
     Store,
@@ -140,10 +148,14 @@ def _rate_over(kinds: Sequence[KindScore], at: str) -> float | None:
 
 @dataclass(frozen=True)
 class Measured:
-    """What the arms answered, and where."""
+    """What the arms answered, with what, and where."""
 
     arms: tuple[ArmResult, ...]
     versions: ServerVersions
+    models: ModelVersions
+    load_s: float
+    """Loading the models, once, outside any query's latency."""
+    build: Build
     machine: Machine
 
 
@@ -162,10 +174,13 @@ Arm = Callable[[str], Fetched]
 """An arm as the run drives it: a query's text in, its five out."""
 
 
-def resolve(catalog: Catalog, url: str, schema: str = SCHEMA) -> ResolveResult:
-    """The catalog rebuilt in the database at `url`, the scored slice through
-    the trigram arm, scored and timed. The schema is the command's; tests
-    build in their own so a run's is left for inspection."""
+def resolve(
+    catalog: Catalog, url: str, load: ModelLoader, schema: str = SCHEMA
+) -> ResolveResult:
+    """The catalog rebuilt in the database at `url` with the models `load`
+    gives, the scored slice through every arm, scored and timed. The schema
+    is the command's; tests build in their own so a run's is left for
+    inspection."""
     query_set = build_query_set(catalog)
     scored = query_set.scored.queries
     if not scored:
@@ -173,10 +188,27 @@ def resolve(catalog: Catalog, url: str, schema: str = SCHEMA) -> ResolveResult:
     try:
         with connect(url) as connection:
             store = Store(connection, schema)
-            store.rebuild(catalog.entries)
-            arms = (measure("trigram", lambda text: trigram(store, text), scored),)
+            # The extensions are checked before the models load, so a
+            # cluster missing one is reported without paying for the load.
+            store.versions()
+            loaded = load()
+            embedder = loaded.embedder
+            build = store.rebuild(catalog.entries, embedder)
+            arms = (
+                measure("trigram", lambda text: trigram(store, text), scored),
+                measure("vector", lambda text: vector(store, embedder, text), scored),
+            )
             return ResolveResult(
-                catalog.counts, query_set, Measured(arms, store.versions(), machine())
+                catalog.counts,
+                query_set,
+                Measured(
+                    arms,
+                    store.versions(),
+                    loaded.versions,
+                    loaded.load_s,
+                    build,
+                    machine(),
+                ),
             )
     except psycopg.Error as error:
         # A refusal after the connection, a schema that cannot be dropped or
