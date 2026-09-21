@@ -2,7 +2,7 @@
 
 **Document reconciliation engine.** docmatch extracts invoices and receipts with vision language models, validates them with deterministic gates, matches them against purchase orders and receiving records, routes exceptions to human review, and measures every change against a labeled benchmark in CI.
 
-> **Status:** phases 0 to 2 are done: their numbers are in the Benchmarks section with the commits that produced them, three extraction rows, the calibration table, the gate ablation, the matching table and its end-to-end rows. Phase 3, entity resolution, is next. The remaining tables fill in as phases complete, and a phase is not done until its number is here.
+> **Status:** phases 0 to 3 are done: their numbers are in the Benchmarks section with the commits that produced them, three extraction rows, the calibration table, the gate ablation, the matching table and its end-to-end rows, and the entity resolution table with the verdict on the reranker. Phase 4, the pipeline, review and observability, is next. The remaining tables fill in as phases complete, and a phase is not done until its number is here.
 
 ## Why
 
@@ -76,12 +76,12 @@ Measurement before modeling.
 
 ### Phase 3. Entity resolution
 
-- Synthetic product catalog with SKUs, canonical descriptions, and noisy variants derived from labeled line items.
+- A catalog of minted SKUs and canonical descriptions, every description that appears in two or more DocILE train documents, and a query set of exact queries and noisy variants that imitate how the saved readings differ from their labels, plus out-of-catalog queries.
 - Postgres with `pgvector` and `pg_trgm`. Hybrid retrieval with reciprocal rank fusion.
-- Cross-encoder reranking as an ablation, kept or dropped based on the number.
-- Resolution confidence feeds the review routing.
+- Cross-encoder reranking as an ablation, kept or dropped by a rule written before the number.
+- A separability diagnostic per arm, how well its top-1 score tells an answerable query from an out-of-catalog one; the threshold that routes a line to review is Phase 4's.
 
-**The number:** top-1 and top-5 accuracy for trigram only, vector only, hybrid, and hybrid plus rerank, with latency per query.
+**The number:** top-1 and top-5 for trigram only, vector only, hybrid, and hybrid plus rerank, with latency per query.
 **Exit:** the table, and a documented keep-or-drop decision on the reranker.
 
 ### Phase 4. Pipeline, review, observability
@@ -492,9 +492,94 @@ negatives and misread lines, so no pivot discussion opens.
 
 ### Entity resolution
 
-| Method | Top-1 | Top-5 | Latency / query | Commit |
+A catalog of 1,920 entries from the train labels, and over it 4,608 scored
+answerable queries, one exact query and two noisy variants per entry of the
+scored slice. Top-1 and top-5 are the headline, the exact queries and the
+noisy variants combined at the exact weight `w = 2/3`. Latency is per query,
+over every scored query, the 813 out of catalog included, on one machine: AMD
+Ryzen 7 5800H, 10 logical CPUs, 11.7 GiB, WSL2 on Ubuntu 24.04, Postgres 16.15
+with pgvector 0.6.0 and pg_trgm 1.6, torch at 10 threads.
+
+| Arm | Top-1 | Top-5 | p50 / p95 latency | Rank-1 tie rate | Commit |
+|---|---|---|---|---|---|
+| trigram only | 0.930 | 0.990 | 0.87 ms / 1.55 ms | 0.096 | [`27bc70d`](https://github.com/franklinmdev/docmatch/commit/27bc70d) |
+| vector only | 0.917 | 0.972 | 11.43 ms / 14.85 ms | 0.014 | [`27bc70d`](https://github.com/franklinmdev/docmatch/commit/27bc70d) |
+| hybrid | 0.917 | 0.987 | 12.63 ms / 16.80 ms | 0.058 | [`27bc70d`](https://github.com/franklinmdev/docmatch/commit/27bc70d) |
+| hybrid plus rerank | 0.888 | 0.984 | 41.98 ms / 82.53 ms | 0.012 | [`27bc70d`](https://github.com/franklinmdev/docmatch/commit/27bc70d) |
+
+Produced at [`27bc70d`](https://github.com/franklinmdev/docmatch/commit/27bc70d) by
+
+```bash
+uv run docmatch resolve
+```
+
+which prints this table, the separability diagnostic, the depth sweeps, the
+verdict and the provenance below in one report; what it builds, and from what,
+is under [Resolution](#resolution). Every query is rebuilt from the labels on
+one seed pinned in code, so rerunning the command at that commit reproduces
+every column but latency, which belongs to the machine. The embedder is
+`sentence-transformers/all-MiniLM-L6-v2` at
+`1110a243fdf4706b3f48f1d95db1a4f5529b4d41` and the reranker
+`cross-encoder/ms-marco-MiniLM-L6-v2` at
+`233902d25c440f23af6f7d6e94d2946bac0bee0a`, both through
+`sentence-transformers` 6.1.0 on torch 2.14.0 for the CPU; loading the
+embedder took 8.80 s and the reranker 0.83 s, and embedding the catalog and
+building the HNSW index 3.97 s and 0.50 s, each paid once and outside the
+latency. The depths are the depth sweep's on the development slice: d = 25
+rows per hybrid half (development top-5 0.989, 0.986 and 0.984 at 25, 50 and
+100) and N = 10 pairs to the reranker (0.987, 0.984 and 0.983 at 10, 25 and
+50), each the smallest value within one point of its grid's best, the smaller
+on a tie, and each equal to the constant in code.
+
+| Arm | Rejected at 0.99 | Rejected at 0.95 | Rejected at 0.90 | AUROC |
 |---|---|---|---|---|
-| | | | | |
+| trigram only | 0.367 | 0.646 | 0.769 | 0.943 |
+| vector only | 0.173 | 0.501 | 0.697 | 0.921 |
+| hybrid | 0.204 | 0.560 | 0.702 | 0.819 |
+| hybrid plus rerank | 0.192 | 0.546 | 0.710 | 0.900 |
+
+The separability diagnostic, from the same run: from each scored query's top-1
+score, the share of the 813 out-of-catalog queries rejected at the cut that
+keeps 0.99, 0.95 and 0.90 of the arm's own answerable scores, and the AUROC,
+both populations weighted at the exact weight. It chooses no threshold; where
+Phase 4 cuts is Phase 4's decision.
+
+**The verdict on the reranker: dropped.** The rule was fixed before any arm was
+measured, in [ADR 0001](docs/adr/0001-reranker-keep-or-drop-rule.md): the
+reranker is kept when its headline top-1 at the swept N is at least 1.0 point
+above the hybrid's and its p95 per query is at most 500 ms, both constants in
+code, and dropped otherwise. Its top-1 is 0.888 against the hybrid's 0.917, a
+gain of -0.029 against the required +0.010; its p95 is 82.53 ms against the
+500 ms ceiling, which holds. Top-1 alone decides, so Phase 4 resolves with the
+hybrid arm, and the rerank arm and its N sweep are deleted from the command
+(#143); this row stays reachable at [`27bc70d`](https://github.com/franklinmdev/docmatch/commit/27bc70d).
+
+**What the table says.** Trigram only leads the headline, and at p50 it
+answers in under a millisecond, thirteen times faster than the vector arm,
+which pays for embedding the query. The report's table by noise kind, which
+never reaches this README, carries the reason. The vector arm reads the exact
+queries best, 0.992 top-1 against trigram's 0.968, and loses the headline on
+the noisy variants: a letter or two substituted keeps most of a description's
+trigrams and moves its embedding, 0.716 top-1 there against trigram's 0.925.
+Fusing the weaker half into the stronger costs the hybrid top-1 and keeps its
+top-5 within 0.003 of trigram's. The cross-encoder's loss is almost all on the
+exact queries, which carry two thirds of the headline: 0.926 top-1 against the
+hybrid's 0.969, and on about half of its misses there the probe on #131 found
+its top-1 a longer description that contains the query. Over the noisy
+variants its gains on extra words and digits dropped and its losses on letters
+and punctuation nearly cancel. Trigram's top-1 score also separates out of
+catalog best, AUROC 0.943, and the fused score worst, 0.819, since a sum of
+reciprocal ranks takes few distinct values. Hybrid is still Phase 4's arm
+under the ADR, which weighs the reranker against the hybrid and nothing else;
+whether trigram alone should replace it is a question with its own number,
+not a reading of this one.
+
+**Against the pivot trigger.** `docs/alternatives.md` opens a pivot discussion
+when entity resolution is the only layer where methods differ materially. It
+is not: the four arms span 4.2 points of top-1 and 1.8 of top-5, while the
+extraction backends span 0.059 of field F1 and 0.237 of line-item F1 on the
+same documents, and the end-to-end matching rows move with the backend. No
+pivot discussion opens.
 
 ### Pipeline, end to end
 

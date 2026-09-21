@@ -53,3 +53,8 @@ Any of these, observed in the Benchmarks section, opens a pivot discussion recor
 - Matching precision and recall above 0.99 on every discrepancy type at first attempt. The matching layer would demonstrate little.
 - Entity resolution is the only layer where methods differ materially. Bank reconciliation becomes attractive.
 - A dataset restriction prevents publishing the numbers needed for the README. Not a live risk for DocILE: its terms restrict redistribution and commercial use of the data, not the publication of results. Contracts with CUAD become attractive if that changes.
+
+## Triggers checked
+
+- **Matching, at Phase 2's close (`abddc29`).** Not met: the per-type table is below 0.99 on several types, and the README's matching section gives the cells.
+- **Entity resolution, at Phase 3's close (`27bc70d`).** Not met. Resolution is not the only layer where methods differ materially: its four arms span 4.2 points of top-1 (0.888 to 0.930) and 1.8 of top-5 (0.972 to 0.990), while the three extraction backends span 0.059 of field F1 and 0.237 of line-item F1 on the fixed subset, and the end-to-end matching rows move with the backend. Bank reconciliation stays the runner-up, not a pivot.
