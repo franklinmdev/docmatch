@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from docmatch import cli
 from docmatch.cli import main, render_extract, render_resolve
 from docmatch.conftest import TEST_SCHEMA
 from docmatch.docile.dataset import DocileDataset
@@ -31,6 +32,8 @@ from docmatch.metrics.fields import Prediction
 from docmatch.metrics.line_items import labeled_line_items
 from docmatch.resolution import run as resolution
 from docmatch.resolution.catalog import CatalogCounts
+from docmatch.resolution.conftest import FAKE_VERSIONS, fake_loader
+from docmatch.resolution.models import ModelVersions
 from docmatch.resolution.queries import (
     BAND_TARGETS,
     KIND_SHARES,
@@ -41,7 +44,7 @@ from docmatch.resolution.queries import (
     Slice,
     SliceName,
 )
-from docmatch.resolution.store import Machine, ServerVersions
+from docmatch.resolution.store import Build, Machine, ServerVersions
 
 EXPECTED_SHOW_OUTPUT = "\n".join(
     [
@@ -2002,31 +2005,50 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "Headline, over the scored slice, exact weight w = 0.667",
         "  arm      top-1  top-5     n",
         "  trigram  0.922  0.980  4608",
+        "  vector   0.946  0.989  4608",
         "",
         "Per arm",
         "  arm      rank-1 tie rate  p50 ms  p95 ms  full fetches  "
         "boundary equal to cut  short fetches",
         "  trigram            0.065    0.41    0.99          4600  "
         "                    3              8",
+        "  vector             0.017   14.21   22.83          4608  "
+        "                    0              0",
         "  a boundary equal to the cut means a tie group may reach past the "
         "fetched rows; a short fetch has nothing past them",
         "",
+        "Paid once, outside the latency",
+        "  model load         2.71 s",
+        "  catalog embedding  1.23 s",
+        "  hnsw build         0.46 s",
+        "",
         "By kind, the same scored queries regrouped, report only",
-        "  kind                    n  trigram top-1  trigram top-5",
-        "  exact                1536          0.970          0.999",
-        "  extra words          1110          0.811          0.901",
-        "  letters substituted   744          0.941          0.995",
-        "  digits dropped        670          0.597          0.896",
-        "  punctuation           548          0.985          1.000",
+        "  kind                    n  trigram top-1  trigram top-5  "
+        "vector top-1  vector top-5",
+        "  exact                1536          0.970          0.999  "
+        "       0.977         0.999",
+        "  extra words          1110          0.811          0.901  "
+        "       0.856         0.946",
+        "  letters substituted   744          0.941          0.995  "
+        "       0.968         0.997",
+        "  digits dropped        670          0.597          0.896  "
+        "       0.746         0.955",
+        "  punctuation           548          0.985          1.000  "
+        "       0.995         1.000",
         "",
         "Provenance, read at run time",
-        "  postgres      16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
-        "  pgvector      0.6.0",
-        "  pg_trgm       1.6",
-        "  cpu           AMD Ryzen 7 5800H with Radeon Graphics",
-        "  logical cpus  10",
-        "  memory        11.7 GiB",
-        "  kernel        6.18.33.2-microsoft-standard-WSL2",
+        "  postgres               16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+        "  pgvector               0.6.0",
+        "  pg_trgm                1.6",
+        "  embedder               sentence-transformers/all-MiniLM-L6-v2",
+        "  embedder revision      1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+        "  sentence-transformers  6.1.0",
+        "  torch                  2.14.0+cpu",
+        "  torch threads          10",
+        "  cpu                    AMD Ryzen 7 5800H with Radeon Graphics",
+        "  logical cpus           10",
+        "  memory                 11.7 GiB",
+        "  kernel                 6.18.33.2-microsoft-standard-WSL2",
         "",
     ]
 )
@@ -2036,7 +2058,9 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
     """The `render_extract` pattern: the numbers are the run's, the block is
     this module's, and the CLI tests need no database. The headline is
     `w` times the exact rate plus `1 - w` times the noisy rate: 0.970 and
-    0.826 at top-1 give 0.922, 0.999 and 0.942 at top-5 give 0.980."""
+    0.826 at top-1 give 0.922, 0.999 and 0.942 at top-5 give 0.980 for the
+    trigram arm; 0.977 and 0.884 give 0.946, 0.999 and 0.970 give 0.989 for
+    the vector arm."""
     result = resolution.ResolveResult(
         CatalogCounts(documents=5180, lines=36147, distinct=8855, entries=1920),
         query_set_of(
@@ -2059,8 +2083,32 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
                     0.987,
                     resolution.OverFetch(full=4600, equal=3, short=8),
                 ),
+                resolution.ArmResult(
+                    "vector",
+                    (
+                        resolution.KindScore("exact", 1536, 1500, 1534),
+                        resolution.KindScore("extra words", 1110, 950, 1050),
+                        resolution.KindScore("letters substituted", 744, 720, 742),
+                        resolution.KindScore("digits dropped", 670, 500, 640),
+                        resolution.KindScore("punctuation", 548, 545, 548),
+                    ),
+                    4608,
+                    80,
+                    14.212,
+                    22.834,
+                    resolution.OverFetch(full=4608, equal=0, short=0),
+                ),
             ),
             ServerVersions("16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)", "0.6.0", "1.6"),
+            ModelVersions(
+                "sentence-transformers/all-MiniLM-L6-v2",
+                "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+                "6.1.0",
+                "2.14.0+cpu",
+                10,
+            ),
+            2.714,
+            Build(embedding_s=1.234, index_s=0.456),
             Machine(
                 "AMD Ryzen 7 5800H with Radeon Graphics",
                 10,
@@ -2172,15 +2220,17 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The real path over the fixture, the one CI's Resolve step runs: the
-    six descriptions the two train documents share are the catalog, the split
-    leaves one development entry, the scored slice's fifteen queries are
-    measured, and rule 6 holds on the output. The run is pointed at the test
-    schema so a real run's `resolution` is left for inspection; the command
-    itself has no flag for it."""
+    """The real path over the fixture, the one CI's Resolve step runs with
+    the real models: the six descriptions the two train documents share are
+    the catalog, the split leaves one development entry, the scored slice's
+    fifteen queries are measured on both arms, and rule 6 holds on the
+    output. The run is pointed at the test schema so a real run's
+    `resolution` is left for inspection, and at the fake embedder so no
+    weights are loaded; the command itself has a flag for neither."""
     monkeypatch.setattr(
         resolution, "resolve", partial(resolution.resolve, schema=TEST_SCHEMA)
     )
+    monkeypatch.setattr(cli, "load_models", fake_loader)
     exit_code = main(resolving(synthetic_subset, "--database-url", database_url))
 
     out = capsys.readouterr().out
@@ -2208,8 +2258,14 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
     assert "\n  trigram  1.000  1.000  15\n" in out, (
         "every scored query finds its entry"
     )
-    assert "\n  exact                5          1.000          1.000\n" in out
+    assert "\n  vector   1.000  1.000  15\n" in out, (
+        "a one-hot fake still puts the exact entry first"
+    )
+    assert "\n  exact                5          1.000          1.000" in out
+    assert "\n  model load         0.50 s\n" in out
     assert "Provenance, read at run time" in out
+    assert f"\n  embedder               {FAKE_VERSIONS.embedder}\n" in out
+    assert "\n  torch threads          1\n" in out
     assert_no_label_text(synthetic_subset, out)
 
 

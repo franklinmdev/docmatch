@@ -1,10 +1,15 @@
 """Tests for the measurement pass on a fake arm, and one run over a real
 Postgres: seam 2 of the Phase 3 spec. Every value is made up."""
 
+import time
+from collections.abc import Sequence
+
 import pytest
 
 from docmatch.resolution.arms import FETCH, Answer, Fetched, ordered
 from docmatch.resolution.catalog import Entry, build_catalog, mint
+from docmatch.resolution.conftest import FAKE_VERSIONS, BucketEmbedder, fake_loader
+from docmatch.resolution.models import Loaded, Vector
 from docmatch.resolution.queries import Query
 from docmatch.resolution.run import (
     EXACT_WEIGHT,
@@ -108,18 +113,42 @@ def test_an_arm_over_no_queries_has_no_rates() -> None:
     assert result.tie_rate is None
 
 
-def test_resolve_over_an_empty_catalog_touches_no_database() -> None:
-    catalog = build_catalog([described("Blue widget"), described("Red widget")])
+class Loader:
+    """A loader that counts its calls and hands out the fake."""
 
-    result = resolve(catalog, "postgresql://localhost:1/nothing")
+    def __init__(self, embedder: BucketEmbedder | None = None) -> None:
+        self.calls = 0
+        self.embedder = embedder or BucketEmbedder()
+
+    def __call__(self) -> Loaded:
+        self.calls += 1
+        return fake_loader(self.embedder, load_s=0.5)
+
+
+def test_resolve_over_an_empty_catalog_touches_no_database_and_loads_nothing() -> None:
+    catalog = build_catalog([described("Blue widget"), described("Red widget")])
+    loader = Loader()
+
+    result = resolve(catalog, "postgresql://localhost:1/nothing", loader)
 
     assert result.measured is None
     assert result.queries.scored.queries == ()
     assert result.queries.development.queries == ()
     assert result.catalog.entries == 0
+    assert loader.calls == 0
 
 
-def test_resolve_answers_every_exact_query_with_its_own_entry_first(
+def test_resolve_loads_nothing_when_no_database_answers() -> None:
+    catalog = build_catalog([described("Blue widget"), described("Blue widget")])
+    loader = Loader()
+
+    with pytest.raises(StoreError, match="no database answers"):
+        resolve(catalog, "postgresql://localhost:1/nothing", loader)
+
+    assert loader.calls == 0
+
+
+def test_resolve_answers_every_exact_query_with_its_own_entry_first_on_both_arms(
     database_url: str,
 ) -> None:
     catalog = build_catalog(
@@ -128,19 +157,49 @@ def test_resolve_answers_every_exact_query_with_its_own_entry_first(
             described("Blue widget", "Red widget", "Green gadget"),
         ]
     )
+    loader = Loader()
 
-    result = resolve(catalog, database_url, schema="resolution_test")
+    result = resolve(catalog, database_url, loader, schema="resolution_test")
 
     assert result.measured is not None
-    (arm,) = result.measured.arms
-    assert arm.name == "trigram"
-    assert arm.kinds[0] == KindScore("exact", 3, 3, 3)
-    assert arm.queries == 9, "three exact and six variants, no development entry"
-    assert sum(each.n for each in arm.kinds[1:]) == 6
-    assert arm.over_fetch == OverFetch(full=0, equal=0, short=9)
+    trigram, vector = result.measured.arms
+    assert (trigram.name, vector.name) == ("trigram", "vector")
+    for arm in (trigram, vector):
+        assert arm.kinds[0] == KindScore("exact", 3, 3, 3)
+        assert arm.queries == 9, "three exact and six variants, no development entry"
+        assert sum(each.n for each in arm.kinds[1:]) == 6
+        assert arm.over_fetch == OverFetch(full=0, equal=0, short=9)
     assert result.queries.development.entries == 0
     assert result.measured.versions.pg_trgm
+    assert result.measured.models == FAKE_VERSIONS
+    assert result.measured.load_s == 0.5
+    assert result.measured.build.embedding_s >= 0
+    assert result.measured.build.index_s >= 0
     assert result.measured.machine.logical_cpus >= 1
+    assert loader.calls == 1
+
+
+def test_the_vector_arm_pays_for_the_embedding_and_not_for_the_load(
+    database_url: str,
+) -> None:
+    """A query's latency is everything it pays on arrival: the vector arm's
+    p50 carries the embedder's time, the trigram arm's does not, and the
+    load is reported once as what the loader said."""
+
+    class Slow(BucketEmbedder):
+        def embed(self, texts: Sequence[str]) -> tuple[Vector, ...]:
+            time.sleep(0.02)
+            return super().embed(texts)
+
+    catalog = build_catalog([described("Blue widget"), described("Blue widget")])
+
+    result = resolve(catalog, database_url, Loader(Slow()), schema="resolution_test")
+
+    assert result.measured is not None
+    trigram, vector = result.measured.arms
+    assert vector.p50_ms >= 20
+    assert trigram.p50_ms < 20
+    assert result.measured.load_s == 0.5
 
 
 def test_a_statement_the_server_refuses_is_reported_not_raised(
@@ -151,7 +210,7 @@ def test_a_statement_the_server_refuses_is_reported_not_raised(
     catalog = build_catalog([described("Blue widget"), described("Blue widget")])
 
     with pytest.raises(StoreError, match="the database refused the run"):
-        resolve(catalog, database_url, schema="pg_catalog")
+        resolve(catalog, database_url, Loader(), schema="pg_catalog")
 
 
 def test_an_answer_carries_the_sku_and_the_score_the_arm_gave() -> None:

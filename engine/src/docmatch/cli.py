@@ -122,6 +122,7 @@ from docmatch.resolution.catalog import (
     SPLIT as CATALOG_SPLIT,
 )
 from docmatch.resolution.catalog import ResolutionError, load_catalog
+from docmatch.resolution.models import load_models
 from docmatch.resolution.queries import DEVELOPMENT_ONE_IN, VARIANTS
 from docmatch.resolution.store import (
     DATABASE_URL_VARIABLE,
@@ -1036,7 +1037,9 @@ def _resolve(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     touched, so a missing split is reported before anything is dropped, and
     a bad number is still a report, so it exits 0 whenever the report prints."""
     catalog = load_catalog(dataset)
-    result = resolution.resolve(catalog, resolve_database_url(arguments.database_url))
+    result = resolution.resolve(
+        catalog, resolve_database_url(arguments.database_url), load_models
+    )
     return render_resolve(result), 0
 
 
@@ -1136,6 +1139,13 @@ def render_resolve(result: resolution.ResolveResult) -> str:
         "  a boundary equal to the cut means a tie group may reach past the "
         "fetched rows; a short fetch has nothing past them",
         "",
+        "Paid once, outside the latency",
+        *_rows(
+            ("model load", f"{measured.load_s:.2f} s"),
+            ("catalog embedding", f"{measured.build.embedding_s:.2f} s"),
+            ("hnsw build", f"{measured.build.index_s:.2f} s"),
+        ),
+        "",
         "By kind, the same scored queries regrouped, report only",
         *_by_kind(measured.arms),
         "",
@@ -1144,6 +1154,11 @@ def render_resolve(result: resolution.ResolveResult) -> str:
             ("postgres", measured.versions.postgres),
             ("pgvector", measured.versions.pgvector),
             ("pg_trgm", measured.versions.pg_trgm),
+            ("embedder", measured.models.embedder),
+            ("embedder revision", measured.models.embedder_revision),
+            ("sentence-transformers", measured.models.sentence_transformers),
+            ("torch", measured.models.torch),
+            ("torch threads", str(measured.models.torch_threads)),
             ("cpu", measured.machine.cpu),
             ("logical cpus", str(measured.machine.logical_cpus)),
             ("memory", f"{measured.machine.memory_gib:.1f} GiB"),
