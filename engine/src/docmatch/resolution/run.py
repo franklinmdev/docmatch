@@ -160,7 +160,7 @@ class Measured:
     """What the arms answered, with what, and where."""
 
     arms: tuple[ArmResult, ...]
-    depth: Sweep
+    depth_sweep: Sweep
     """The depth sweep on the development slice, beside the constant the
     hybrid arm was measured at."""
     versions: ServerVersions
@@ -210,7 +210,9 @@ def resolve(
             def hybrid_at(depth: int) -> Arm:
                 return lambda text: hybrid(store, embedder, text, depth)
 
-            depth = sweep("d", DEPTH, DEPTHS, hybrid_at, query_set.development.queries)
+            depth_sweep = sweep(
+                "d", DEPTH, DEPTHS, hybrid_at, query_set.development.queries
+            )
             arms = (
                 measure("trigram", lambda text: trigram(store, text), scored),
                 measure("vector", lambda text: vector(store, embedder, text), scored),
@@ -221,7 +223,7 @@ def resolve(
                 query_set,
                 Measured(
                     arms,
-                    depth,
+                    depth_sweep,
                     store.versions(),
                     loaded.versions,
                     loaded.load_s,
@@ -249,10 +251,7 @@ def measure(name: str, arm: Arm, queries: Sequence[Query]) -> ArmResult:
     outcomes = Counter(fetched.over_fetch for _, fetched in answered)
     return ArmResult(
         name=name,
-        kinds=tuple(
-            _score(kind, [each for each in answered if each[0].kind == kind])
-            for kind in QUERY_KINDS
-        ),
+        kinds=_by_kind(answered),
         queries=len(queries),
         tied_at_1=sum(fetched.tied_at_1 for _, fetched in answered),
         p50_ms=percentile_of(latencies, 50),
@@ -278,21 +277,23 @@ def sweep(
         name,
         constant,
         tuple(
-            Point(value, _answered(arm_at(value), queries), len(queries))
-            for value in grid
+            Point(value, _top5(arm_at(value), queries), len(queries)) for value in grid
         ),
     )
 
 
-def _answered(arm: Arm, queries: Sequence[Query]) -> float | None:
+def _top5(arm: Arm, queries: Sequence[Query]) -> float | None:
     """The headline top-5 of the arm over the queries."""
-    answered = [(query, arm(query.text)) for query in queries]
     return _headline_of(
-        [
-            _score(kind, [each for each in answered if each[0].kind == kind])
-            for kind in QUERY_KINDS
-        ],
-        "top5",
+        _by_kind([(query, arm(query.text)) for query in queries]), "top5"
+    )
+
+
+def _by_kind(answered: Sequence[tuple[Query, Fetched]]) -> tuple[KindScore, ...]:
+    """One score per kind, in the report's order, n 0 for a kind not there."""
+    return tuple(
+        _score(kind, [each for each in answered if each[0].kind == kind])
+        for kind in QUERY_KINDS
     )
 
 

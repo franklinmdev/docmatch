@@ -1147,7 +1147,7 @@ def render_resolve(result: resolution.ResolveResult) -> str:
             ("hnsw build", f"{measured.build.index_s:.2f} s"),
         ),
         "",
-        *_sweep(measured.depth, "per hybrid half"),
+        *_sweep(measured.depth_sweep, "per hybrid half"),
         "",
         "By kind, the same scored queries regrouped, report only",
         *_by_kind(measured.arms),

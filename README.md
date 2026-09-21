@@ -800,8 +800,9 @@ code printed beside the table), per arm the rank-1 tie rate, p50 and p95
 latency per query and what the over-fetch check found, what was paid once
 outside the latency (model load, catalog embedding, HNSW build), the sweep's
 development top-5 at each d with the constant, the procedure's value and the
-rule, the same scored queries regrouped by kind with top-1 and top-5 per arm, a diagnostic
-that never reaches this README, and a provenance block read at run time: the
+rule, the same scored queries regrouped by kind with top-1 and top-5 per
+arm, a diagnostic that never reaches this README, and a provenance block
+read at run time: the
 Postgres, pgvector and pg_trgm versions and the `hnsw.ef_search` in effect
 from the server, the embedder and its revision, the `sentence-transformers`
 and torch versions and the torch thread count from the process, and the

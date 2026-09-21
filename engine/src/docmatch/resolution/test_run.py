@@ -213,7 +213,7 @@ def test_resolve_answers_every_exact_query_with_its_own_entry_first_on_every_arm
         assert sum(each.n for each in arm.kinds[1:]) == 6
         assert arm.over_fetch == OverFetch(full=0, equal=0, short=9)
     assert result.queries.development.entries == 0
-    assert result.measured.depth == Sweep(
+    assert result.measured.depth_sweep == Sweep(
         "d", DEPTH, tuple(Point(value, None, 0) for value in DEPTHS)
     )
     assert result.measured.versions.pg_trgm

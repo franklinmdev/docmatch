@@ -78,6 +78,12 @@ from the cut's, equal to it, or a fetch short of its full rows where the
 check does not apply."""
 
 
+_WORST_FIRST: tuple[OverFetchOutcome, ...] = ("equal", "distinct", "short")
+"""How two halves' checks combine into the arm's: a tie group at either
+half's boundary is the arm's, and the check applies when either half was a
+full fetch (#130)."""
+
+
 @dataclass(frozen=True)
 class Fetched:
     """What an arm answered: its five, and whether the over-fetch was enough."""
@@ -121,15 +127,8 @@ def fuse(
             fused[sku] = fused.get(sku, 0.0) + 1 / (RRF_K + rank)
     ranked = sorted(fused.items(), key=lambda item: (-item[1], item[0]))
     answers = tuple(Answer(sku, score) for sku, score in ranked[:TOP])
-    checks = {_check(half, depth, depth + FETCH) for half in halves}
-    over_fetch: OverFetchOutcome = (
-        "equal"
-        if "equal" in checks
-        else "distinct"
-        if "distinct" in checks
-        else "short"
-    )
-    return Fetched(answers, over_fetch)
+    checks = [_check(half, depth, depth + FETCH) for half in halves]
+    return Fetched(answers, min(checks, key=_WORST_FIRST.index))
 
 
 def _ranked(rows: Sequence[Row]) -> list[Row]:

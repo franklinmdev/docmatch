@@ -2267,9 +2267,10 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
     the real models: the six descriptions the two train documents share are
     the catalog, the split leaves one development entry, the scored slice's
     fifteen queries are measured on every arm, the depth sweep runs over the
-    development entry's three, and rule 6 holds on the output. The run is pointed at the test schema so a real run's
-    `resolution` is left for inspection, and at the fake embedder so no
-    weights are loaded; the command itself has a flag for neither."""
+    development entry's three, and rule 6 holds on the output. The run is
+    pointed at the test schema so a real run's `resolution` is left for
+    inspection, and at the fake embedder so no weights are loaded; the
+    command itself has a flag for neither."""
     monkeypatch.setattr(
         resolution, "resolve", partial(resolution.resolve, schema=TEST_SCHEMA)
     )

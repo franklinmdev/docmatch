@@ -20,10 +20,12 @@ DEPTHS = (25, 50, 100)
 """The grid d is swept over, per hybrid half (#120)."""
 
 DEPTH = 25
-"""The depth per hybrid half the scored slice is measured at."""
+"""The depth per hybrid half the scored slice is measured at: the value the
+procedure gave on the real development slice at the first run (#130)."""
 
 POINT = 0.01
-"""How close to the grid's best a smaller value must come to be chosen."""
+"""How close to the grid's best a smaller value must come to be chosen, one
+point of top-5 (#120)."""
 
 _ROUNDING = 1e-9
 """Room for binary floating point, so a value exactly one point below the
