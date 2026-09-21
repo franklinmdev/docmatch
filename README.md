@@ -541,8 +541,8 @@ constant in code.
 The separability diagnostic, from the same run: from each scored query's top-1
 score, the share of the 813 out-of-catalog queries rejected at the cut that
 keeps 0.99, 0.95 and 0.90 of the arm's own answerable scores, and the AUROC,
-both populations weighted at the exact weight. It chooses no operating threshold; where
-Phase 4 cuts is Phase 4's decision.
+both populations weighted at the exact weight. It chooses no operating
+threshold; where Phase 4 cuts is Phase 4's decision.
 
 **The verdict on the reranker: dropped.** The rule was fixed before any arm was
 measured, in [ADR 0001](docs/adr/0001-reranker-keep-or-drop-rule.md): the
