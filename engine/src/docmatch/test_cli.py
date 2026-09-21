@@ -5,7 +5,6 @@ directory, so the suite runs in CI with no dataset present.
 """
 
 import json
-import re
 import shutil
 from collections.abc import Sequence
 from dataclasses import replace
@@ -36,10 +35,9 @@ from docmatch.resolution.queries import (
     BAND_TARGETS,
     KIND_SHARES,
     NOISE_KINDS,
-    BandShare,
-    KindShare,
     Query,
     QuerySet,
+    Share,
     Slice,
     SliceName,
 )
@@ -1951,7 +1949,7 @@ def slice_of(name: SliceName, entries: int) -> Slice:
         queries.append(Query("x", f"SKU-{index}", "exact"))
         queries.append(Query("x", f"SKU-{index}", "extra words"))
         queries.append(Query("x", f"SKU-{index}", "digits dropped"))
-    return Slice(name, entries, tuple(queries))
+    return Slice(name, tuple(queries))
 
 
 def query_set_of(
@@ -1963,11 +1961,11 @@ def query_set_of(
         slice_of("scored", scored),
         slice_of("development", development),
         tuple(
-            KindShare(kind, count, count / noisy if noisy else None, KIND_SHARES[kind])
+            Share(kind, count, count / noisy if noisy else None, KIND_SHARES[kind])
             for kind, count in zip(NOISE_KINDS, kinds, strict=True)
         ),
         tuple(
-            BandShare(name, count, count / noisy if noisy else None, target)
+            Share(name, count, count / noisy if noisy else None, target)
             for (name, _, _, target), count in zip(BAND_TARGETS, bands, strict=True)
         ),
     )
@@ -1981,7 +1979,7 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  distinct descriptions  8855",
         "  entries                1920",
         "",
-        "Query set, one exact query and two noisy variants per entry, one entry "
+        "Query set, one exact query and 2 noisy variants per entry, one entry "
         "in 5 to development",
         "  slice        entries  exact  noisy  queries",
         "  scored          1536   1536   3072     4608",
@@ -2090,7 +2088,7 @@ def test_resolve_renders_an_empty_catalog_as_nothing_to_resolve() -> None:
             "  distinct descriptions  3",
             "  entries                0",
             "",
-            "Query set, one exact query and two noisy variants per entry, one "
+            "Query set, one exact query and 2 noisy variants per entry, one "
             "entry in 5 to development",
             "  slice        entries  exact  noisy  queries",
             "  scored             0      0      0        0",
@@ -2196,7 +2194,7 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
                 "  distinct descriptions  10",
                 "  entries                6",
                 "",
-                "Query set, one exact query and two noisy variants per entry, "
+                "Query set, one exact query and 2 noisy variants per entry, "
                 "one entry in 5 to development",
                 "  slice        entries  exact  noisy  queries",
                 "  scored             5      5     10       15",
@@ -2207,8 +2205,10 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
             ]
         )
     )
-    assert re.search(r"\n  trigram  [01]\.\d{3}  [01]\.\d{3}  15\n", out)
-    assert "\n  exact                5  " in out, "the by-kind table's first row"
+    assert "\n  trigram  1.000  1.000  15\n" in out, (
+        "every scored query finds its entry"
+    )
+    assert "\n  exact                5          1.000          1.000\n" in out
     assert "Provenance, read at run time" in out
     assert_no_label_text(synthetic_subset, out)
 

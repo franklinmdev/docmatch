@@ -31,7 +31,7 @@ from dataclasses import dataclass
 
 import psycopg
 
-from docmatch.metrics.score import percentile_of
+from docmatch.metrics.score import percentile_of, share_of
 from docmatch.resolution.arms import Fetched, trigram
 from docmatch.resolution.catalog import Catalog, CatalogCounts
 from docmatch.resolution.queries import (
@@ -68,11 +68,11 @@ class KindScore:
 
     @property
     def top1_rate(self) -> float | None:
-        return _share(self.top1, self.n)
+        return share_of(self.top1, self.n)
 
     @property
     def top5_rate(self) -> float | None:
-        return _share(self.top5, self.n)
+        return share_of(self.top5, self.n)
 
 
 @dataclass(frozen=True)
@@ -111,7 +111,7 @@ class ArmResult:
 
     @property
     def tie_rate(self) -> float | None:
-        return _share(self.tied_at_1, self.queries)
+        return share_of(self.tied_at_1, self.queries)
 
     def _exact(self, at: str) -> float | None:
         return _rate_over([each for each in self.kinds if each.kind == "exact"], at)
@@ -133,7 +133,7 @@ def headline(exact: float | None, noisy: float | None) -> float | None:
 def _rate_over(kinds: Sequence[KindScore], at: str) -> float | None:
     """The rate over every query of the kinds given, pooled."""
     correct = sum(each.top1 if at == "top1" else each.top5 for each in kinds)
-    return _share(correct, sum(each.n for each in kinds))
+    return share_of(correct, sum(each.n for each in kinds))
 
 
 @dataclass(frozen=True)
@@ -221,7 +221,3 @@ def _score(kind: QueryKind, answered: Sequence[tuple[Query, Fetched]]) -> KindSc
         top1 += bool(skus) and skus[0] == query.sku
         top5 += query.sku in skus
     return KindScore(kind, len(answered), top1, top5)
-
-
-def _share(count: int, n: int) -> float | None:
-    return count / n if n else None

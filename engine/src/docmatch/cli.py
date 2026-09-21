@@ -122,7 +122,7 @@ from docmatch.resolution.catalog import (
     SPLIT as CATALOG_SPLIT,
 )
 from docmatch.resolution.catalog import ResolutionError, load_catalog
-from docmatch.resolution.queries import DEVELOPMENT_ONE_IN
+from docmatch.resolution.queries import DEVELOPMENT_ONE_IN, VARIANTS
 from docmatch.resolution.store import (
     DATABASE_URL_VARIABLE,
     DEFAULT_DATABASE_URL,
@@ -1053,8 +1053,8 @@ def render_resolve(result: resolution.ResolveResult) -> str:
             ("entries", str(result.catalog.entries)),
         ),
         "",
-        "Query set, one exact query and two noisy variants per entry, one entry "
-        f"in {DEVELOPMENT_ONE_IN} to development",
+        f"Query set, one exact query and {VARIANTS} noisy variants per entry, "
+        f"one entry in {DEVELOPMENT_ONE_IN} to development",
         *_table(
             ("slice", "entries", "exact", "noisy", "queries"),
             [
@@ -1073,7 +1073,7 @@ def render_resolve(result: resolution.ResolveResult) -> str:
         *_table(
             ("kind", "share", "target"),
             [
-                (each.kind, _rate(each.share), f"{each.target:.3f}")
+                (each.name, _rate(each.share), f"{each.target:.3f}")
                 for each in queries.kinds
             ],
         ),
@@ -1081,7 +1081,7 @@ def render_resolve(result: resolution.ResolveResult) -> str:
         *_table(
             ("similarity to the entry", "share", "target"),
             [
-                (each.band, _rate(each.share), f"{each.target:.3f}")
+                (each.name, _rate(each.share), f"{each.target:.3f}")
                 for each in queries.bands
             ],
         ),
@@ -1160,6 +1160,8 @@ def _rate(rate: float | None) -> str:
 def _by_kind(arms: Sequence[resolution.ArmResult]) -> list[str]:
     """Top-1 and top-5 per arm for each kind of query, exact and the four
     noise kinds, with n once per row since every arm answers the same set."""
+    if not arms:
+        return []
     header = ["kind", "n"]
     for arm in arms:
         header += [f"{arm.name} top-1", f"{arm.name} top-5"]

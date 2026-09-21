@@ -233,7 +233,7 @@ def test_kind_shares_and_bands_land_within_tolerance_on_the_shaped_pool() -> Non
     for band in query_set.bands:
         assert band.share is not None
         assert abs(band.share - band.target) <= TOLERANCE, band
-    assert [each.kind for each in query_set.kinds] == list(NOISE_KINDS)
+    assert [each.name for each in query_set.kinds] == list(NOISE_KINDS)
     assert sum(each.count for each in query_set.bands) == sum(
         each.count for each in query_set.kinds
     )
@@ -348,7 +348,7 @@ def test_the_targets_are_the_measured_shares() -> None:
     assert [each.target for each in query_set.bands] == pytest.approx(
         [0.362, 0.095, 0.126, 0.095, 0.322]
     )
-    assert [each.band for each in query_set.bands] == [
+    assert [each.name for each in query_set.bands] == [
         "[0.9, 1.0)",
         "[0.8, 0.9)",
         "[0.7, 0.8)",

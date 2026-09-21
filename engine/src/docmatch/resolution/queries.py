@@ -17,15 +17,19 @@ renormalized over the mass they carry: the reading carries extra words
 the other (24.5), digit-bearing words dropped (21.2), punctuation (19.2).
 A variant draws one kind and keeps it, since a backend's error is a habit
 of a document rather than a rate per row, and an entry's two variants draw
-independently, two variants standing for two documents.
+independently, two variants standing for two documents. A draw the model
+rejects, a text that is another entry's description, redraws the strength
+and never the kind, so a kind that collides more often does not lose share
+to the others.
 
 Not every entry can take every kind. Only an entry with a digit-bearing word
-beside a plain one can drop digits, about two entries in five on the real
-catalog, and an entry with no letter cannot have one substituted. A variant
-therefore draws whether it drops digits first, at the rate that makes the
-kind's share over every variant land on its target given how many entries
-can take it, and otherwise draws among the kinds its entry can take at their
-target proportions. Each draw is still one independent draw per variant; the
+beside a plain one, whose digits dropped leave a text that is no entry, can
+drop digits, about two entries in five on the real catalog, and an entry
+with no letter cannot have one substituted. A variant therefore draws
+whether it drops digits first, at the rate that makes the kind's share over
+every variant land on its target given how many entries can take it, and
+otherwise draws among the kinds its entry can take at their target
+proportions. Each draw is still one independent draw per variant; the
 conditioning is what keeps the shares honest on a catalog where the kind
 that matters most, since 115 of #117's 287 near-duplicate pairs differ only
 in their digits, would otherwise fall to a third of its measured share.
@@ -37,7 +41,9 @@ and punctuation are one edit or two, so they sit in the top band on all but
 the shortest entries; digits dropped is one word or every digit-bearing
 word, the middle bands; extra words is text longer than most entries, the
 bottom band. The variant is normalized before it is a query, so spacing
-alone never survives and the fourth kind is punctuation.
+alone never survives and the fourth kind is punctuation: a mark added,
+swapped or dropped outright, the text the same once every mark is removed,
+which is how #116 told punctuation from spacing.
 
 The extra text never comes from a catalog entry (#119): for half the
 variants it is a run of numeric or unit-shaped tokens standing for the
@@ -46,10 +52,11 @@ description, appended after it as right-hand columns would; for the other
 half a fragment of a train singleton description standing for page text, at
 either end. Growth runs a median of about 26 characters on the real catalog,
 inside #116's 14 to 32 per backend, and long enough that the bottom band
-is mostly this kind's, as it was in the measurement. Appending an
-entry's text would manufacture the merged reading carrying two entries that
-#116 ruled out, so a fragment that happens to equal an entry is redrawn, as
-is any variant whose text equals another entry's description.
+is mostly this kind's, as it was in the measurement. Appending an entry's
+text would manufacture the merged reading carrying two entries that #116
+ruled out, so added text that carries any entry's whole description,
+word-bounded, is redrawn, as is any variant whose text equals another
+entry's description.
 
 The split
 ---------
@@ -74,6 +81,7 @@ from typing import Literal, get_args
 
 from docmatch.matching.similarity import similarity
 from docmatch.metrics.normalization import normalize_text
+from docmatch.metrics.score import share_of
 from docmatch.resolution.catalog import Catalog, Entry, ResolutionError
 
 SEED = 20260921
@@ -119,9 +127,18 @@ BAND_TARGETS: tuple[tuple[str, float, float, float], ...] = (
 band's name, its bounds, and #116's measured share of differing readings
 over the blind pairing (72, 19, 25, 19 and 64 of 199)."""
 
-TOLERANCE = 0.05
+TOLERANCE = 0.07
 """How far a kind share or a band share may sit from its target, in share
-points, on the made-up pool the test runs (#119)."""
+points, on the made-up pool the test runs. #119 set 5; it was widened to 7
+on #128 because the two middle bands cannot be reached with these kinds:
+letters and punctuation are one edit or two by #116's own definition, so
+43.7 percent of the mass can only land in the top two bands, and the
+[0.7, 0.8) band #116 measured at 12.6 percent was carried by readings that
+drop or replace whole words, a kind #119 chose not to imitate. On the real
+catalog [0.8, 0.9) sits about 5 points over its target and [0.7, 0.8) about
+5 under, and no strength constant moves either; every kind share and every
+other band sits within 5. The two extra points cover the swing between
+seeds, about 1.5 points on 3,840 variants."""
 
 LETTERS_TWO = 0.1
 """How often a letters variant substitutes two letters rather than one."""
@@ -148,7 +165,8 @@ FRAGMENT_WORDS = (5, 14)
 when the bleed is page text, inclusive bounds, capped at the singleton's."""
 
 ATTEMPTS = 50
-"""How many draws a variant gets before the run gives up on its entry."""
+"""How many strength draws a kind gets, and how many kinds a variant gets,
+before the run gives up on its entry."""
 
 
 @dataclass(frozen=True)
@@ -166,11 +184,14 @@ SliceName = Literal["scored", "development"]
 
 @dataclass(frozen=True)
 class Slice:
-    """The queries of one side of the split, and the entries behind them."""
+    """The queries of one side of the split."""
 
     name: SliceName
-    entries: int
     queries: tuple[Query, ...]
+
+    @property
+    def entries(self) -> int:
+        return len({each.sku for each in self.queries})
 
     @property
     def exact(self) -> int:
@@ -182,20 +203,11 @@ class Slice:
 
 
 @dataclass(frozen=True)
-class KindShare:
-    """One noise kind's share of the noisy variants, against its target."""
+class Share:
+    """One noise kind's, or one similarity band's, share of the noisy
+    variants, against its measured target."""
 
-    kind: NoiseKind
-    count: int
-    share: float | None
-    target: float
-
-
-@dataclass(frozen=True)
-class BandShare:
-    """One similarity band's share of the noisy variants, against its target."""
-
-    band: str
+    name: str
     count: int
     share: float | None
     target: float
@@ -207,8 +219,8 @@ class QuerySet:
 
     scored: Slice
     development: Slice
-    kinds: tuple[KindShare, ...]
-    bands: tuple[BandShare, ...]
+    kinds: tuple[Share, ...]
+    bands: tuple[Share, ...]
 
     @property
     def slices(self) -> tuple[Slice, Slice]:
@@ -236,32 +248,28 @@ def build_query_set(catalog: Catalog, seed: int = SEED) -> QuerySet:
             own.append(variant)
         (held_out if entry.sku in development else scored).extend(own)
     return QuerySet(
-        Slice("scored", len(catalog.entries) - len(development), tuple(scored)),
-        Slice("development", len(development), tuple(held_out)),
+        Slice("scored", tuple(scored)),
+        Slice("development", tuple(held_out)),
         _kind_shares(variants),
         _band_shares(variants),
     )
 
 
-def _kind_shares(variants: Sequence[tuple[Entry, Query]]) -> tuple[KindShare, ...]:
+def _kind_shares(variants: Sequence[tuple[Entry, Query]]) -> tuple[Share, ...]:
     return tuple(
-        KindShare(kind, count, _share(count, len(variants)), KIND_SHARES[kind])
+        Share(kind, count, share_of(count, len(variants)), KIND_SHARES[kind])
         for kind in NOISE_KINDS
         for count in [sum(each.kind == kind for _, each in variants)]
     )
 
 
-def _band_shares(variants: Sequence[tuple[Entry, Query]]) -> tuple[BandShare, ...]:
+def _band_shares(variants: Sequence[tuple[Entry, Query]]) -> tuple[Share, ...]:
     scores = [similarity(entry.description, each.text) for entry, each in variants]
     return tuple(
-        BandShare(name, count, _share(count, len(scores)), target)
+        Share(name, count, share_of(count, len(scores)), target)
         for name, low, high, target in BAND_TARGETS
         for count in [sum(low <= score < high for score in scores)]
     )
-
-
-def _share(count: int, n: int) -> float | None:
-    return count / n if n else None
 
 
 class _Noise:
@@ -271,7 +279,17 @@ class _Noise:
         self.rng = rng
         self.descriptions = frozenset(each.description for each in catalog.entries)
         self.singletons = catalog.singletons
-        takes = sum(self.takes_digits(each.description) for each in catalog.entries)
+        self.takes_digits = frozenset(
+            each.description
+            for each in catalog.entries
+            if any(
+                drop not in self.descriptions for drop in _digit_drops(each.description)
+            )
+        )
+        """The entries that can drop digits: at least one digit-bearing word
+        beside a plain one, and at least one of the drops leaving a text
+        that is no entry's description."""
+        takes = len(self.takes_digits)
         self.digit_rate = (
             min(1.0, KIND_SHARES["digits dropped"] * len(catalog.entries) / takes)
             if takes
@@ -280,26 +298,23 @@ class _Noise:
         """How often a variant whose entry can drop digits does: the rate that
         lands the kind's share over every variant on its target."""
 
-    def takes_digits(self, text: str) -> bool:
-        """Whether the entry can drop digits: at least one digit-bearing word
-        beside a plain one, and at least one of the two drops leaving a text
-        that is no entry's description."""
-        return any(dropped not in self.descriptions for dropped in _digit_drops(text))
-
     def variant(self, entry: Entry) -> Query:
         """One noisy variant of the entry: a kind drawn and kept, its text
-        normalized, different from every entry's description."""
+        normalized, different from every entry's description. A text that is
+        an entry's redraws the strength; a kind that never gets clear of the
+        entries in `ATTEMPTS` draws is given up and another drawn."""
         for _ in range(ATTEMPTS):
             kind = self._kind(entry.description)
-            text = normalize_text(self._apply(kind, entry.description))
-            if text and text not in self.descriptions:
-                return Query(text, entry.sku, kind)
+            for _ in range(ATTEMPTS):
+                text = normalize_text(self._apply(kind, entry.description))
+                if text and text not in self.descriptions:
+                    return Query(text, entry.sku, kind)
         raise ResolutionError(
-            f"no variant of {entry.sku} differs from every entry after {ATTEMPTS} draws"
+            f"no variant of {entry.sku} differs from every entry after {ATTEMPTS} kinds"
         )
 
     def _kind(self, text: str) -> NoiseKind:
-        if self.takes_digits(text) and self.rng.random() < self.digit_rate:
+        if text in self.takes_digits and self.rng.random() < self.digit_rate:
             return "digits dropped"
         kinds = [
             kind
@@ -350,17 +365,29 @@ class _Noise:
                 at = self.rng.randrange(len(words))
                 words[at] += self.rng.choice(PUNCTUATION_MARKS)
                 text = " ".join(words)
+                continue
+            index = self.rng.choice(marks)
+            if operation == "swap":
+                others = [mark for mark in PUNCTUATION_MARKS if mark != text[index]]
+                mark = self.rng.choice(others)
             else:
-                index = self.rng.choice(marks)
-                mark = self.rng.choice(PUNCTUATION_MARKS) if operation == "swap" else ""
-                text = text[:index] + mark + text[index + 1 :]
+                # Dropped outright, a joined word staying joined: #116 counted
+                # a reading as punctuation when both sides agree once the
+                # marks are removed, and a space in the mark's place would be
+                # the spacing kind #119 left out.
+                mark = ""
+            text = text[:index] + mark + text[index + 1 :]
         return text
 
     def _extra_words(self, text: str) -> str:
-        if not self.singletons or self.rng.random() < 0.5:
-            return f"{text} {self._numeric()}"
-        fragment = self._fragment()
-        return f"{text} {fragment}" if self.rng.random() < 0.5 else f"{fragment} {text}"
+        for _ in range(ATTEMPTS):
+            if not self.singletons or self.rng.random() < 0.5:
+                added, in_front = self._numeric(), False
+            else:
+                added, in_front = self._fragment(), self.rng.random() < 0.5
+            if not self._carries_entry(added):
+                break
+        return f"{added} {text}" if in_front else f"{text} {added}"
 
     def _numeric(self) -> str:
         pieces = []
@@ -375,14 +402,19 @@ class _Noise:
         return " ".join(pieces)
 
     def _fragment(self) -> str:
-        for _ in range(ATTEMPTS):
-            words = self.rng.choice(self.singletons).split()
-            span = min(len(words), self.rng.randint(*FRAGMENT_WORDS))
-            start = self.rng.randrange(len(words) - span + 1)
-            fragment = " ".join(words[start : start + span])
-            if fragment not in self.descriptions:
-                return fragment
-        return self._numeric()
+        words = self.rng.choice(self.singletons).split()
+        span = min(len(words), self.rng.randint(*FRAGMENT_WORDS))
+        start = self.rng.randrange(len(words) - span + 1)
+        return " ".join(words[start : start + span])
+
+    def _carries_entry(self, added: str) -> bool:
+        """Whether any run of the added words is an entry's whole description."""
+        words = added.split()
+        return any(
+            " ".join(words[start:end]) in self.descriptions
+            for start in range(len(words))
+            for end in range(start + 1, len(words) + 1)
+        )
 
 
 def _has_digit(word: str) -> bool:
