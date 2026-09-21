@@ -2,7 +2,7 @@
 Postgres: seam 2 of the Phase 3 spec. Every value is made up."""
 
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import pytest
 
@@ -19,8 +19,10 @@ from docmatch.resolution.run import (
     headline,
     measure,
     resolve,
+    sweep,
 )
 from docmatch.resolution.store import StoreError
+from docmatch.resolution.sweep import DEPTH, DEPTHS, Point, Sweep
 from docmatch.resolution.test_catalog import described
 
 
@@ -34,7 +36,7 @@ def test_measure_scores_top_1_and_top_5_against_the_query_truth() -> None:
         "one": answering("SKU-1", "SKU-2"),
         "two": answering("SKU-9", "SKU-2"),
         "three": answering("SKU-9", "SKU-8", "SKU-7", "SKU-6", "SKU-5", "SKU-3"),
-        "four": Fetched((), 0, None),
+        "four": Fetched((), "short"),
     }
     queries = [
         Query("one", "SKU-1", "exact"),
@@ -103,6 +105,47 @@ def test_the_headline_weights_exact_and_noisy_or_takes_the_one_present() -> None
     assert headline(None, None) is None
 
 
+def test_the_sweep_scores_each_value_by_headline_top_5_and_applies_the_rule() -> None:
+    """At depth 25 the arm answers nothing right, at 50 every exact query's
+    entry is fifth and no variant's, at 100 every query's: 50 scores `w`,
+    below 100 by more than a point, so 100 is chosen."""
+
+    def arm_at(depth: int) -> Callable[[str], Fetched]:
+        def arm(text: str) -> Fetched:
+            truth = "SKU-" + text.split()[0]
+            found = depth == 100 or (depth == 50 and text.endswith("exact"))
+            misses = [f"SKU-miss-{index}" for index in range(4)]
+            return answering(*misses, truth if found else "SKU-other")
+
+        return arm
+
+    queries = [
+        Query("1 exact", "SKU-1", "exact"),
+        Query("1 noisy", "SKU-1", "extra words"),
+        Query("1 noisier", "SKU-1", "digits dropped"),
+    ]
+
+    swept = sweep("d", 50, DEPTHS, arm_at, queries)
+
+    assert swept == Sweep(
+        "d",
+        50,
+        (
+            Point(25, 0.0, 3),
+            Point(50, EXACT_WEIGHT, 3),
+            Point(100, 1.0, 3),
+        ),
+    )
+    assert swept.chosen == 100
+
+
+def test_a_sweep_over_no_development_query_scores_nothing_and_chooses_nothing() -> None:
+    swept = sweep("d", 50, DEPTHS, lambda depth: lambda text: answering(), [])
+
+    assert swept.points == tuple(Point(value, None, 0) for value in DEPTHS)
+    assert swept.chosen is None
+
+
 def test_an_arm_over_no_queries_has_no_rates() -> None:
     result = ArmResult(
         "fake", (KindScore("exact", 0, 0, 0),), 0, 0, 0.0, 0.0, OverFetch(0, 0, 0)
@@ -148,7 +191,7 @@ def test_resolve_loads_nothing_when_no_database_answers() -> None:
     assert loader.calls == 0
 
 
-def test_resolve_answers_every_exact_query_with_its_own_entry_first_on_both_arms(
+def test_resolve_answers_every_exact_query_with_its_own_entry_first_on_every_arm(
     database_url: str,
 ) -> None:
     catalog = build_catalog(
@@ -162,14 +205,17 @@ def test_resolve_answers_every_exact_query_with_its_own_entry_first_on_both_arms
     result = resolve(catalog, database_url, loader, schema="resolution_test")
 
     assert result.measured is not None
-    trigram, vector = result.measured.arms
-    assert (trigram.name, vector.name) == ("trigram", "vector")
-    for arm in (trigram, vector):
+    trigram, vector, hybrid = result.measured.arms
+    assert (trigram.name, vector.name, hybrid.name) == ("trigram", "vector", "hybrid")
+    for arm in (trigram, vector, hybrid):
         assert arm.kinds[0] == KindScore("exact", 3, 3, 3)
         assert arm.queries == 9, "three exact and six variants, no development entry"
         assert sum(each.n for each in arm.kinds[1:]) == 6
         assert arm.over_fetch == OverFetch(full=0, equal=0, short=9)
     assert result.queries.development.entries == 0
+    assert result.measured.depth_sweep == Sweep(
+        "d", DEPTH, tuple(Point(value, None, 0) for value in DEPTHS)
+    )
     assert result.measured.versions.pg_trgm
     assert result.measured.models == FAKE_VERSIONS
     assert result.measured.load_s == 0.5
@@ -179,12 +225,12 @@ def test_resolve_answers_every_exact_query_with_its_own_entry_first_on_both_arms
     assert loader.calls == 1
 
 
-def test_the_vector_arm_pays_for_the_embedding_and_not_for_the_load(
+def test_the_embedding_arms_pay_for_the_embedding_and_not_for_the_load(
     database_url: str,
 ) -> None:
-    """A query's latency is everything it pays on arrival: the vector arm's
-    p50 carries the embedder's time, the trigram arm's does not, and the
-    load is reported once as what the loader said. The gap between the two
+    """A query's latency is everything it pays on arrival: the vector and
+    hybrid arms' p50 carry the embedder's time, the trigram arm's does not,
+    and the load is reported once as what the loader said. The gap between
     arms is asserted rather than either arm's own bound, so a slow runner
     cannot fail it."""
 
@@ -198,8 +244,9 @@ def test_the_vector_arm_pays_for_the_embedding_and_not_for_the_load(
     result = resolve(catalog, database_url, Loader(Slow()), schema="resolution_test")
 
     assert result.measured is not None
-    trigram, vector = result.measured.arms
+    trigram, vector, hybrid = result.measured.arms
     assert vector.p50_ms - trigram.p50_ms >= 15
+    assert hybrid.p50_ms - trigram.p50_ms >= 15
     assert result.measured.load_s == 0.5
 
 
