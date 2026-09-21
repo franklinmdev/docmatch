@@ -14,7 +14,9 @@ Only the scored slice is measured: the table is produced once over queries
 no knob was set on, and the development slice waits for the depth sweep
 (#130). Latency is everything a query pays on arrival, measured one query at
 a time on one connection, after a discarded warmup pass over the same
-queries, as p50 and p95 over the scored pass (#120). For the trigram arm
+queries, as p50 and p95 over the scored pass, answerable and out of catalog
+alike, since a line pays the same whether it is in the catalog or not
+(#120, #132). For the trigram arm
 that is the SQL and the ordering; for the vector arm the embedding of the
 query too, and the warmup pass covers the model with it. The rerank joins
 the count with its arm. Model load, embedding the catalog and building the
@@ -28,14 +30,39 @@ The run also tallies what the over-fetch check found: on how many full
 fetches the score at the fetched boundary equalled the score at the cut, and
 how many fetches came back short of `FETCH` rows, where the check does not
 apply. The report says both rather than the run failing (#120).
+
+Separability
+------------
+
+The out-of-catalog queries never enter the headline, the tie rate or the
+table by kind; they feed one diagnostic per arm, how well its top-1 score
+tells a query in the catalog from one that is not (#119). Scores are
+distances, lower first, as every arm orders them, and a query an arm
+answered with nothing counts as farthest. The four arms' scores are not
+commensurable, so each cut anchors to the arm's own answerable
+distribution: the smallest score that keeps `KEPT` of answerable at or
+under it, and the share of out-of-catalog queries beyond it. The cut is a
+reporting device; no threshold is chosen, which is Phase 4 routing's call.
+Beside it AUROC, answerable positive, the chance an out-of-catalog query
+sits farther than an answerable one with ties at half, which is rank based
+and so scale free.
+
+Both populations are weighted the way the headline is: the exact queries
+carry `w` of their population and the noisy ones the rest. scipy 1.18's
+`mannwhitneyu` takes no weights, so AUROC is the weighted sum of its U
+statistic over each pairing of an answerable stratum with an out-of-catalog
+one, which is exactly the weighted statistic since every query in a stratum
+carries the same weight.
 """
 
+import math
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import psycopg
+from scipy.stats import mannwhitneyu
 
 from docmatch.metrics.score import percentile_of, share_of
 from docmatch.resolution.arms import Fetched, trigram, vector
@@ -63,6 +90,9 @@ EXACT_WEIGHT = 2 / 3
 """The share of a headline the exact queries carry, inside #116's 0.65 to
 0.70 exact band, the same for every arm (#119). The noisy variants share
 the rest."""
+
+KEPT = (0.99, 0.95, 0.90)
+"""The shares of answerable queries each separability cut keeps (#119)."""
 
 
 @dataclass(frozen=True)
@@ -96,6 +126,16 @@ class OverFetch:
 
 
 @dataclass(frozen=True)
+class Separability:
+    """How well one arm's top-1 score tells answerable from out of catalog."""
+
+    rejected: tuple[float | None, ...]
+    """At each cut in `KEPT`, the weighted share of out-of-catalog queries
+    beyond it; None when there is none to reject."""
+    auroc: float | None
+
+
+@dataclass(frozen=True)
 class ArmResult:
     """One arm over the scored slice."""
 
@@ -105,11 +145,14 @@ class ArmResult:
     order, n 0 for a kind the slice does not carry, so the table keeps its
     five rows on a catalog of any size."""
     queries: int
+    """The answerable queries, the n of the headline."""
     tied_at_1: int
     """Queries whose first two answers shared a score."""
     p50_ms: float
     p95_ms: float
+    """Both over every scored query, answerable and out of catalog."""
     over_fetch: OverFetch
+    separability: Separability
 
     @property
     def top1(self) -> float | None:
@@ -144,6 +187,68 @@ def _rate_over(kinds: Sequence[KindScore], at: str) -> float | None:
     """The rate over every query of the kinds given, pooled."""
     correct = sum(each.top1 if at == "top1" else each.top5 for each in kinds)
     return share_of(correct, sum(each.n for each in kinds))
+
+
+Scored = Sequence[tuple[QueryKind, float]]
+"""A population's top-1 scores, each beside its query's kind."""
+
+
+def separability(answerable: Scored, out_of_catalog: Scored) -> Separability:
+    """The weighted share of out-of-catalog queries beyond each cut in `KEPT`
+    of the answerable distribution, and the weighted AUROC."""
+    if not answerable or not out_of_catalog:
+        return Separability(tuple(None for _ in KEPT), None)
+    kept = sorted(
+        (score, weight)
+        for (_, score), weight in zip(answerable, _weights(answerable), strict=True)
+    )
+    beyond = list(zip(out_of_catalog, _weights(out_of_catalog), strict=True))
+    rejected = []
+    for keep in KEPT:
+        cut = _cut(kept, keep)
+        rejected.append(sum(weight for (_, score), weight in beyond if score > cut))
+    auroc = 0.0
+    for positives, positive_weight in _strata(answerable):
+        for negatives, negative_weight in _strata(out_of_catalog):
+            pairs = len(positives) * len(negatives)
+            u = mannwhitneyu(negatives, positives).statistic
+            auroc += positive_weight * negative_weight * float(u) / pairs
+    return Separability(tuple(rejected), auroc)
+
+
+def _cut(kept: Sequence[tuple[float, float]], keep: float) -> float:
+    """The smallest score at or under which `keep` of the weight lies; a
+    hair of slack so a sum of weights that should reach it does."""
+    total = 0.0
+    for score, weight in kept:
+        total += weight
+        if total >= keep - 1e-9:
+            return score
+    return kept[-1][0]
+
+
+def _strata(scored: Scored) -> list[tuple[list[float], float]]:
+    """The exact and the noisy scores apart, each with its population's
+    weight: `w` and `1 - w` when both are present, all of it otherwise."""
+    exact = [score for kind, score in scored if kind == "exact"]
+    noisy = [score for kind, score in scored if kind != "exact"]
+    if exact and noisy:
+        return [(exact, EXACT_WEIGHT), (noisy, 1 - EXACT_WEIGHT)]
+    return [(exact or noisy, 1.0)]
+
+
+def _weights(scored: Scored) -> list[float]:
+    """Each query's weight, in order: its stratum's weight shared evenly over
+    the stratum."""
+    exact = sum(kind == "exact" for kind, _ in scored)
+    strata = _strata(scored)
+    if len(strata) == 1:
+        return [1 / len(scored)] * len(scored)
+    (_, exact_weight), (noisy, noisy_weight) = strata
+    return [
+        exact_weight / exact if kind == "exact" else noisy_weight / len(noisy)
+        for kind, _ in scored
+    ]
 
 
 @dataclass(frozen=True)
@@ -194,9 +299,17 @@ def resolve(
             loaded = load()
             embedder = loaded.embedder
             build = store.rebuild(catalog.entries, embedder)
+            unanswerable = query_set.scored.out_of_catalog
             arms = (
-                measure("trigram", lambda text: trigram(store, text), scored),
-                measure("vector", lambda text: vector(store, embedder, text), scored),
+                measure(
+                    "trigram", lambda text: trigram(store, text), scored, unanswerable
+                ),
+                measure(
+                    "vector",
+                    lambda text: vector(store, embedder, text),
+                    scored,
+                    unanswerable,
+                ),
             )
             return ResolveResult(
                 catalog.counts,
@@ -216,17 +329,25 @@ def resolve(
         raise StoreError(f"the database refused the run: {error}") from None
 
 
-def measure(name: str, arm: Arm, queries: Sequence[Query]) -> ArmResult:
-    """Every query through the arm once discarded and once scored and timed."""
-    for query in queries:
+def measure(
+    name: str,
+    arm: Arm,
+    queries: Sequence[Query],
+    out_of_catalog: Sequence[Query] = (),
+) -> ArmResult:
+    """Every query through the arm once discarded and once scored and timed,
+    the out-of-catalog ones timed and read for their top-1 score only."""
+    every = [*queries, *out_of_catalog]
+    for query in every:
         arm(query.text)
     latencies: list[float] = []
-    answered: list[tuple[Query, Fetched]] = []
-    for query in queries:
+    fetches: list[Fetched] = []
+    for query in every:
         started = time.perf_counter()
-        fetched = arm(query.text)
+        fetches.append(arm(query.text))
         latencies.append((time.perf_counter() - started) * 1000)
-        answered.append((query, fetched))
+    answered = list(zip(queries, fetches[: len(queries)], strict=True))
+    unanswerable = list(zip(out_of_catalog, fetches[len(queries) :], strict=True))
     outcomes = Counter(fetched.over_fetch for _, fetched in answered)
     return ArmResult(
         name=name,
@@ -243,7 +364,16 @@ def measure(name: str, arm: Arm, queries: Sequence[Query]) -> ArmResult:
             equal=outcomes["equal"],
             short=outcomes["short"],
         ),
+        separability=separability(_top1(answered), _top1(unanswerable)),
     )
+
+
+def _top1(answered: Sequence[tuple[Query, Fetched]]) -> Scored:
+    """Each query's top-1 score beside its kind, farthest when unanswered."""
+    return [
+        (query.kind, fetched.answers[0].score if fetched.answers else math.inf)
+        for query, fetched in answered
+    ]
 
 
 def _score(kind: QueryKind, answered: Sequence[tuple[Query, Fetched]]) -> KindScore:

@@ -59,9 +59,15 @@ PUNCTUATION_SHARE = 0.45
 MARK = "qq"
 
 
-def shaped_pool(entries: int = 1000, marked: bool = False, seed: int = 1) -> Catalog:
+def shaped_pool(
+    entries: int = 1000,
+    marked: bool = False,
+    seed: int = 1,
+    singletons: int | None = None,
+) -> Catalog:
     """A made-up catalog shaped like the real one's measured lengths, with
-    a singleton pool; `marked` starts every singleton word with `qq`."""
+    a singleton pool, half the entries unless `singletons` says; `marked`
+    starts every singleton word with `qq`."""
     rng = random.Random(seed)
     descriptions: set[str] = set()
     while len(descriptions) < entries:
@@ -73,9 +79,9 @@ def shaped_pool(entries: int = 1000, marked: bool = False, seed: int = 1) -> Cat
                 punctuation=rng.random() < PUNCTUATION_SHARE,
             )
         )
-    singletons: set[str] = set()
-    while len(singletons) < entries // 2:
-        singletons.add(
+    pool: set[str] = set()
+    while len(pool) < (entries // 2 if singletons is None else singletons):
+        pool.add(
             _description(
                 rng,
                 _length(rng, SINGLETON_LENGTHS),
@@ -84,7 +90,7 @@ def shaped_pool(entries: int = 1000, marked: bool = False, seed: int = 1) -> Cat
                 mark=MARK if marked else "",
             )
         )
-    return catalog_of(*descriptions, singletons=tuple(singletons - descriptions))
+    return catalog_of(*descriptions, singletons=tuple(pool - descriptions))
 
 
 def _length(rng: random.Random, quantiles: Sequence[tuple[float, int]]) -> int:
@@ -140,7 +146,7 @@ def _word(rng: random.Random, length: int) -> str:
 
 def variants_of(query_set: QuerySet, catalog: Catalog) -> list[tuple[Entry, Query]]:
     """Every noisy variant beside its entry."""
-    by_sku = {each.sku: each for each in catalog.entries}
+    by_sku: dict[str | None, Entry] = {each.sku: each for each in catalog.entries}
     return [
         (by_sku[each.sku], each)
         for one in query_set.slices
@@ -354,7 +360,7 @@ def test_the_exact_query_is_the_canonical_description_with_its_sku() -> None:
         if each.kind == "exact"
     ]
 
-    assert sorted(exact, key=lambda each: each.sku) == [
+    assert sorted(exact, key=lambda each: str(each.sku)) == [
         Query(each.description, each.sku, "exact") for each in catalog.entries
     ]
 
@@ -373,3 +379,103 @@ def test_the_targets_are_the_measured_shares() -> None:
         "[0.5, 0.7)",
         "below 0.5",
     ]
+
+
+def out_of_catalog(query_set: QuerySet) -> list[Query]:
+    return [each for one in query_set.slices for each in one.out_of_catalog]
+
+
+def test_out_of_catalog_is_0_150_of_the_set_split_and_stratified_like_entries() -> None:
+    """At the real catalog's size the draw gives #119's counts: 1,016 of
+    6,776, 813 scored and 203 development, each slice one exact to two
+    noisy. Every out-of-catalog query carries no SKU; an exact one is its
+    singleton unchanged, a noisy one is no entry's description."""
+    catalog = shaped_pool(entries=1920, marked=True, singletons=1200)
+    descriptions = {each.description for each in catalog.entries}
+
+    query_set = build_query_set(catalog)
+
+    counted = [
+        (
+            sum(each.kind == "exact" for each in one.out_of_catalog),
+            sum(each.kind != "exact" for each in one.out_of_catalog),
+        )
+        for one in query_set.slices
+    ]
+    assert counted == [(271, 542), (68, 135)]
+    for query in out_of_catalog(query_set):
+        assert query.sku is None
+        assert query.text == normalize_text(query.text)
+        assert query.text not in descriptions
+        if query.kind == "exact":
+            assert query.text in catalog.singletons
+        else:
+            assert query.kind in NOISE_KINDS
+    exact = [each.text for each in out_of_catalog(query_set) if each.kind == "exact"]
+    assert len(set(exact)) == len(exact), "one query per description"
+    assert (len(query_set.scored.queries), len(query_set.development.queries)) == (
+        4608,
+        1152,
+    )
+
+
+GUARDED = (
+    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel",
+    "india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa",
+    "quebec", "romeo", "sierra", "tango",
+)  # fmt: skip
+
+
+def test_a_singleton_at_or_above_the_guard_to_any_entry_is_never_drawn() -> None:
+    """Twenty entries ask for eleven out-of-catalog queries and the pool
+    holds five singletons, one of them an entry respelled by one letter:
+    the four others are all drawn and the respelled one never is, under any
+    seed."""
+    entries = [f"heavy duty {word} bracket, galvanised steel" for word in GUARDED]
+    respelled = "heavy duty alpha brackot, galvanised steel"
+    far = ["freight and handling", "service call", "labour 2 hours", "fuel surcharge"]
+    catalog = catalog_of(*entries, singletons=[respelled, *far])
+
+    for seed in range(SEED, SEED + 20):
+        drawn = out_of_catalog(build_query_set(catalog, seed=seed))
+        assert len(drawn) == 4
+        assert all(each.text != respelled for each in drawn)
+        assert {each.text for each in drawn if each.kind == "exact"} <= set(far)
+
+
+def test_the_out_of_catalog_draw_repeats_under_the_seed_and_differs_under_another() -> (
+    None
+):
+    catalog = shaped_pool(entries=200, marked=True, singletons=300)
+
+    one = out_of_catalog(build_query_set(catalog))
+    again = out_of_catalog(build_query_set(catalog))
+    other = out_of_catalog(build_query_set(catalog, seed=SEED + 1))
+
+    assert one == again
+    assert len(one) == round(0.15 * 600 / 0.85)
+    assert [each.text for each in other] != [each.text for each in one]
+
+
+def test_a_catalog_of_six_with_four_singletons_draws_three_all_scored() -> None:
+    """The fixture's shape: eighteen answerable queries ask for three out of
+    catalog, one exact and two noisy, too few for development to get any."""
+    catalog = catalog_of(
+        *(f"item {n} thing" for n in range(6)),
+        singletons=["freight charge", "fuel surcharge", "labour", "service call"],
+    )
+
+    query_set = build_query_set(catalog)
+
+    assert query_set.development.out_of_catalog == ()
+    assert sorted(each.kind == "exact" for each in query_set.scored.out_of_catalog) == [
+        False,
+        False,
+        True,
+    ]
+
+
+def test_an_empty_catalog_draws_no_out_of_catalog_query() -> None:
+    catalog = build_catalog([described("Blue widget"), described("Red widget")])
+
+    assert out_of_catalog(build_query_set(catalog)) == []

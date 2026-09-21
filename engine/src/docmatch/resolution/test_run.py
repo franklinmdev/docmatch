@@ -1,6 +1,7 @@
 """Tests for the measurement pass on a fake arm, and one run over a real
 Postgres: seam 2 of the Phase 3 spec. Every value is made up."""
 
+import math
 import time
 from collections.abc import Sequence
 
@@ -10,15 +11,18 @@ from docmatch.resolution.arms import FETCH, Answer, Fetched, ordered
 from docmatch.resolution.catalog import Entry, build_catalog, mint
 from docmatch.resolution.conftest import FAKE_VERSIONS, BucketEmbedder, fake_loader
 from docmatch.resolution.models import Loaded, Vector
-from docmatch.resolution.queries import Query
+from docmatch.resolution.queries import Query, QueryKind
 from docmatch.resolution.run import (
     EXACT_WEIGHT,
+    KEPT,
     ArmResult,
     KindScore,
     OverFetch,
+    Separability,
     headline,
     measure,
     resolve,
+    separability,
 )
 from docmatch.resolution.store import StoreError
 from docmatch.resolution.test_catalog import described
@@ -105,7 +109,14 @@ def test_the_headline_weights_exact_and_noisy_or_takes_the_one_present() -> None
 
 def test_an_arm_over_no_queries_has_no_rates() -> None:
     result = ArmResult(
-        "fake", (KindScore("exact", 0, 0, 0),), 0, 0, 0.0, 0.0, OverFetch(0, 0, 0)
+        "fake",
+        (KindScore("exact", 0, 0, 0),),
+        0,
+        0,
+        0.0,
+        0.0,
+        OverFetch(0, 0, 0),
+        Separability((None, None, None), None),
     )
 
     assert result.top1 is None
@@ -212,6 +223,113 @@ def test_a_statement_the_server_refuses_is_reported_not_raised(
 
     with pytest.raises(StoreError, match="the database refused the run"):
         resolve(catalog, database_url, Loader(), schema="pg_catalog")
+
+
+def exact_at(*scores: float) -> list[tuple[QueryKind, float]]:
+    return [("exact", score) for score in scores]
+
+
+def test_separability_on_scores_that_separate_perfectly() -> None:
+    answerable = exact_at(0.1, 0.15) + [("extra words", 0.2), ("punctuation", 0.25)]
+    out = exact_at(0.8) + [("digits dropped", 0.85), ("extra words", 0.9)]
+
+    result = separability(answerable, out)
+
+    assert result.rejected == (1.0, 1.0, 1.0)
+    assert result.auroc == 1.0
+
+
+def test_separability_on_scores_that_do_not_separate_at_all() -> None:
+    """Ten answerable and ten out of catalog on the same ten scores: the cut
+    keeping 0.90 of answerable sits at the ninth and rejects the tenth out
+    of catalog, the cuts keeping more reject none, and AUROC is a coin."""
+    scores = [index / 10 for index in range(1, 11)]
+
+    result = separability(exact_at(*scores), exact_at(*scores))
+
+    assert result.rejected == pytest.approx((0.0, 0.0, 0.1))
+    assert result.auroc == pytest.approx(0.5)
+
+
+def test_separability_weights_both_populations_at_w_on_their_exact_slice() -> None:
+    """Each population's exact query carries 2/3 and each noisy one 1/6.
+    Answerable cumulates 2/3, 5/6, 1 at 0.1, 0.2, 0.6, so every cut sits at
+    0.6 and rejects the 0.9 out of catalog, 1/6 of its population. AUROC:
+    the 0.5 exact beats 5/6 of answerable at weight 2/3, the 0.3 beats 5/6
+    at 1/6, the 0.9 beats all at 1/6, 31/36 in all."""
+    answerable = exact_at(0.1) + [("extra words", 0.2), ("punctuation", 0.6)]
+    out = exact_at(0.5) + [("letters substituted", 0.3), ("extra words", 0.9)]
+
+    result = separability(answerable, out)
+
+    assert result.rejected == pytest.approx((1 / 6, 1 / 6, 1 / 6))
+    assert result.auroc == pytest.approx(31 / 36)
+
+
+def test_separability_counts_a_query_with_no_answer_as_farthest() -> None:
+    result = separability(exact_at(0.1, 0.2), exact_at(0.15, math.inf))
+
+    assert result.auroc == pytest.approx(0.75)
+    assert result.rejected == (0.5, 0.5, 0.5)
+
+
+def test_separability_with_no_out_of_catalog_query_has_no_numbers() -> None:
+    result = separability(exact_at(0.1), [])
+
+    assert result == Separability((None, None, None), None)
+    assert KEPT == (0.99, 0.95, 0.90)
+
+
+def test_measure_times_out_of_catalog_queries_and_leaves_them_out_of_the_rates() -> (
+    None
+):
+    """An out-of-catalog query is timed like any other and feeds only the
+    separability: never the headline, the tie rate or the table by kind."""
+    calls: list[str] = []
+    answers = {
+        "in": ordered([("SKU-1", 0.1), ("SKU-2", 0.1)]),
+        "out": ordered([("SKU-1", 0.9), ("SKU-2", 0.9)]),
+    }
+
+    def arm(text: str) -> Fetched:
+        calls.append(text)
+        return answers[text]
+
+    result = measure(
+        "fake",
+        arm,
+        [Query("in", "SKU-1", "exact")],
+        [Query("out", None, "exact"), Query("out", None, "extra words")],
+    )
+
+    assert calls.count("out") == 4, "each out-of-catalog query warmed and timed"
+    assert result.queries == 1
+    assert result.tied_at_1 == 1
+    assert sum(each.n for each in result.kinds) == 1
+    assert result.top1 == 1.0
+    assert result.separability == Separability((1.0, 1.0, 1.0), 1.0)
+
+
+def test_resolve_measures_the_scored_out_of_catalog_queries_on_every_arm(
+    database_url: str,
+) -> None:
+    """Three entries ask for two out-of-catalog queries, drawn from the two
+    singletons, both scored; every arm prints its separability."""
+    catalog = build_catalog(
+        [
+            described("Blue widget", "Red widget", "Green gadget", "Freight charge"),
+            described("Blue widget", "Red widget", "Green gadget", "Fuel surcharge"),
+        ]
+    )
+
+    result = resolve(catalog, database_url, Loader(), schema="resolution_test")
+
+    assert len(result.queries.scored.out_of_catalog) == 2
+    assert result.measured is not None
+    for arm in result.measured.arms:
+        assert arm.queries == 9
+        assert arm.separability.auroc is not None
+        assert all(each is not None for each in arm.separability.rejected)
 
 
 def test_an_answer_carries_the_sku_and_the_score_the_arm_gave() -> None:
