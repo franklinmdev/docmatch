@@ -22,6 +22,7 @@ join in #129, #130 and #131.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from psycopg import sql
 
@@ -37,10 +38,17 @@ straddling the cut is ordered in code rather than by the index."""
 
 @dataclass(frozen=True)
 class Answer:
-    """One entry an arm returned, and how far it sat from the query."""
+    """One entry an arm returned, and its score: for an index arm the
+    distance the index measured, lower first."""
 
     sku: str
     score: float
+
+
+OverFetchOutcome = Literal["distinct", "equal", "short"]
+"""What the over-fetch check found for one query: the boundary score distinct
+from the cut's, equal to it, or a fetch short of `FETCH` rows where the
+check does not apply."""
 
 
 @dataclass(frozen=True)
@@ -48,7 +56,7 @@ class Fetched:
     """What an arm answered: its five, and whether the over-fetch was enough."""
 
     answers: tuple[Answer, ...]
-    fetched: int
+    rows: int
     """How many rows the index returned, at most `FETCH`."""
     boundary: float | None
     """The score of the last row the index returned, or None when it returned
@@ -60,14 +68,14 @@ class Fetched:
         return len(self.answers) > 1 and self.answers[0].score == self.answers[1].score
 
     @property
-    def boundary_equals_cut(self) -> bool | None:
+    def over_fetch(self) -> OverFetchOutcome:
         """Whether the score at the fetched boundary equals the score at the
         cut, in which case a tie group may reach past what the index returned
-        and the five are only as pinned as the index's own order. None when
-        the fetch came back short of `FETCH`, where nothing lay beyond it."""
-        if self.fetched < FETCH or self.boundary is None:
-            return None
-        return self.boundary == self.answers[TOP - 1].score
+        and the five are only as pinned as the index's own order. Short when
+        the fetch came back under `FETCH` rows, where nothing lay beyond it."""
+        if self.rows < FETCH or self.boundary is None:
+            return "short"
+        return "equal" if self.boundary == self.answers[TOP - 1].score else "distinct"
 
 
 def ordered(rows: Sequence[tuple[str, float]]) -> Fetched:

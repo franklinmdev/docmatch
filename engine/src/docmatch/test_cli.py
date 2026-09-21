@@ -8,11 +8,14 @@ import json
 import shutil
 from dataclasses import replace
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
 
 import pytest
 
 from docmatch.cli import main, render_extract, render_resolve
+from docmatch.conftest import TEST_SCHEMA
+from docmatch.docile.dataset import DocileDataset
 from docmatch.evals import public
 from docmatch.evals.conftest import annotate
 from docmatch.evals.manifest import Manifest, load, rank, select, write
@@ -24,6 +27,7 @@ from docmatch.extraction.extractor import Usage
 from docmatch.extraction.run import DocumentRun, Run
 from docmatch.extraction.test_run import READING, FakeExtractor, a_subset
 from docmatch.metrics.fields import Prediction
+from docmatch.metrics.line_items import labeled_line_items
 from docmatch.resolution import run as resolution
 from docmatch.resolution.catalog import CatalogCounts
 from docmatch.resolution.store import Machine, ServerVersions
@@ -1934,12 +1938,12 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  distinct descriptions  8855",
         "  entries                1920",
         "",
-        "Queries",
-        "  slice  queries",
+        "Queries by kind",
+        "  kind   queries",
         "  exact     1920",
         "",
-        "Headline, exact weight w = 0.667, over the exact slice alone until the "
-        "noisy slice exists",
+        "Headline, exact weight w = 0.667, the exact queries alone until the "
+        "noisy variants exist",
         "  arm      top-1  top-5     n",
         "  trigram  0.990  0.999  1920",
         "",
@@ -1969,12 +1973,12 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
     this module's, and the CLI tests need no database."""
     result = resolution.ResolveResult(
         CatalogCounts(documents=5180, lines=36147, distinct=8855, entries=1920),
-        (resolution.SliceCount("exact", 1920),),
+        (resolution.KindCount("exact", 1920),),
         resolution.Measured(
             (
                 resolution.ArmResult(
                     "trigram",
-                    (resolution.SliceScore("exact", 1920, 1901, 1918),),
+                    (resolution.KindScore("exact", 1920, 1901, 1918),),
                     1920,
                     150,
                     0.412,
@@ -1998,7 +2002,7 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
 def test_resolve_renders_an_empty_catalog_as_nothing_to_resolve() -> None:
     result = resolution.ResolveResult(
         CatalogCounts(documents=2, lines=3, distinct=3, entries=0),
-        (resolution.SliceCount("exact", 0),),
+        (resolution.KindCount("exact", 0),),
         None,
     )
 
@@ -2010,8 +2014,8 @@ def test_resolve_renders_an_empty_catalog_as_nothing_to_resolve() -> None:
             "  distinct descriptions  3",
             "  entries                0",
             "",
-            "Queries",
-            "  slice  queries",
+            "Queries by kind",
+            "  kind   queries",
             "  exact        0",
             "",
             "Nothing to resolve: no description appears in two or more train "
@@ -2072,11 +2076,19 @@ def test_resolve_takes_the_database_url_from_the_flag_before_the_environment(
 
 
 def test_resolve_prints_the_fixture_report_with_no_label_text(
-    synthetic_subset: Path, database_url: str, capsys: pytest.CaptureFixture[str]
+    synthetic_subset: Path,
+    database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The real path over the fixture, the one CI's Resolve step runs: the
     six descriptions the two train documents share are the catalog, every
-    exact query finds its own entry first, and rule 6 holds on the output."""
+    exact query finds its own entry first, and rule 6 holds on the output.
+    The run is pointed at the test schema so a real run's `resolution` is
+    left for inspection; the command itself has no flag for it."""
+    monkeypatch.setattr(
+        resolution, "resolve", partial(resolution.resolve, schema=TEST_SCHEMA)
+    )
     exit_code = main(resolving(synthetic_subset, "--database-url", database_url))
 
     out = capsys.readouterr().out
@@ -2090,8 +2102,8 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
                 "  distinct descriptions  10",
                 "  entries                6",
                 "",
-                "Queries",
-                "  slice  queries",
+                "Queries by kind",
+                "  kind   queries",
                 "  exact        6",
                 "",
             ]
@@ -2099,6 +2111,23 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
     )
     assert "  trigram  1.000  1.000  6\n" in out
     assert "Provenance, read at run time" in out
-    assert "Nitrile" not in out
-    assert "Socket set" not in out
-    assert "gloves" not in out
+    assert_no_label_text(synthetic_subset, out)
+
+
+def assert_no_label_text(synthetic_subset: Path, out: str) -> None:
+    """No description the fixture's train split labels, entry or singleton,
+    and no word of one, appears in the output."""
+    dataset = DocileDataset(synthetic_subset)
+    descriptions = {
+        text
+        for document_id in dataset.document_ids("train")
+        for row in labeled_line_items(dataset.annotation(document_id))
+        for text in row.get("line_item_description", ())
+    }
+    assert len(descriptions) == 10
+    lowered = out.casefold()
+    for description in descriptions:
+        assert description.casefold() not in lowered
+        for word in description.replace(",", " ").split():
+            if len(word) > 3:
+                assert word.casefold() not in lowered, word

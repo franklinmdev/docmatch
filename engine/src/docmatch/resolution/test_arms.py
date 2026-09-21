@@ -32,7 +32,7 @@ def test_ordered_ranks_by_score_then_sku_and_cuts_to_five() -> None:
         Answer("SKU-c", 0.5),
         Answer("SKU-d", 0.5),
     )
-    assert fetched.fetched == 6
+    assert fetched.rows == 6
     assert fetched.boundary == 0.9
 
 
@@ -43,8 +43,8 @@ def test_ordered_reports_a_tie_at_rank_1_and_not_one_lower_down() -> None:
 
 
 def test_the_over_fetch_check_is_skipped_below_a_full_fetch() -> None:
-    assert ordered([("SKU-a", 0.5)] * (FETCH - 1)).boundary_equals_cut is None
-    assert ordered([]).boundary_equals_cut is None
+    assert ordered([("SKU-a", 0.5)] * (FETCH - 1)).over_fetch == "short"
+    assert ordered([]).over_fetch == "short"
     assert ordered([]).answers == ()
 
 
@@ -52,8 +52,8 @@ def test_the_over_fetch_check_fires_when_a_tie_group_reaches_the_boundary() -> N
     tied = [(f"SKU-{index:02d}", 0.5) for index in range(FETCH)]
     clear = [(f"SKU-{index:02d}", index / 100) for index in range(FETCH)]
 
-    assert ordered(tied).boundary_equals_cut is True
-    assert ordered(clear).boundary_equals_cut is False
+    assert ordered(tied).over_fetch == "equal"
+    assert ordered(clear).over_fetch == "distinct"
 
 
 def test_trigram_returns_five_ordered_by_distance_then_sku(store: Store) -> None:
@@ -71,14 +71,16 @@ def test_trigram_returns_five_ordered_by_distance_then_sku(store: Store) -> None
     for one, other in zip(fetched.answers, fetched.answers[1:], strict=False):
         assert (one.score, one.sku) < (other.score, other.sku)
     assert not fetched.tied_at_1
-    assert fetched.fetched == len(catalog)
+    assert fetched.rows == len(catalog)
 
 
 def test_trigram_breaks_ties_by_sku_whatever_order_the_index_returned(
     store: Store,
 ) -> None:
     """Eight entries at one distance from the query: the five are the five
-    smallest SKUs, inserted in either order."""
+    smallest SKUs, whichever order they were inserted in. What order the
+    index returns them in is the index's business; `ordered` is pinned on
+    every order above, and this pins that the arm applies it."""
     tied = widgets(8)
     expected = sorted(each.sku for each in tied)[:TOP]
 
@@ -103,8 +105,8 @@ def test_trigram_reports_a_tie_group_that_reaches_the_fetched_boundary(
 
     fetched = trigram(store, "widget")
 
-    assert fetched.fetched == FETCH
-    assert fetched.boundary_equals_cut is True
+    assert fetched.rows == FETCH
+    assert fetched.over_fetch == "equal"
 
 
 def test_trigram_over_fetch_is_enough_when_the_cut_sits_clear_of_the_boundary(
@@ -116,8 +118,8 @@ def test_trigram_over_fetch_is_enough_when_the_cut_sits_clear_of_the_boundary(
 
     fetched = trigram(store, "widget")
 
-    assert fetched.fetched == FETCH
-    assert fetched.boundary_equals_cut is False
+    assert fetched.rows == FETCH
+    assert fetched.over_fetch == "distinct"
     assert {each.sku for each in fetched.answers} > {each.sku for each in close}
 
 
@@ -127,4 +129,4 @@ def test_trigram_answers_fewer_than_five_over_a_smaller_catalog(store: Store) ->
     fetched = trigram(store, "widget")
 
     assert len(fetched.answers) == 2
-    assert fetched.boundary_equals_cut is None
+    assert fetched.over_fetch == "short"

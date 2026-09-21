@@ -760,7 +760,7 @@ at a time on one connection, after a discarded warmup pass, and scores the
 answers against the SKU each query was generated from.
 
 It prints the catalog counts (documents, lines, distinct descriptions,
-entries), the query counts per slice, the headline table (top-1 and top-5 per
+entries), the query counts per kind, the headline table (top-1 and top-5 per
 arm at the exact weight, a constant in code printed beside the table), per
 arm the rank-1 tie rate, p50 and p95 latency per query and what the over-fetch
 check found, and a provenance block read at run time: the Postgres, pgvector

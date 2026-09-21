@@ -8,12 +8,13 @@ from docmatch.resolution.catalog import Entry, Query, build_catalog, mint
 from docmatch.resolution.run import (
     EXACT_WEIGHT,
     ArmResult,
+    KindScore,
     OverFetch,
-    SliceScore,
     headline,
     measure,
     resolve,
 )
+from docmatch.resolution.store import StoreError
 from docmatch.resolution.test_catalog import described
 
 
@@ -38,7 +39,7 @@ def test_measure_scores_top_1_and_top_5_against_the_query_truth() -> None:
 
     result = measure("fake", lambda text: answers[text], queries)
 
-    assert result.slices == (SliceScore("exact", 4, 1, 2),)
+    assert result.kinds == (KindScore("exact", 4, 1, 2),)
     assert result.top1 == 0.25
     assert result.top5 == 0.5
     assert result.queries == 4
@@ -71,16 +72,17 @@ def test_measure_times_the_arm_itself_and_discards_the_warmup_pass() -> None:
     assert 0 <= result.p50_ms <= result.p95_ms
 
 
-def test_the_headline_is_the_exact_slice_alone_until_the_noisy_slice_exists() -> None:
+def test_the_headline_weights_exact_and_noisy_or_takes_the_one_present() -> None:
     assert pytest.approx(2 / 3) == EXACT_WEIGHT
-    assert headline([("exact", 0.9)]) == pytest.approx(0.9)
-    assert headline([("exact", None)]) is None
-    assert headline([]) is None
+    assert headline(0.9, 0.6) == pytest.approx(0.8)
+    assert headline(0.9, None) == pytest.approx(0.9)
+    assert headline(None, 0.6) == pytest.approx(0.6)
+    assert headline(None, None) is None
 
 
 def test_an_arm_over_no_queries_has_no_rates() -> None:
     result = ArmResult(
-        "fake", (SliceScore("exact", 0, 0, 0),), 0, 0, 0.0, 0.0, OverFetch(0, 0, 0)
+        "fake", (KindScore("exact", 0, 0, 0),), 0, 0, 0.0, 0.0, OverFetch(0, 0, 0)
     )
 
     assert result.top1 is None
@@ -94,7 +96,7 @@ def test_resolve_over_an_empty_catalog_touches_no_database() -> None:
     result = resolve(catalog, "postgresql://localhost:1/nothing")
 
     assert result.measured is None
-    assert [(each.kind, each.queries) for each in result.slices] == [("exact", 0)]
+    assert [(each.kind, each.queries) for each in result.kinds] == [("exact", 0)]
     assert result.catalog.entries == 0
 
 
@@ -113,11 +115,22 @@ def test_resolve_answers_every_exact_query_with_its_own_entry_first(
     assert result.measured is not None
     (arm,) = result.measured.arms
     assert arm.name == "trigram"
-    assert arm.slices == (SliceScore("exact", 3, 3, 3),)
+    assert arm.kinds == (KindScore("exact", 3, 3, 3),)
     assert arm.top1 == 1.0
     assert arm.over_fetch == OverFetch(full=0, equal=0, short=3)
     assert result.measured.versions.pg_trgm
     assert result.measured.machine.logical_cpus >= 1
+
+
+def test_a_statement_the_server_refuses_is_reported_not_raised(
+    database_url: str,
+) -> None:
+    """`pg_catalog` cannot be dropped, so a run in it is refused after the
+    connection, which is a report and not a traceback."""
+    catalog = build_catalog([described("Blue widget"), described("Blue widget")])
+
+    with pytest.raises(StoreError, match="the database refused the run"):
+        resolve(catalog, database_url, schema="pg_catalog")
 
 
 def test_an_answer_carries_the_sku_and_the_score_the_arm_gave() -> None:

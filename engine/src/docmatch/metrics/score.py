@@ -8,8 +8,9 @@ documents, so a later micro-average sums counts rather than means; the ratios
 are always derived.
 """
 
+import math
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 
@@ -83,3 +84,19 @@ def micro_average(parts: Iterable[Score]) -> MicroAverage:
 def ratio(part: int, whole: int) -> float:
     """A share of a whole that may be nothing, in which case there is no shortfall."""
     return 1.0 if whole == 0 else part / whole
+
+
+def percentile_of(values: Sequence[float], percentile: int) -> float:
+    """The nearest-rank percentile, which needs no interpolation to explain.
+
+    The smallest value at or above which `percentile` percent of the sample
+    lies. With 100 documents p50 is the 50th and p95 the 95th, both of them a
+    latency some document actually had rather than a number between two of them.
+    """
+    if not values:
+        return 0.0
+    if not 0 < percentile <= 100:
+        raise ValueError(f"not a percentile: {percentile}")
+    ordered = sorted(values)
+    rank = math.ceil(percentile / 100 * len(ordered))
+    return ordered[rank - 1]

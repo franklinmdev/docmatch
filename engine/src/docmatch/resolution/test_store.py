@@ -3,6 +3,7 @@ not failed, when no database answers; the precedence and the password
 masking need none."""
 
 import pytest
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from docmatch.resolution.catalog import Entry, mint
 from docmatch.resolution.store import (
@@ -99,6 +100,34 @@ def test_rebuild_builds_the_gist_trigram_index(store: Store) -> None:
 
     assert isinstance(definition, str)
     assert "USING gist (description gist_trgm_ops)" in definition
+
+
+def test_a_missing_extension_is_named_without_a_traceback(database_url: str) -> None:
+    """`template1` is a database on the same cluster where nobody created
+    the extensions, locally or in CI; if someone has, there is nothing to
+    pin here."""
+    parts = {key: str(value) for key, value in conninfo_to_dict(database_url).items()}
+    parts["dbname"] = "template1"
+    try:
+        connection = connect(make_conninfo("", **parts))
+    except StoreError as error:
+        pytest.skip(str(error))
+    with connection:
+        bare = Store(connection, "resolution_test")
+        installed = {
+            str(name)
+            for (name,) in connection.execute(
+                "SELECT extname FROM pg_extension "
+                "WHERE extname IN ('vector', 'pg_trgm')"
+            ).fetchall()
+        }
+        if {"vector", "pg_trgm"} <= installed:
+            pytest.skip("template1 has both extensions here")
+
+        with pytest.raises(StoreError, match="is not installed") as caught:
+            bare.rebuild([Entry(mint("one"), "one")])
+
+    assert "CREATE EXTENSION" in str(caught.value)
 
 
 def test_versions_reads_the_server_and_both_extensions(store: Store) -> None:

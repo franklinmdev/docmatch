@@ -74,6 +74,8 @@ class CatalogCounts:
 
 @dataclass(frozen=True)
 class Catalog:
+    """Every entry resolution can name, and the counts it was built from."""
+
     entries: tuple[Entry, ...]
     """Sorted by SKU: the order carries no meaning, and a fixed one keeps a
     rebuild inserting the same rows in the same order."""

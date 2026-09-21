@@ -1051,10 +1051,10 @@ def render_resolve(result: resolution.ResolveResult) -> str:
             ("entries", str(result.catalog.entries)),
         ),
         "",
-        "Queries",
+        "Queries by kind",
         *_table(
-            ("slice", "queries"),
-            [(each.kind, str(each.queries)) for each in result.slices],
+            ("kind", "queries"),
+            [(each.kind, str(each.queries)) for each in result.kinds],
         ),
     ]
     measured = result.measured
@@ -1070,8 +1070,8 @@ def render_resolve(result: resolution.ResolveResult) -> str:
         )
     lines += [
         "",
-        f"Headline, exact weight w = {resolution.EXACT_WEIGHT:.3f}, over the exact "
-        "slice alone until the noisy slice exists",
+        f"Headline, exact weight w = {resolution.EXACT_WEIGHT:.3f}, the exact "
+        "queries alone until the noisy variants exist",
         *_table(
             ("arm", "top-1", "top-5", "n"),
             [

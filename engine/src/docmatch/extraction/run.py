@@ -52,9 +52,8 @@ document takes while nineteen others compete with it for the same rate limit.
 """
 
 import json
-import math
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -72,6 +71,7 @@ from docmatch.extraction.extractor import (
     Usage,
 )
 from docmatch.metrics.fields import Prediction
+from docmatch.metrics.score import percentile_of
 
 ATTEMPTS = 3
 """How many times one document may be sent before it is given up on."""
@@ -176,22 +176,6 @@ class Run:
             for each in self.documents
             if each.prediction is not None
         }
-
-
-def percentile_of(values: Sequence[float], percentile: int) -> float:
-    """The nearest-rank percentile, which needs no interpolation to explain.
-
-    The smallest value at or above which `percentile` percent of the sample
-    lies. With 100 documents p50 is the 50th and p95 the 95th, both of them a
-    latency some document actually had rather than a number between two of them.
-    """
-    if not values:
-        return 0.0
-    if not 0 < percentile <= 100:
-        raise ValueError(f"not a percentile: {percentile}")
-    ordered = sorted(values)
-    rank = math.ceil(percentile / 100 * len(ordered))
-    return ordered[rank - 1]
 
 
 def extract_subset(
