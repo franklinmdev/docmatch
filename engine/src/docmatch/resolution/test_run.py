@@ -360,6 +360,30 @@ def test_measure_times_out_of_catalog_queries_and_leaves_them_out_of_the_rates()
     assert result.separability == Separability((1.0, 1.0, 1.0), 1.0)
 
 
+def test_measure_reads_a_score_that_is_higher_first_as_nearer_for_separability() -> (
+    None
+):
+    """The hybrid's fused score is higher first where the index arms' distances
+    are lower first (#130), so an arm measured as higher first has its scores
+    entered the other way round: an out-of-catalog query at a lower fused
+    score than every answerable one is beyond every cut, and the AUROC is
+    1.0, where the same numbers read as distances would give 0.0."""
+    answers = {
+        "in": Fetched((Answer("SKU-1", 0.03),), "distinct"),
+        "out": Fetched((Answer("SKU-1", 0.01),), "distinct"),
+    }
+    queries = [Query("in", "SKU-1", "exact")]
+    out_of_catalog = [Query("out", None, "exact")]
+
+    as_distances = measure("fake", answers.__getitem__, queries, out_of_catalog)
+    as_scores = measure(
+        "fake", answers.__getitem__, queries, out_of_catalog, higher_first=True
+    )
+
+    assert as_distances.separability == Separability((0.0, 0.0, 0.0), 0.0)
+    assert as_scores.separability == Separability((1.0, 1.0, 1.0), 1.0)
+
+
 def test_resolve_measures_the_scored_out_of_catalog_queries_on_every_arm(
     database_url: str,
 ) -> None:

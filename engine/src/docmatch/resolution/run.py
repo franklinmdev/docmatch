@@ -40,16 +40,17 @@ Separability
 
 The out-of-catalog queries never enter the headline, the tie rate or the
 table by kind; they feed one diagnostic per arm, how well its top-1 score
-tells a query in the catalog from one that is not (#119). Scores are
-distances, lower first, as every arm orders them, and a query an arm
-answered with nothing counts as farthest. The four arms' scores are not
-commensurable, so each cut anchors to the arm's own answerable
-distribution: the smallest score that keeps `KEPT` of answerable at or
-under it, and the share of out-of-catalog queries beyond it. The cut is a
-reporting device; no threshold is chosen, which is Phase 4 routing's call.
-Beside it AUROC, answerable positive, the chance an out-of-catalog query
-sits farther than an answerable one with ties at half, which is rank based
-and so scale free.
+tells a query in the catalog from one that is not (#119). Scores enter as
+distances, lower first, as the index arms order them; the hybrid's fused
+score is higher first (#130) and enters negated, so beyond a cut means the
+same thing on every arm, and a query an arm answered with nothing counts as
+farthest either way. The four arms' scores are not commensurable, so each cut
+anchors to the arm's own answerable distribution: the smallest score that
+keeps `KEPT` of answerable at or under it, and the share of out-of-catalog
+queries beyond it. The cut is a reporting device; no threshold is chosen,
+which is Phase 4 routing's call. Beside it AUROC, answerable positive, the
+chance an out-of-catalog query sits farther than an answerable one with ties
+at half, which is rank based and so scale free.
 
 Both populations are weighted the way the headline is: the exact queries
 carry `w` of their population and the noisy ones the rest. scipy 1.18's
@@ -325,7 +326,13 @@ def resolve(
                     scored,
                     out_of_catalog,
                 ),
-                measure("hybrid", hybrid_at(DEPTH), scored, out_of_catalog),
+                measure(
+                    "hybrid",
+                    hybrid_at(DEPTH),
+                    scored,
+                    out_of_catalog,
+                    higher_first=True,
+                ),
             )
             return ResolveResult(
                 catalog.counts,
@@ -351,9 +358,11 @@ def measure(
     arm: Arm,
     queries: Sequence[Query],
     out_of_catalog: Sequence[Query] = (),
+    higher_first: bool = False,
 ) -> ArmResult:
     """Every query through the arm once discarded and once scored and timed,
-    the out-of-catalog ones timed and read for their top-1 score only."""
+    the out-of-catalog ones timed and read for their top-1 score only, which
+    enters the separability negated when the arm scores higher first."""
     every = [*queries, *out_of_catalog]
     for query in every:
         arm(query.text)
@@ -380,7 +389,10 @@ def measure(
             equal=outcomes["equal"],
             short=outcomes["short"],
         ),
-        separability=separability(_top1(answered), _top1(out_of_catalog_answered)),
+        separability=separability(
+            _top1(answered, higher_first),
+            _top1(out_of_catalog_answered, higher_first),
+        ),
     )
 
 
@@ -417,10 +429,12 @@ def _by_kind(answered: Sequence[tuple[Query, Fetched]]) -> tuple[KindScore, ...]
     )
 
 
-def _top1(answered: Sequence[tuple[Query, Fetched]]) -> TopScores:
-    """Each query's top-1 score beside its kind, farthest when unanswered."""
+def _top1(answered: Sequence[tuple[Query, Fetched]], higher_first: bool) -> TopScores:
+    """Each query's top-1 score beside its kind as a distance, negated when
+    the arm scores higher first, and farthest when unanswered."""
+    sign = -1 if higher_first else 1
     return [
-        (query.kind, fetched.answers[0].score if fetched.answers else math.inf)
+        (query.kind, sign * fetched.answers[0].score if fetched.answers else math.inf)
         for query, fetched in answered
     ]
 
