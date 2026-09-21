@@ -523,7 +523,7 @@ def test_a_missing_line_needs_another_seed_in_the_pool() -> None:
 
 
 def test_a_line_the_records_could_not_tell_apart_is_never_the_one_injected() -> None:
-    """Two lines alike on every cell pairing reads leave no way to say which
+    """Two lines alike on every pairing cell leave no way to say which
     one was removed or added, so the truth could not be scored: such lines
     seed neither, whatever else they carry."""
     doubled = seed(

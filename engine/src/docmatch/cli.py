@@ -968,7 +968,8 @@ def _diagnostic(table: Table) -> list[str]:
             (
                 "lines paired with another partner",
                 f"{table.crossed_pairs.crossed} of {table.crossed_pairs.keyed}, "
-                f"{table.crossed_pairs.alike} alike on every pairing cell",
+                f"{table.crossed_pairs.alike} alike on code, description, "
+                "quantity, unit price and amount",
             ),
         ),
         "",
