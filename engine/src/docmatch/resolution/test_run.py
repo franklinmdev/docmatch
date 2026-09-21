@@ -4,7 +4,8 @@ Postgres: seam 2 of the Phase 3 spec. Every value is made up."""
 import pytest
 
 from docmatch.resolution.arms import FETCH, Answer, Fetched, ordered
-from docmatch.resolution.catalog import Entry, Query, build_catalog, mint
+from docmatch.resolution.catalog import Entry, build_catalog, mint
+from docmatch.resolution.queries import Query
 from docmatch.resolution.run import (
     EXACT_WEIGHT,
     ArmResult,
@@ -39,10 +40,27 @@ def test_measure_scores_top_1_and_top_5_against_the_query_truth() -> None:
 
     result = measure("fake", lambda text: answers[text], queries)
 
-    assert result.kinds == (KindScore("exact", 4, 1, 2),)
+    assert result.kinds[0] == KindScore("exact", 4, 1, 2)
     assert result.top1 == 0.25
     assert result.top5 == 0.5
     assert result.queries == 4
+
+
+def test_measure_lists_every_kind_with_n_0_for_one_the_slice_does_not_carry() -> None:
+    """The by-kind table has five rows whatever the slice carries, so a small
+    catalog prints the same shape as the real one."""
+    queries = [Query("one", "SKU-1", "exact"), Query("one x", "SKU-1", "extra words")]
+
+    result = measure("fake", lambda text: answering("SKU-1"), queries)
+
+    assert result.kinds == (
+        KindScore("exact", 1, 1, 1),
+        KindScore("extra words", 1, 1, 1),
+        KindScore("letters substituted", 0, 0, 0),
+        KindScore("digits dropped", 0, 0, 0),
+        KindScore("punctuation", 0, 0, 0),
+    )
+    assert result.kinds[2].top1_rate is None
 
 
 def test_measure_counts_ties_at_rank_1_and_what_the_over_fetch_check_found() -> None:
@@ -96,7 +114,8 @@ def test_resolve_over_an_empty_catalog_touches_no_database() -> None:
     result = resolve(catalog, "postgresql://localhost:1/nothing")
 
     assert result.measured is None
-    assert [(each.kind, each.queries) for each in result.kinds] == [("exact", 0)]
+    assert result.queries.scored.queries == ()
+    assert result.queries.development.queries == ()
     assert result.catalog.entries == 0
 
 
@@ -115,9 +134,11 @@ def test_resolve_answers_every_exact_query_with_its_own_entry_first(
     assert result.measured is not None
     (arm,) = result.measured.arms
     assert arm.name == "trigram"
-    assert arm.kinds == (KindScore("exact", 3, 3, 3),)
-    assert arm.top1 == 1.0
-    assert arm.over_fetch == OverFetch(full=0, equal=0, short=3)
+    assert arm.kinds[0] == KindScore("exact", 3, 3, 3)
+    assert arm.queries == 9, "three exact and six variants, no development entry"
+    assert sum(each.n for each in arm.kinds[1:]) == 6
+    assert arm.over_fetch == OverFetch(full=0, equal=0, short=9)
+    assert result.queries.development.entries == 0
     assert result.measured.versions.pg_trgm
     assert result.measured.machine.logical_cpus >= 1
 

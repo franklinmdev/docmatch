@@ -6,6 +6,7 @@ directory, so the suite runs in CI with no dataset present.
 
 import json
 import shutil
+from collections.abc import Sequence
 from dataclasses import replace
 from decimal import Decimal
 from functools import partial
@@ -30,6 +31,16 @@ from docmatch.metrics.fields import Prediction
 from docmatch.metrics.line_items import labeled_line_items
 from docmatch.resolution import run as resolution
 from docmatch.resolution.catalog import CatalogCounts
+from docmatch.resolution.queries import (
+    BAND_TARGETS,
+    KIND_SHARES,
+    NOISE_KINDS,
+    Query,
+    QuerySet,
+    Share,
+    Slice,
+    SliceName,
+)
 from docmatch.resolution.store import Machine, ServerVersions
 
 EXPECTED_SHOW_OUTPUT = "\n".join(
@@ -1930,6 +1941,36 @@ UNANSWERING = "postgresql://localhost:1/nothing"
 """A database url no server answers at: port 1 refuses at once."""
 
 
+def slice_of(name: SliceName, entries: int) -> Slice:
+    """A slice of `entries` entries, each with its exact query and two
+    variants; the texts are placeholders, since the renderer prints none."""
+    queries = []
+    for index in range(entries):
+        queries.append(Query("x", f"SKU-{index}", "exact"))
+        queries.append(Query("x", f"SKU-{index}", "extra words"))
+        queries.append(Query("x", f"SKU-{index}", "digits dropped"))
+    return Slice(name, tuple(queries))
+
+
+def query_set_of(
+    scored: int, development: int, kinds: Sequence[int], bands: Sequence[int]
+) -> QuerySet:
+    """A query set with the counts given, its shares over the noisy variants."""
+    noisy = 2 * (scored + development)
+    return QuerySet(
+        slice_of("scored", scored),
+        slice_of("development", development),
+        tuple(
+            Share(kind, count, count / noisy if noisy else None, KIND_SHARES[kind])
+            for kind, count in zip(NOISE_KINDS, kinds, strict=True)
+        ),
+        tuple(
+            Share(name, count, count / noisy if noisy else None, target)
+            for (name, _, _, target), count in zip(BAND_TARGETS, bands, strict=True)
+        ),
+    )
+
+
 EXPECTED_RESOLVE_OUTPUT = "\n".join(
     [
         "Catalog, from train",
@@ -1938,22 +1979,45 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  distinct descriptions  8855",
         "  entries                1920",
         "",
-        "Queries by kind",
-        "  kind   queries",
-        "  exact     1920",
+        "Query set, one exact query and 2 noisy variants per entry, one entry "
+        "in 5 to development",
+        "  slice        entries  exact  noisy  queries",
+        "  scored          1536   1536   3072     4608",
+        "  development      384    384    768     1152",
         "",
-        "Headline, exact weight w = 0.667, the exact queries alone until the "
-        "noisy variants exist",
+        "Noise model, over every noisy variant, each share against its measured target",
+        "  kind                 share  target",
+        "  extra words          0.361   0.350",
+        "  letters substituted  0.242   0.245",
+        "  digits dropped       0.218   0.212",
+        "  punctuation          0.178   0.192",
+        "",
+        "  similarity to the entry  share  target",
+        "  [0.9, 1.0)               0.359   0.362",
+        "  [0.8, 0.9)               0.141   0.095",
+        "  [0.7, 0.8)               0.081   0.126",
+        "  [0.5, 0.7)               0.138   0.095",
+        "  below 0.5                0.281   0.322",
+        "",
+        "Headline, over the scored slice, exact weight w = 0.667",
         "  arm      top-1  top-5     n",
-        "  trigram  0.990  0.999  1920",
+        "  trigram  0.922  0.980  4608",
         "",
         "Per arm",
         "  arm      rank-1 tie rate  p50 ms  p95 ms  full fetches  "
         "boundary equal to cut  short fetches",
-        "  trigram            0.078    0.41    0.99          1900  "
-        "                    3             20",
+        "  trigram            0.065    0.41    0.99          4600  "
+        "                    3              8",
         "  a boundary equal to the cut means a tie group may reach past the "
         "fetched rows; a short fetch has nothing past them",
+        "",
+        "By kind, the same scored queries regrouped, report only",
+        "  kind                    n  trigram top-1  trigram top-5",
+        "  exact                1536          0.970          0.999",
+        "  extra words          1110          0.811          0.901",
+        "  letters substituted   744          0.941          0.995",
+        "  digits dropped        670          0.597          0.896",
+        "  punctuation           548          0.985          1.000",
         "",
         "Provenance, read at run time",
         "  postgres      16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
@@ -1970,20 +2034,30 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
 
 def test_resolve_renders_the_report_from_a_built_result() -> None:
     """The `render_extract` pattern: the numbers are the run's, the block is
-    this module's, and the CLI tests need no database."""
+    this module's, and the CLI tests need no database. The headline is
+    `w` times the exact rate plus `1 - w` times the noisy rate: 0.970 and
+    0.826 at top-1 give 0.922, 0.999 and 0.942 at top-5 give 0.980."""
     result = resolution.ResolveResult(
         CatalogCounts(documents=5180, lines=36147, distinct=8855, entries=1920),
-        (resolution.KindCount("exact", 1920),),
+        query_set_of(
+            1536, 384, kinds=(1388, 930, 837, 685), bands=(1380, 541, 311, 530, 1078)
+        ),
         resolution.Measured(
             (
                 resolution.ArmResult(
                     "trigram",
-                    (resolution.KindScore("exact", 1920, 1901, 1918),),
-                    1920,
-                    150,
+                    (
+                        resolution.KindScore("exact", 1536, 1490, 1535),
+                        resolution.KindScore("extra words", 1110, 900, 1000),
+                        resolution.KindScore("letters substituted", 744, 700, 740),
+                        resolution.KindScore("digits dropped", 670, 400, 600),
+                        resolution.KindScore("punctuation", 548, 540, 548),
+                    ),
+                    4608,
+                    300,
                     0.412,
                     0.987,
-                    resolution.OverFetch(full=1900, equal=3, short=20),
+                    resolution.OverFetch(full=4600, equal=3, short=8),
                 ),
             ),
             ServerVersions("16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)", "0.6.0", "1.6"),
@@ -2002,7 +2076,7 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
 def test_resolve_renders_an_empty_catalog_as_nothing_to_resolve() -> None:
     result = resolution.ResolveResult(
         CatalogCounts(documents=2, lines=3, distinct=3, entries=0),
-        (resolution.KindCount("exact", 0),),
+        query_set_of(0, 0, kinds=(0, 0, 0, 0), bands=(0, 0, 0, 0, 0)),
         None,
     )
 
@@ -2014,9 +2088,26 @@ def test_resolve_renders_an_empty_catalog_as_nothing_to_resolve() -> None:
             "  distinct descriptions  3",
             "  entries                0",
             "",
-            "Queries by kind",
-            "  kind   queries",
-            "  exact        0",
+            "Query set, one exact query and 2 noisy variants per entry, one "
+            "entry in 5 to development",
+            "  slice        entries  exact  noisy  queries",
+            "  scored             0      0      0        0",
+            "  development        0      0      0        0",
+            "",
+            "Noise model, over every noisy variant, each share against its "
+            "measured target",
+            "  kind                 share  target",
+            "  extra words           none   0.350",
+            "  letters substituted   none   0.245",
+            "  digits dropped        none   0.212",
+            "  punctuation           none   0.192",
+            "",
+            "  similarity to the entry  share  target",
+            "  [0.9, 1.0)                none   0.362",
+            "  [0.8, 0.9)                none   0.095",
+            "  [0.7, 0.8)                none   0.126",
+            "  [0.5, 0.7)                none   0.095",
+            "  below 0.5                 none   0.322",
             "",
             "Nothing to resolve: no description appears in two or more train "
             "documents, so the database was not touched.",
@@ -2082,10 +2173,11 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The real path over the fixture, the one CI's Resolve step runs: the
-    six descriptions the two train documents share are the catalog, every
-    exact query finds its own entry first, and rule 6 holds on the output.
-    The run is pointed at the test schema so a real run's `resolution` is
-    left for inspection; the command itself has no flag for it."""
+    six descriptions the two train documents share are the catalog, the split
+    leaves one development entry, the scored slice's fifteen queries are
+    measured, and rule 6 holds on the output. The run is pointed at the test
+    schema so a real run's `resolution` is left for inspection; the command
+    itself has no flag for it."""
     monkeypatch.setattr(
         resolution, "resolve", partial(resolution.resolve, schema=TEST_SCHEMA)
     )
@@ -2102,14 +2194,21 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
                 "  distinct descriptions  10",
                 "  entries                6",
                 "",
-                "Queries by kind",
-                "  kind   queries",
-                "  exact        6",
+                "Query set, one exact query and 2 noisy variants per entry, "
+                "one entry in 5 to development",
+                "  slice        entries  exact  noisy  queries",
+                "  scored             5      5     10       15",
+                "  development        1      1      2        3",
                 "",
+                "Noise model, over every noisy variant, each share against its "
+                "measured target",
             ]
         )
     )
-    assert "  trigram  1.000  1.000  6\n" in out
+    assert "\n  trigram  1.000  1.000  15\n" in out, (
+        "every scored query finds its entry"
+    )
+    assert "\n  exact                5          1.000          1.000\n" in out
     assert "Provenance, read at run time" in out
     assert_no_label_text(synthetic_subset, out)
 

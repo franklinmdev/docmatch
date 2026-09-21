@@ -122,6 +122,7 @@ from docmatch.resolution.catalog import (
     SPLIT as CATALOG_SPLIT,
 )
 from docmatch.resolution.catalog import ResolutionError, load_catalog
+from docmatch.resolution.queries import DEVELOPMENT_ONE_IN, VARIANTS
 from docmatch.resolution.store import (
     DATABASE_URL_VARIABLE,
     DEFAULT_DATABASE_URL,
@@ -1042,6 +1043,7 @@ def _resolve(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
 def render_resolve(result: resolution.ResolveResult) -> str:
     """The resolution report as a block a human can paste anywhere: counts,
     rates and milliseconds only, never a description."""
+    queries = result.queries
     lines = [
         f"Catalog, from {CATALOG_SPLIT}",
         *_rows(
@@ -1051,10 +1053,37 @@ def render_resolve(result: resolution.ResolveResult) -> str:
             ("entries", str(result.catalog.entries)),
         ),
         "",
-        "Queries by kind",
+        f"Query set, one exact query and {VARIANTS} noisy variants per entry, "
+        f"one entry in {DEVELOPMENT_ONE_IN} to development",
         *_table(
-            ("kind", "queries"),
-            [(each.kind, str(each.queries)) for each in result.kinds],
+            ("slice", "entries", "exact", "noisy", "queries"),
+            [
+                (
+                    each.name,
+                    str(each.entries),
+                    str(each.exact),
+                    str(each.noisy),
+                    str(len(each.queries)),
+                )
+                for each in queries.slices
+            ],
+        ),
+        "",
+        "Noise model, over every noisy variant, each share against its measured target",
+        *_table(
+            ("kind", "share", "target"),
+            [
+                (each.name, _rate(each.share), f"{each.target:.3f}")
+                for each in queries.kinds
+            ],
+        ),
+        "",
+        *_table(
+            ("similarity to the entry", "share", "target"),
+            [
+                (each.name, _rate(each.share), f"{each.target:.3f}")
+                for each in queries.bands
+            ],
         ),
     ]
     measured = result.measured
@@ -1070,8 +1099,8 @@ def render_resolve(result: resolution.ResolveResult) -> str:
         )
     lines += [
         "",
-        f"Headline, exact weight w = {resolution.EXACT_WEIGHT:.3f}, the exact "
-        "queries alone until the noisy variants exist",
+        f"Headline, over the scored slice, exact weight w = "
+        f"{resolution.EXACT_WEIGHT:.3f}",
         *_table(
             ("arm", "top-1", "top-5", "n"),
             [
@@ -1107,6 +1136,9 @@ def render_resolve(result: resolution.ResolveResult) -> str:
         "  a boundary equal to the cut means a tie group may reach past the "
         "fetched rows; a short fetch has nothing past them",
         "",
+        "By kind, the same scored queries regrouped, report only",
+        *_by_kind(measured.arms),
+        "",
         "Provenance, read at run time",
         *_rows(
             ("postgres", measured.versions.postgres),
@@ -1123,6 +1155,28 @@ def render_resolve(result: resolution.ResolveResult) -> str:
 
 def _rate(rate: float | None) -> str:
     return "none" if rate is None else f"{rate:.3f}"
+
+
+def _by_kind(arms: Sequence[resolution.ArmResult]) -> list[str]:
+    """Top-1 and top-5 per arm for each kind of query, exact and the four
+    noise kinds, with n once per row since every arm answers the same set."""
+    if not arms:
+        return []
+    header = ["kind", "n"]
+    for arm in arms:
+        header += [f"{arm.name} top-1", f"{arm.name} top-5"]
+    scored = [{each.kind: each for each in arm.kinds} for arm in arms]
+    rows = []
+    for lead in arms[0].kinds:
+        row = [lead.kind, str(lead.n)]
+        for by_kind in scored:
+            score = by_kind.get(lead.kind)
+            row += [
+                _rate(score.top1_rate if score else None),
+                _rate(score.top5_rate if score else None),
+            ]
+        rows.append(row)
+    return _table(header, rows)
 
 
 def _corpus(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:

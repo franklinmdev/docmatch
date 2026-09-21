@@ -86,6 +86,12 @@ def ratio(part: int, whole: int) -> float:
     return 1.0 if whole == 0 else part / whole
 
 
+def share_of(count: int, n: int) -> float | None:
+    """A share of a sample that may be empty, in which case there is no share:
+    a rate over no queries is not a rate, and the report prints it as none."""
+    return count / n if n else None
+
+
 def percentile_of(values: Sequence[float], percentile: int) -> float:
     """The nearest-rank percentile, which needs no interpolation to explain.
 

@@ -15,12 +15,11 @@ into one truth. DocILE's own line codes play no part: 225 of the 1,920
 entries carry one on every line, 151 codes serve more than one description,
 and rule 6 keeps them out of any output.
 
-A query is one normalized description and nothing else, carrying the SKU of
-the entry it was generated from as its truth (#119). This module builds the
-exact queries, one per entry with its canonical description unchanged; the
-noisy variants, the split and the out-of-catalog draw are later tickets.
+Beside the entries the catalog carries the singletons, every description in
+exactly one document: no entry, but the pool the query set's extra-words
+bleed and the out-of-catalog draw take text from (#119, `queries`).
 
-Everything here is pure: annotations in, entries and queries out. The
+Everything here is pure: annotations in, entries and singletons out. The
 builder never reads the dataset itself; `load_catalog` does, from the train
 split only, and a missing split is an error rather than a smaller catalog
 (#75).
@@ -29,7 +28,6 @@ split only, and a missing split is an error rather than a smaller catalog
 import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Literal
 
 from docmatch.docile.annotation import Annotation
 from docmatch.docile.dataset import DocileDataset
@@ -80,20 +78,11 @@ class Catalog:
     """Sorted by SKU: the order carries no meaning, and a fixed one keeps a
     rebuild inserting the same rows in the same order."""
     counts: CatalogCounts
-
-
-QueryKind = Literal["exact"]
-"""How a query was made from its entry. The noisy kinds join in #128."""
-
-
-@dataclass(frozen=True)
-class Query:
-    """One normalized description sent to an arm, and what the right answer
-    is: the SKU of the entry it was generated from."""
-
-    text: str
-    sku: str
-    kind: QueryKind
+    singletons: tuple[str, ...] = ()
+    """Every canonical description that appears in exactly one document,
+    sorted: no entry, but the pool the extra-words bleed takes its fragments
+    from and the out-of-catalog draw its queries, so that neither ever
+    carries an entry's text (#119)."""
 
 
 def mint(description: str) -> str:
@@ -124,6 +113,7 @@ def build_catalog(annotations: Iterable[Annotation]) -> Catalog:
     return Catalog(
         tuple(entries[sku] for sku in sorted(entries)),
         CatalogCounts(documents, lines, len(seen_in), len(entries)),
+        tuple(sorted(text for text, count in seen_in.items() if count == 1)),
     )
 
 
@@ -133,8 +123,3 @@ def load_catalog(dataset: DocileDataset) -> Catalog:
         dataset.annotation(document_id)
         for document_id in sorted(dataset.document_ids(SPLIT))
     )
-
-
-def exact_queries(catalog: Catalog) -> tuple[Query, ...]:
-    """One exact query per entry: its canonical description unchanged."""
-    return tuple(Query(each.description, each.sku, "exact") for each in catalog.entries)
