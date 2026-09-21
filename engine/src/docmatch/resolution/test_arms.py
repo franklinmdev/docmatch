@@ -3,6 +3,9 @@ spec. Skipped, not failed, when no database answers. Every description is
 made up, the catalogs are built to tie, and the embedder is the fake."""
 
 import string
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 
 from docmatch.resolution.arms import (
     FETCH,
@@ -406,22 +409,31 @@ def test_hybrid_reports_a_tie_group_that_reaches_a_half_boundary(
     assert fetched.over_fetch == "equal"
 
 
-def test_hybrid_over_fetches_past_the_search_list_at_a_deep_half(
-    store: Store,
+@dataclass(frozen=True)
+class Asking(Store):
+    """A store that records the search list each statement asked for."""
+
+    asked: list[int] = field(default_factory=list)
+
+    @contextmanager
+    def search_list(self, rows: int) -> Iterator[None]:
+        self.asked.append(rows)
+        with super().search_list(rows):
+            yield
+
+
+def test_hybrid_asks_for_a_search_list_as_wide_as_its_fetch(
+    store: Store, embedder: BucketEmbedder
 ) -> None:
     """An HNSW scan returns at most `hnsw.ef_search` rows, pinned at 100, so
-    at depth 100 the vector half asks for 125 and would come back short of
-    them, with no row past its cut. 130 entries at one vector distance fill
-    the half to its boundary, so the tie group reaching it is the arm's; the
-    trigram half sits clear at its cut, since the fillers' lengths differ,
-    so the outcome is the vector half's or nothing. The planner scans 130
-    rows without the index, which the real catalog never is, so the test
-    asks for the index the way the real catalog gets it."""
-    fillers = [f"f{index}" for index in range(130)]
-    embedder = BucketEmbedder("widget", *fillers)
-    store.rebuild(entries(*(f"widget {filler}" for filler in fillers)), embedder)
-    store.connection.execute("SET enable_seqscan = off")
+    a half fetched past the pin would come back short of its over-fetch,
+    with no row past its cut, unless the list is as wide as the fetch. The
+    store widens it past the pin and leaves it alone below, pinned in the
+    store's tests; the arm asks for `d + 25` at every d."""
+    asking = Asking(store.connection, store.schema)
+    asking.rebuild(entries("blue widget"), embedder)
 
-    fetched = hybrid(store, embedder, "widget", depth=100)
+    hybrid(asking, embedder, "widget", depth=100)
+    hybrid(asking, embedder, "widget", depth=25)
 
-    assert fetched.over_fetch == "equal"
+    assert asking.asked == [100 + FETCH, 25 + FETCH]

@@ -3,6 +3,7 @@ not failed, when no database answers; the precedence and the password
 masking need none."""
 
 import pytest
+from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from docmatch.resolution.catalog import Entry, mint
@@ -18,6 +19,7 @@ from docmatch.resolution.store import (
     connect,
     machine,
     resolve_database_url,
+    vector_literal,
     without_password,
 )
 
@@ -221,3 +223,38 @@ def test_a_search_list_already_wide_enough_is_left_at_the_pin(
         )
 
     assert inside == str(EF_SEARCH)
+
+
+def test_a_widened_search_list_returns_every_row_the_index_is_asked_for(
+    store: Store,
+) -> None:
+    """An HNSW scan returns at most `hnsw.ef_search` rows (pgvector README,
+    "Why are there less results for a query after adding an HNSW index?"),
+    which is what a hybrid half deeper than the pin runs into. 130 entries,
+    `widget` and one filler repeated once more each, sit at distinct
+    distances from `widget` on the index, so the graph links them along
+    the chain and the scan reaches them all; a catalog tied at one distance
+    would leave the graph's links to the build and the count to the
+    version. The planner scans 130 rows without the index, which the real
+    catalog never is, so the test asks for the index the way the real
+    catalog gets it."""
+    embedder = BucketEmbedder("widget", "f")
+    chain = ["widget" + " f" * count for count in range(1, 131)]
+    store.rebuild([Entry(mint(each), each) for each in chain], embedder)
+    store.connection.execute("SET enable_seqscan = off")
+    (embedded,) = embedder.embed(["widget"])
+    statement = sql.SQL(
+        "SELECT count(*) FROM (SELECT sku FROM {table} "
+        "ORDER BY embedding <=> %(embedded)s::vector LIMIT 125) AS asked"
+    ).format(table=sql.Identifier(store.schema, "catalog"))
+    parameters = {"embedded": vector_literal(embedded)}
+
+    (at_the_pin,) = store.connection.execute(statement, parameters).fetchone() or (
+        None,
+    )
+    with store.search_list(125):
+        (widened,) = store.connection.execute(statement, parameters).fetchone() or (
+            None,
+        )
+
+    assert (at_the_pin, widened) == (EF_SEARCH, 125)
