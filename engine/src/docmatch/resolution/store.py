@@ -11,10 +11,12 @@ building the HNSW index cost is timed and reported once, outside any query's
 latency.
 
 The HNSW index is `vector_cosine_ops` at m 16 and ef_construction 64, the
-defaults, and the connection's `hnsw.ef_search` is set to 100 once the index
-exists: at the default 40 the index disagreed with an exact scan on the
-top-5 set for 3.3 percent of queries, at 100 for 1.2, at 200 for none, for
-0.2 ms against 12 ms of embedding (#120, probe 2). pgvector README read
+defaults, and `hnsw.ef_search` is set to 100 on the connection the moment a
+store is made over it, then read back into the provenance block, so no arm
+ever runs at the default by way of a fresh session: at the default 40 the
+index disagreed with an exact scan on the top-5 set for 3.3 percent of
+queries, at 100 for 1.2, at 200 for none, for 0.2 ms against 12 ms of
+embedding (#120, probe 2). pgvector README read
 2026-09-21 (github.com/pgvector/pgvector, 0.8.6): `WITH (m, ef_construction)`
 on the index, `SET hnsw.ef_search` on the session, a vector written as its
 bracketed literal, and an index built after the data loads is faster.
@@ -123,6 +125,9 @@ class ServerVersions:
     postgres: str
     pgvector: str
     pg_trgm: str
+    ef_search: str
+    """`hnsw.ef_search` as the connection reports it, so the value the vector
+    arm ran at is on the row and not only in the code."""
 
 
 @dataclass(frozen=True)
@@ -151,6 +156,12 @@ class Store:
 
     connection: psycopg.Connection[tuple[object, ...]]
     schema: str = SCHEMA
+
+    def __post_init__(self) -> None:
+        """The HNSW search list, on this connection, before any arm runs."""
+        self.connection.execute(
+            sql.SQL("SET hnsw.ef_search = {}").format(sql.Literal(EF_SEARCH))
+        )
 
     def rebuild(self, entries: Sequence[Entry], embedder: Embedder) -> Build:
         """Drop whatever the last run left, and build the catalog afresh.
@@ -209,9 +220,6 @@ class Store:
             )
             index_s = time.perf_counter() - started
             self.connection.execute(sql.SQL("ANALYZE {}").format(table))
-        self.connection.execute(
-            sql.SQL("SET hnsw.ef_search = {}").format(sql.Literal(EF_SEARCH))
-        )
         return Build(embedding_s, index_s)
 
     def versions(self) -> ServerVersions:
@@ -233,17 +241,23 @@ class Store:
         (server,) = self.connection.execute(
             "SELECT current_setting('server_version')"
         ).fetchone() or ("unknown",)
+        (ef_search,) = self.connection.execute(
+            "SELECT current_setting('hnsw.ef_search')"
+        ).fetchone() or ("unknown",)
         return ServerVersions(
             postgres=str(server),
             pgvector=installed["vector"],
             pg_trgm=installed["pg_trgm"],
+            ef_search=str(ef_search),
         )
 
 
 def vector_literal(vector: Vector) -> str:
     """A vector as pgvector reads it, `[x,y,z]`, bound as a parameter and
-    cast on the server, so no driver adapter is needed."""
-    return "[" + ",".join(repr(each) for each in vector) + "]"
+    cast on the server, so no driver adapter is needed. Nine significant
+    digits round-trip a float32 exactly, which is what the column stores,
+    at half the text a full float64 repr would send."""
+    return "[" + ",".join(f"{each:.9g}" for each in vector) + "]"
 
 
 def machine() -> Machine:

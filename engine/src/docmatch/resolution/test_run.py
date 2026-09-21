@@ -184,7 +184,9 @@ def test_the_vector_arm_pays_for_the_embedding_and_not_for_the_load(
 ) -> None:
     """A query's latency is everything it pays on arrival: the vector arm's
     p50 carries the embedder's time, the trigram arm's does not, and the
-    load is reported once as what the loader said."""
+    load is reported once as what the loader said. The gap between the two
+    arms is asserted rather than either arm's own bound, so a slow runner
+    cannot fail it."""
 
     class Slow(BucketEmbedder):
         def embed(self, texts: Sequence[str]) -> tuple[Vector, ...]:
@@ -197,8 +199,7 @@ def test_the_vector_arm_pays_for_the_embedding_and_not_for_the_load(
 
     assert result.measured is not None
     trigram, vector = result.measured.arms
-    assert vector.p50_ms >= 20
-    assert trigram.p50_ms < 20
+    assert vector.p50_ms - trigram.p50_ms >= 15
     assert result.measured.load_s == 0.5
 
 

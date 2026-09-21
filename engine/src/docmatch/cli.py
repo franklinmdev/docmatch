@@ -1154,6 +1154,7 @@ def render_resolve(result: resolution.ResolveResult) -> str:
             ("postgres", measured.versions.postgres),
             ("pgvector", measured.versions.pgvector),
             ("pg_trgm", measured.versions.pg_trgm),
+            ("hnsw ef_search", measured.versions.ef_search),
             ("embedder", measured.models.embedder),
             ("embedder revision", measured.models.embedder_revision),
             ("sentence-transformers", measured.models.sentence_transformers),

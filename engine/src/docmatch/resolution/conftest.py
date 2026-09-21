@@ -25,6 +25,8 @@ class BucketEmbedder:
     and an entry embed the same way and the catalog is never read."""
 
     def __init__(self, *vocabulary: str) -> None:
+        if len(vocabulary) >= DIMENSIONS:
+            raise ValueError("the vocabulary must leave dimensions for other words")
         self._vocabulary = {word: index for index, word in enumerate(vocabulary)}
         self.calls: list[tuple[str, ...]] = []
         """Every batch of texts asked for, in order."""

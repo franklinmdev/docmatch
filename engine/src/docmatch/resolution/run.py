@@ -20,8 +20,9 @@ query too, and the warmup pass covers the model with it. The rerank joins
 the count with its arm. Model load, embedding the catalog and building the
 HNSW index are each timed once and reported beside the table, never per
 query. The models are loaded through the loader given, after the database
-has answered and only when there is something to resolve, so a database
-that does not answer is reported without loading anything.
+has answered with both extensions and only when there is something to
+resolve, so a database that does not answer, or one missing an extension,
+is reported without loading anything.
 
 The run also tallies what the over-fetch check found: on how many full
 fetches the score at the fetched boundary equalled the score at the cut, and
@@ -186,9 +187,12 @@ def resolve(
         return ResolveResult(catalog.counts, query_set, None)
     try:
         with connect(url) as connection:
+            store = Store(connection, schema)
+            # The extensions are checked before the models load, so a
+            # cluster missing one is reported without paying for the load.
+            store.versions()
             loaded = load()
             embedder = loaded.embedder
-            store = Store(connection, schema)
             build = store.rebuild(catalog.entries, embedder)
             arms = (
                 measure("trigram", lambda text: trigram(store, text), scored),

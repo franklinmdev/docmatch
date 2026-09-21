@@ -2040,6 +2040,7 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  postgres               16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
         "  pgvector               0.6.0",
         "  pg_trgm                1.6",
+        "  hnsw ef_search         100",
         "  embedder               sentence-transformers/all-MiniLM-L6-v2",
         "  embedder revision      1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
         "  sentence-transformers  6.1.0",
@@ -2099,7 +2100,9 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
                     resolution.OverFetch(full=4608, equal=0, short=0),
                 ),
             ),
-            ServerVersions("16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)", "0.6.0", "1.6"),
+            ServerVersions(
+                "16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)", "0.6.0", "1.6", "100"
+            ),
             ModelVersions(
                 "sentence-transformers/all-MiniLM-L6-v2",
                 "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",

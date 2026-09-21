@@ -133,14 +133,15 @@ def test_rebuild_builds_the_hnsw_index_at_the_pinned_parameters(
     assert (HNSW_M, HNSW_EF_CONSTRUCTION) == (16, 64)
 
 
-def test_rebuild_sets_the_search_list_on_the_connection(
-    store: Store, embedder: BucketEmbedder
+def test_a_store_sets_the_search_list_on_its_connection_before_any_rebuild(
+    store: Store,
 ) -> None:
-    store.rebuild([Entry(mint("one"), "one")], embedder)
-
+    """A fresh session would run the vector arm at pgvector's default 40;
+    making a store over the connection is what pins it at 100."""
     (setting,) = store.connection.execute("SHOW hnsw.ef_search").fetchone() or (None,)
 
     assert setting == str(EF_SEARCH) == "100"
+    assert store.versions().ef_search == "100"
 
 
 def test_rebuild_reports_what_embedding_and_indexing_cost(

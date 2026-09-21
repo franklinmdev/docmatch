@@ -30,12 +30,17 @@ from dataclasses import dataclass
 from importlib.metadata import version
 from typing import TYPE_CHECKING, Protocol
 
+from docmatch.resolution.catalog import ResolutionError
+
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
 EMBEDDER = "sentence-transformers/all-MiniLM-L6-v2"
-"""The embedder, and its full commit as the Hugging Face repo records it."""
+"""The embedder, by its Hugging Face repo id (#112)."""
+
 EMBEDDER_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+"""The embedder's full commit as the repo records it, passed as `revision=`
+and read by CI as its cache key, so the row and the cache both name it."""
 
 TORCH_THREADS = 10
 """Intra-op threads torch runs the models on, pinned (#120)."""
@@ -44,6 +49,12 @@ BATCH = 64
 """Texts per forward pass when the catalog is embedded at build time."""
 
 Vector = tuple[float, ...]
+
+
+class ModelError(ResolutionError):
+    """A model that could not be loaded: not cached and not reachable, or not
+    at the pinned revision. A report, not a traceback, like a database that
+    does not answer."""
 
 
 class Embedder(Protocol):
@@ -106,7 +117,15 @@ def load_models() -> Loaded:
     from sentence_transformers import SentenceTransformer
 
     torch.set_num_threads(TORCH_THREADS)
-    model = SentenceTransformer(EMBEDDER, revision=EMBEDDER_REVISION, device="cpu")
+    try:
+        model = SentenceTransformer(EMBEDDER, revision=EMBEDDER_REVISION, device="cpu")
+    except OSError as error:
+        # The hub's errors, a missing cache entry offline and a revision the
+        # repo does not have, are all OSError subclasses.
+        raise ModelError(
+            f"the embedder {EMBEDDER} at {EMBEDDER_REVISION} could not be "
+            f"loaded: {error}"
+        ) from None
     return Loaded(
         embedder=SentenceTransformerEmbedder(model),
         versions=ModelVersions(
