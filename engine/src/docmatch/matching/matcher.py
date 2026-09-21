@@ -136,6 +136,7 @@ from docmatch.matching.records import (
     ReceivingRecord,
     Record,
     cell_values,
+    listed,
     listed_units,
     read_cell,
 )
@@ -492,7 +493,8 @@ class _Comparison:
     @property
     def ranking(self) -> tuple[float, int]:
         """What a best candidate is picked by: similarity with the floors
-        ignored, then how close the values come (#102)."""
+        ignored, then how close the values come, the unit counted with them
+        (#102, #124)."""
         return ((self.code or 0.0) + (self.description or 0.0), self.values)
 
     def worth(self, scale: int) -> int:
@@ -656,7 +658,9 @@ def _compare(one: FieldValues, other: FieldValues) -> _Comparison:
         code=_identity(one, other, "code"),
         description=_identity(one, other, "description"),
         values=sum(_close(one, other, cell) for cell in VALUE_CELLS)
-        + sum(THOUSANDTHS * _agree(one, other, cell) for cell in TIEBREAK_CELLS),
+        + sum(
+            THOUSANDTHS for cell in TIEBREAK_CELLS if _same_listing(one, other, cell)
+        ),
         # Only a nameless pair pairs on exact agreement, so only a nameless
         # pair pays for reading the values a second way.
         agreements=sum(_agree(one, other, cell) for cell in VALUE_CELLS)
@@ -670,8 +674,10 @@ def _best[V, S: float](
 ) -> S:
     """The closest any one of a cell's values comes to any one of the other
     side's, by the measure given. A line that lists several values is as close
-    as its best one, which is how pairing reads every cell: a reading that
-    disagrees with itself still pairs on the value that agrees."""
+    as its best one, which is how pairing grades identity and closeness: a
+    reading that disagrees with itself still pairs on the value that agrees.
+    The unit tiebreak is the one comparison read another way, whole listings
+    against each other, as the unit variant rule reads them."""
     return max(measure(left, right) for left in one for right in other)
 
 
@@ -694,10 +700,16 @@ def alike(one: CellValues, other: CellValues) -> float:
     )
 
 
+def _same_listing(one: FieldValues, other: FieldValues, cell: LineCell) -> bool:
+    """Whether both carry the cell and list the same normalized texts, the
+    comparison the unit variant rule makes through `listed_units`, so pairing
+    and the rule never disagree about two units: a line listing two units
+    against one listing one of them is no closer, and the rule fires on it."""
+    return bool(listed(one, cell)) and listed(one, cell) == listed(other, cell)
+
+
 def _agree(one: FieldValues, other: FieldValues, cell: LineCell) -> bool:
-    """Whether both carry the cell and share a normalized value. On the unit,
-    a text cell, that is the comparison `listed_units` makes for the unit
-    variant rule, so pairing and the rule never disagree about two units."""
+    """Whether both carry the cell and share a normalized value."""
     left, right = cell_values(one, cell), cell_values(other, cell)
     if left is None or right is None:
         return False

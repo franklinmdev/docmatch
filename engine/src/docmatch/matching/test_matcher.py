@@ -660,6 +660,41 @@ def test_the_unit_breaks_a_tie_between_nameless_lines_alike_on_every_value() -> 
     assert result.findings == ()
 
 
+def test_a_line_listing_two_units_is_no_closer_to_one_listing_one_of_them() -> None:
+    """The tiebreak reads whole listings against each other, as the unit
+    variant rule does, so the two never disagree: the copy listing one of the
+    line's two units is no closer than the copy listing neither, and the
+    amount decides (#124)."""
+    result = matched(
+        record(
+            line(
+                description="Copier paper",
+                quantity="3",
+                amount_gross="30.00",
+                units_of_measure=("box", "ea"),
+            ),
+        ),
+        record(
+            line(
+                description="Copier paper",
+                quantity="3",
+                amount_gross="20.00",
+                units_of_measure="ea",
+            ),
+            line(
+                description="Copier paper",
+                quantity="3",
+                amount_gross="30.00",
+                units_of_measure="pk",
+            ),
+        ),
+    )
+
+    assert [(each.invoice_line, each.po_line) for each in result.pairings] == [
+        (0, 1),
+    ]
+
+
 def test_two_nameless_lines_sharing_only_a_unit_do_not_pair() -> None:
     """Sharing `ea` is no evidence of the same item: the unit is never an
     exact agreement that lets two nameless lines pair, only a tiebreak among
