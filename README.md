@@ -78,7 +78,7 @@ Measurement before modeling.
 
 - A catalog of minted SKUs and canonical descriptions, every description that appears in two or more DocILE train documents, and a query set of exact queries and noisy variants that imitate how the saved readings differ from their labels, plus out-of-catalog queries.
 - Postgres with `pgvector` and `pg_trgm`. Hybrid retrieval with reciprocal rank fusion.
-- Cross-encoder reranking as an ablation, kept or dropped by a rule written before the number.
+- Cross-encoder reranking over the hybrid's candidates, kept or dropped by a rule written before the number.
 - A separability diagnostic per arm, how well its top-1 score tells an answerable query from an out-of-catalog one; the threshold that routes a line to review is Phase 4's.
 
 **The number:** top-1 and top-5 for trigram only, vector only, hybrid, and hybrid plus rerank, with latency per query.
@@ -513,7 +513,7 @@ Produced at [`27bc70d`](https://github.com/franklinmdev/docmatch/commit/27bc70d)
 uv run docmatch resolve
 ```
 
-which prints this table, the separability diagnostic, the depth sweeps, the
+which prints this table, the separability diagnostic, the depth sweep, the
 verdict and the provenance below in one report; what it builds, and from what,
 is under [Resolution](#resolution). Every query is rebuilt from the labels on
 one seed pinned in code, so rerunning the command at that commit reproduces
@@ -526,10 +526,10 @@ every column but latency, which belongs to the machine. The embedder is
 embedder took 8.80 s and the reranker 0.83 s, and embedding the catalog and
 building the HNSW index 3.97 s and 0.50 s, each paid once and outside the
 latency. The depths are the depth sweep's on the development slice: d = 25
-rows per hybrid half (development top-5 0.989, 0.986 and 0.984 at 25, 50 and
-100) and N = 10 pairs to the reranker (0.987, 0.984 and 0.983 at 10, 25 and
-50), each the smallest value within one point of its grid's best, the smaller
-on a tie, and each equal to the constant in code.
+rows per hybrid half, over 25, 50 and 100, and N = 10 pairs to the reranker,
+over 10, 25 and 50, each the smallest value whose development top-5 is within
+one point of its grid's best, the smaller on a tie, and each equal to the
+constant in code.
 
 | Arm | Rejected at 0.99 | Rejected at 0.95 | Rejected at 0.90 | AUROC |
 |---|---|---|---|---|
@@ -556,19 +556,18 @@ hybrid arm, and the rerank arm and its N sweep are deleted from the command
 
 **What the table says.** Trigram only leads the headline, and at p50 it
 answers in under a millisecond, thirteen times faster than the vector arm,
-which pays for embedding the query. The report's table by noise kind, which
-never reaches this README, carries the reason. The vector arm reads the exact
-queries best, 0.992 top-1 against trigram's 0.968, and loses the headline on
-the noisy variants: a letter or two substituted keeps most of a description's
-trigrams and moves its embedding, 0.716 top-1 there against trigram's 0.925.
-Fusing the weaker half into the stronger costs the hybrid top-1 and keeps its
-top-5 within 0.003 of trigram's. The cross-encoder's loss is almost all on the
-exact queries, which carry two thirds of the headline: 0.926 top-1 against the
-hybrid's 0.969, and on about half of its misses there the probe on #131 found
-its top-1 a longer description that contains the query. Over the noisy
-variants its gains on extra words and digits dropped and its losses on letters
-and punctuation nearly cancel. Trigram's top-1 score also separates out of
-catalog best, AUROC 0.943, and the fused score worst, 0.819, since a sum of
+which pays for embedding the query. The report's table by noise kind, a
+diagnostic that stays in the report, carries the reason. The vector arm reads
+the exact queries best and loses the headline on the noisy variants, most on a
+letter or two substituted, which keeps most of a description's trigrams and
+moves its embedding. Fusing the weaker half into the stronger costs the hybrid
+top-1 and keeps its top-5 within 0.003 of trigram's. The cross-encoder's loss
+is almost all on the exact queries, which carry two thirds of the headline,
+and on about half of its misses there the probe on #131 found its top-1 a
+longer description that contains the query; over the noisy variants its gains
+on extra words and digits dropped and its losses on letters and punctuation
+nearly cancel. Trigram's top-1 score also separates out of catalog best,
+AUROC 0.943, and the fused score worst, 0.819, likely because a sum of
 reciprocal ranks takes few distinct values. Hybrid is still Phase 4's arm
 under the ADR, which weighs the reranker against the hybrid and nothing else;
 whether trigram alone should replace it is a question with its own number,
@@ -577,9 +576,10 @@ not a reading of this one.
 **Against the pivot trigger.** `docs/alternatives.md` opens a pivot discussion
 when entity resolution is the only layer where methods differ materially. It
 is not: the four arms span 4.2 points of top-1 and 1.8 of top-5, while the
-extraction backends span 0.059 of field F1 and 0.237 of line-item F1 on the
-same documents, and the end-to-end matching rows move with the backend. No
-pivot discussion opens.
+three extraction backends span 5.9 points of field F1 and 23.7 of line-item
+F1 on the fixed subset, and the end-to-end matching rows move with the backend,
+0.366 to 0.506 on the clean-case rate. Extraction is where methods differ
+most. No pivot discussion opens.
 
 ### Pipeline, end to end
 

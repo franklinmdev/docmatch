@@ -56,5 +56,4 @@ Any of these, observed in the Benchmarks section, opens a pivot discussion recor
 
 ## Triggers checked
 
-- **Matching, at Phase 2's close (`abddc29`).** Not met: the per-type table is below 0.99 on several types, and the README's matching section gives the cells.
-- **Entity resolution, at Phase 3's close (`27bc70d`).** Not met. Resolution is not the only layer where methods differ materially: its four arms span 4.2 points of top-1 (0.888 to 0.930) and 1.8 of top-5 (0.972 to 0.990), while the three extraction backends span 0.059 of field F1 and 0.237 of line-item F1 on the fixed subset, and the end-to-end matching rows move with the backend. Bank reconciliation stays the runner-up, not a pivot.
+- **Entity resolution, at Phase 3's close (`27bc70d`).** Not met. Resolution is not the only layer where methods differ materially: the extraction backends differ more than the resolution arms do. The README's entity resolution section gives both spans under "Against the pivot trigger". Bank reconciliation stays the runner-up.
