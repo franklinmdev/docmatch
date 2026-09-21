@@ -127,3 +127,69 @@ _Avoid_: near miss, decoy
 **End-to-end row**:
 Matching measured with a backend's reading as the invoice, against the purchase order and receiving record derived from the same document's labels. Truth is always the generator's: a finding caused by a misread value is a false alarm, and an injected discrepancy the reading hides is a miss. The labels control takes the labels as the invoice on the same cases, so the gap to it is what extraction costs.
 _Avoid_: pipeline score, compound score, control row
+
+### Resolution
+
+**Catalog entry**:
+One thing resolution can name: a minted SKU and a canonical description, nothing more. The canonical description is a labeled description after the text normalization pairing already compares. The catalog is seeded from DocILE train alone: every normalized description that appears in two or more train documents is an entry, with no draw, no seed and no size parameter. Near-duplicates are kept apart, never collapsed, since two descriptions that differ only in their digits are two entries.
+_Avoid_: product, item, master data
+
+**SKU**:
+The identifier a catalog entry is minted with: `SKU-` and the first eight hex characters of the SHA-256 of its canonical description. It depends on that description alone, so it never shifts when the catalog changes; a collision raises, and DocILE's own line codes play no part in it. It is the truth an answerable query is scored against.
+_Avoid_: id, code (on its own)
+
+**Query**:
+One normalized description sent to an arm to be resolved, and nothing else: no code, no quantity, no price. It never carries two entries. Every query is either answerable or out of catalog.
+_Avoid_: search, lookup
+
+**Answerable query**:
+A query generated from a catalog entry and carrying that entry's SKU as its truth. Every entry carries three, one exact query and two noisy variants.
+_Avoid_: positive query, known query
+
+**Out-of-catalog query**:
+A query drawn from a train description that appears in one document only and whose nearest catalog entry sits below a pinned similarity, so it has no entry and carries no SKU. It is a fixed share of the set, it never enters the headline, and it exists for the separability diagnostic.
+_Avoid_: negative query, distractor, unknown query
+
+**Exact query**:
+An entry's canonical description unchanged, one per entry. It is the reading a backend produces about two times in three, so it is carried once and weighted rather than repeated.
+_Avoid_: clean query, gold query
+
+**Noisy variant**:
+A query made from an entry's canonical description by applying one noise kind at a calibrated strength, two per entry, each drawing its kind independently. A variant keeps its kind and is never a mix, the way a backend's error is a habit of a document rather than a rate per row.
+_Avoid_: perturbation, augmentation, corrupted query
+
+**Noise kind**:
+One of the four ways a reading differs from its label that the noisy variants imitate, in the shares measured against the labels on the saved runs: extra words, a letter or two substituted, digits dropped, punctuation. Each kind's strength is calibrated so the variants' similarity to their entry reproduces the measured bands, and a test asserts both the shares and the bands. Case, whitespace, an empty reading, a split and a merge are not kinds.
+_Avoid_: typo, corruption, error type
+
+**Arm**:
+One way to resolve a query: one indexed query against the catalog in Postgres plus a deterministic ordering applied in code, score then SKU ascending at every rank and at the cut, returning exactly five entries so top-5 means the same thing in every row. Four arms are measured: trigram only, vector only, hybrid, and hybrid plus rerank.
+_Avoid_: method, strategy, retriever
+
+**Headline**:
+An arm's top-1 or top-5 over the scored answerable queries, the exact queries and the noisy variants each scored on their own and combined at the exact weight. It is the number the README's resolution table shows; out-of-catalog queries never enter it.
+_Avoid_: accuracy (on its own), score (on its own)
+
+**Exact weight**:
+The share of a headline the exact queries carry, pinned in code at the measured share of exact readings, about two in three, printed beside the table and the same for every arm. It carries the exact-reading rate as a weight rather than as duplicated queries, since an entry has one exact form.
+_Avoid_: mixture rate, prior, exact ratio
+
+**Development slice**:
+The queries of the one fifth of entries that one pinned 80/20 split set aside for choosing knobs, the depth sweep among them, plus the same fifth of the out-of-catalog draw. No accuracy or latency number measured on it appears in the README; the depths it chose do. The catalog stays whole on both slices.
+_Avoid_: validation set, dev set, tuning set
+
+**Scored slice**:
+The queries of the other four fifths of the entries and of the out-of-catalog draw, measured once, after every knob is set, to produce the table and the separability diagnostic. No knob is chosen on it.
+_Avoid_: test set, holdout, evaluation set
+
+**Separability diagnostic**:
+Per arm, how well its top-1 score tells an answerable query from an out-of-catalog one: the share of out-of-catalog queries rejected at each of three cuts that keep a fixed high share of the answerable, plus the AUROC, the area under the receiver operating characteristic curve, with answerable positive. Each cut anchors to the arm's own answerable quantile, which is what makes four incommensurable scores comparable. It chooses no operating threshold, that point is Phase 4's, and it is printed beside the keep-or-drop verdict and never weighed in it.
+_Avoid_: threshold, cutoff, rejection rate
+
+**Depth sweep**:
+The procedure that sets the two depth constants on the development slice: d, the rows each hybrid half keeps before fusion, over its grid on the hybrid arm first, then N, the pairs sent to the reranker, over its grid at the winning d. The rule picks the smallest value whose development top-5 is within one point of the grid's best, ties to the cheaper. The constants live in code, and every run repeats the sweep and prints the procedure's value beside each constant, the pairing-floor pattern.
+_Avoid_: hyperparameter search, tuning, grid search
+
+**Keep-or-drop rule**:
+ADR 0001's rule on the reranker, fixed before any arm was measured: kept when its headline top-1 at the swept N clears the hybrid's by at least a pinned margin and its p95 latency per query on the named machine stays under a pinned ceiling, dropped otherwise. Top-1 alone decides. The two thresholds are constants in code beside d and N, and the command prints the verdict with both measurements against both. Kept means hybrid plus rerank is the arm Phase 4 resolves with; dropped means the arm and its N sweep are deleted after the row lands.
+_Avoid_: ablation (on its own), go/no-go, success criterion
