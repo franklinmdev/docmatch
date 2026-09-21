@@ -553,6 +553,8 @@ gain of -0.029 against the required +0.010; its p95 is 82.53 ms against the
 500 ms ceiling, which holds. Top-1 alone decides, so Phase 4 resolves with the
 hybrid arm, and the rerank arm and its N sweep are deleted from the command
 (#143); this row stays reachable at [`27bc70d`](https://github.com/franklinmdev/docmatch/commit/27bc70d).
+The arm was deleted in #143, so `docmatch resolve` now prints three rows, no
+N sweep and no verdict.
 
 **What the table says.** Trigram only leads the headline, and at p50 it
 answers in under a millisecond, thirteen times faster than the vector arm,
@@ -829,16 +831,15 @@ uv run docmatch resolve
 ```
 
 This is the command the resolution table comes from. It needs no model call
-that costs money: the embedder and the reranker are open-weight models that
-run on the CPU, `sentence-transformers/all-MiniLM-L6-v2` and the cross-encoder
-`cross-encoder/ms-marco-MiniLM-L6-v2`, each pinned to its full commit and
-loaded through `sentence-transformers`, with torch installed from PyTorch's
-CPU index so no CUDA library is pulled in, and the first run downloads the
-weights into the Hugging Face cache. It needs a Postgres with the `vector` and
-`pg_trgm` extensions already created: `--database-url`, else
-`DOCMATCH_DATABASE_URL`, else `postgresql:///docmatch`, the socket a local
-cluster offers. Both extensions are required to exist, and a missing one is
-reported without a traceback. Nothing is written to disk.
+that costs money: the embedder is an open-weight model that runs on the CPU,
+`sentence-transformers/all-MiniLM-L6-v2` pinned to its full commit and loaded
+through `sentence-transformers`, with torch installed from PyTorch's CPU index
+so no CUDA library is pulled in, and the first run downloads the weights into
+the Hugging Face cache. It needs a Postgres with the `vector` and `pg_trgm`
+extensions already created: `--database-url`, else `DOCMATCH_DATABASE_URL`,
+else `postgresql:///docmatch`, the socket a local cluster offers. Both
+extensions are required to exist, and a missing one is reported without a
+traceback. Nothing is written to disk.
 
 It builds the catalog from the train labels by one rule with no draw and no
 size parameter, every normalized description that appears in two or more
@@ -875,21 +876,14 @@ each, the HNSW search list widened to that many for the statement when d + 25
 is past its pin of 100, ranks each half the way its single arm would and cuts
 it to d, and fuses the two by reciprocal rank fusion, each entry scoring
 `1/(60 + rank)` summed over the halves it is in, then orders by fused score
-then SKU and cuts to five. The rerank arm runs the hybrid's statement and
-fusion, sends the fused list's first N entries to the cross-encoder as
-(query, canonical description) pairs in one call, orders them by its score
-then SKU in place of the fused order, and cuts to five; N is at least 10, so
-the five are always reranked, and a fused list shorter than N is reranked
-whole. d and N are constants in code; before the table, every run sweeps d
-over 25, 50 and 100 on the hybrid arm, then N over 10, 25 and 50 on the
-rerank arm at the constant d, both on the development slice, and prints the
-value each rule gives (the smallest value whose development top-5 is within
-one point of the grid's best, the smaller on a tie) beside its constant, and
-the scored slice is always measured at the constants. A query's latency is
-everything it pays on arrival, the embedding and the rerank call included,
-over every scored query whether in the catalog or not; loading each model,
-embedding the catalog and building the index are paid once and reported
-once.
+then SKU and cuts to five. d is a constant in code; before the table, every
+run sweeps d over 25, 50 and 100 on the development slice and prints the
+value its rule gives (the smallest d whose development top-5 is within one
+point of the grid's best, the smaller on a tie) beside the constant, and the
+scored slice is always measured at the constant. A query's latency is
+everything it pays on arrival, the embedding included, over every scored
+query whether in the catalog or not; loading the model, embedding the catalog
+and building the index are paid once and reported once.
 
 It prints the catalog counts (documents, lines, distinct descriptions,
 entries), the query set per slice (entries, exact, noisy, queries), the
@@ -903,24 +897,20 @@ out-of-catalog queries rejected at the cuts that keep 0.99, 0.95 and 0.90 of
 the arm's own answerable scores, and AUROC, both populations weighted at the
 exact weight; a reporting device, no threshold is chosen), per arm the rank-1
 tie rate, p50 and p95 latency per query and what the over-fetch check found,
-what was paid once outside the latency (the embedder's load, the reranker's
-load, catalog embedding, HNSW build), each sweep's development top-5 at each
-value with the constant, the procedure's value and the rule, the same scored
-queries regrouped by kind with top-1 and top-5 per arm, a diagnostic that
-never reaches this README, the keep-or-drop verdict on the reranker under the
-rule [ADR 0001](docs/adr/0001-reranker-keep-or-drop-rule.md) fixed before any
-arm was measured (kept when the rerank arm's headline top-1 is at least 1.0
-point above the hybrid's and its p95 per query is at most 500 ms, both
-constants in code, printed with both measurements against them and what each
-verdict does), and a provenance block read at run time: the Postgres, pgvector
-and pg_trgm versions and the `hnsw.ef_search` in effect from the server, the
-embedder and the reranker with their revisions, the `sentence-transformers`
-and torch versions and the torch thread count from the process, and the CPU,
-logical CPUs, memory and kernel from the OS, since latency is a property of a
-named machine. No description is ever printed. CI runs the command on the same
-synthetic corpus against a pinned `pgvector/pgvector` container with the real
-models cached by their revisions; its latency means nothing, and the README's
-numbers come from the command run locally.
+what was paid once outside the latency (model load, catalog embedding, HNSW
+build), the sweep's development top-5 at each d with the constant, the
+procedure's value and the rule, the same scored queries regrouped by kind
+with top-1 and top-5 per arm, a diagnostic that never reaches this README,
+and a provenance block read at run time: the
+Postgres, pgvector and pg_trgm versions and the `hnsw.ef_search` in effect
+from the server, the embedder and its revision, the `sentence-transformers`
+and torch versions and the torch thread count from the process, and the
+CPU, logical CPUs, memory and kernel
+from the OS, since latency is a property of a named machine. No description
+is ever printed. CI runs the command on the same synthetic corpus against a
+pinned `pgvector/pgvector` container with the real model cached by its
+revision; its latency means nothing, and the README's numbers come from the
+command run locally.
 
 ### The baseline run
 
@@ -1086,7 +1076,7 @@ docmatch/
     src/docmatch/      extraction, validation, resolution, matching, metrics
       evals/           the pinned subset, the run that scores it, the corpus survey
       matching/        records, pairing, the rules, the case generator, the scorer
-      resolution/      the catalog, the query set, the models, the Postgres working space, the arms, the run
+      resolution/      the catalog, the query set, the embedder, the Postgres working space, the arms, the run
     tests/evals/       the synthetic corpus CI runs the eval, the match and the resolve on
   apps/review/         Next.js review inbox, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
