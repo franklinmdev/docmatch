@@ -2025,17 +2025,6 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  hybrid   0.947  0.992  4608",
         "  rerank   0.959  0.994  4608",
         "",
-        "Keep-or-drop verdict on the reranker, ADR 0001, over the scored slice",
-        "  measurement                         value        constant  holds",
-        "  rerank top-1 less hybrid top-1     +0.012  at least 0.010    yes",
-        "  rerank p95 per query            340.50 ms  at most 500 ms    yes",
-        "  verdict: kept",
-        "  kept means hybrid plus rerank is the arm Phase 4 resolves with",
-        "  dropped means the rerank arm and its N sweep are deleted after the "
-        "README row lands",
-        "  top-1 alone decides; the separability below is printed beside it "
-        "and never weighed",
-        "",
         "Separability, top-1 score, 4608 answerable against 813 out of catalog, "
         "both weighted by w",
         "  arm      rejected at 0.99  rejected at 0.95  rejected at 0.90  AUROC",
@@ -2108,6 +2097,16 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  punctuation           548          0.985          1.000  "
         "       0.995         1.000         0.996         1.000  "
         "       0.998         1.000",
+        "",
+        "Keep-or-drop verdict on the reranker, ADR 0001, over the scored slice",
+        "  measurement                         value        constant  holds",
+        "  rerank top-1 less hybrid top-1     +0.012  at least 0.010    yes",
+        "  rerank p95 per query            340.50 ms  at most 500 ms    yes",
+        "  verdict: kept",
+        "  kept means hybrid plus rerank is the arm Phase 4 resolves with",
+        "  dropped means the rerank arm and its N sweep are deleted after the "
+        "README row lands",
+        "  top-1 alone decides; the separability above is printed and never weighed",
         "",
         "Provenance, read at run time",
         "  postgres               16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",

@@ -1128,8 +1128,6 @@ def render_resolve(result: resolution.ResolveResult) -> str:
             ],
         ),
         "",
-        *_verdict(measured.verdict),
-        "",
         f"Separability, top-1 score, {len(queries.scored.queries)} answerable "
         f"against {len(queries.scored.out_of_catalog)} out of catalog, both "
         "weighted by w",
@@ -1198,6 +1196,8 @@ def render_resolve(result: resolution.ResolveResult) -> str:
         "By kind, the same scored queries regrouped, report only",
         *_by_kind(measured.arms),
         "",
+        *_verdict(measured.verdict),
+        "",
         "Provenance, read at run time",
         *_rows(
             ("postgres", measured.versions.postgres),
@@ -1264,8 +1264,7 @@ def _verdict(verdict: resolution_sweep.Verdict) -> list[str]:
         "  kept means hybrid plus rerank is the arm Phase 4 resolves with",
         "  dropped means the rerank arm and its N sweep are deleted after the "
         "README row lands",
-        "  top-1 alone decides; the separability below is printed beside it "
-        "and never weighed",
+        "  top-1 alone decides; the separability above is printed and never weighed",
     ]
 
 
