@@ -16,10 +16,13 @@ store is made over it, then read back into the provenance block, so no arm
 ever runs at the default by way of a fresh session: at the default 40 the
 index disagreed with an exact scan on the top-5 set for 3.3 percent of
 queries, at 100 for 1.2, at 200 for none, for 0.2 ms against 12 ms of
-embedding (#120, probe 2). pgvector README read
-2026-09-21 (github.com/pgvector/pgvector, 0.8.6): `WITH (m, ef_construction)`
-on the index, `SET hnsw.ef_search` on the session, a vector written as its
-bracketed literal, and an index built after the data loads is faster.
+embedding (#120, probe 2). An HNSW scan returns at most that many rows, so a
+statement asking the index for more, a hybrid half deeper than 75 (#130),
+widens the list to what it asks for and pins it back after. pgvector README
+read 2026-09-21 (github.com/pgvector/pgvector, 0.8.6): `WITH (m,
+ef_construction)` on the index, `SET hnsw.ef_search` on the session, a
+vector written as its bracketed literal, an index built after the data loads
+is faster, and results are limited by the size of the candidate list.
 
 Both extensions are required to exist, `vector` for the column type and
 `pg_trgm` for the index, and a missing one is reported without a traceback.
@@ -47,7 +50,8 @@ cluster already offers, so the command needs no flag on the named machine.
 import os
 import platform
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import psycopg
@@ -159,8 +163,25 @@ class Store:
 
     def __post_init__(self) -> None:
         """The HNSW search list, on this connection, before any arm runs."""
+        self._set_search_list(EF_SEARCH)
+
+    @contextmanager
+    def search_list(self, rows: int) -> Iterator[None]:
+        """The HNSW search list at least `rows` wide for the statements
+        inside, since the index returns at most that many, and back at the
+        pin after them, so no other arm runs any wider."""
+        if rows <= EF_SEARCH:
+            yield
+            return
+        self._set_search_list(rows)
+        try:
+            yield
+        finally:
+            self._set_search_list(EF_SEARCH)
+
+    def _set_search_list(self, rows: int) -> None:
         self.connection.execute(
-            sql.SQL("SET hnsw.ef_search = {}").format(sql.Literal(EF_SEARCH))
+            sql.SQL("SET hnsw.ef_search = {}").format(sql.Literal(rows))
         )
 
     def rebuild(self, entries: Sequence[Entry], embedder: Embedder) -> Build:

@@ -10,20 +10,25 @@ every arm. Beside it the same queries regroup by kind, exact and the four
 noise kinds, top-1 and top-5 per arm with n, a diagnostic that says where an
 arm wins and never reaches the README.
 
-Only the scored slice is measured: the table is produced once over queries
-no knob was set on, and the development slice waits for the depth sweep
-(#130). Latency is everything a query pays on arrival, measured one query at
-a time on one connection, after a discarded warmup pass over the same
-queries, as p50 and p95 over the scored pass, answerable and out of catalog
-alike, since a line pays the same whether it is in the catalog or not
-(#120, #132). For the trigram arm that is the SQL and the ordering; for the
-vector arm the embedding of the query too, and the warmup pass covers the
-model with it. The rerank joins the count with its arm. Model load,
-embedding the catalog and building the HNSW index are each timed once and
-reported beside the table, never per query. The models are loaded through
+The table is produced once over the scored slice, queries no knob was set on.
+The development slice is where the depth sweep runs, before the table: the
+hybrid arm at every d of the grid, scored by its development headline top-5,
+and the rule in `sweep` applied to the result. The scored slice is then
+measured at the constant d in code, never at the swept value, so a
+disagreement between the two is printed rather than silently moving the table
+(#130). The sweep is scored and not timed. Latency is everything a query pays
+on arrival, measured one query at a time on one connection, after a discarded
+warmup pass over the same queries, as p50 and p95 over the scored pass,
+answerable and out of catalog alike, since a line pays the same whether it is
+in the catalog or not (#120, #132). For the trigram arm that is the SQL and
+the ordering; for the vector and hybrid arms the embedding of the query too,
+and the warmup pass covers the model with it; for the hybrid the one
+statement and the fusion. The rerank joins the count with its arm. Model
+load, embedding the catalog and building the HNSW index are each timed once
+and reported beside the table, never per query. The models are loaded through
 the loader given, after the database has answered with both extensions and
-only when there is something to resolve, so a database that does not
-answer, or one missing an extension, is reported without loading anything.
+only when there is something to resolve, so a database that does not answer,
+or one missing an extension, is reported without loading anything.
 
 The run also tallies what the over-fetch check found: on how many full
 fetches the score at the fetched boundary equalled the score at the cut, and
@@ -64,7 +69,7 @@ import psycopg
 from scipy.stats import mannwhitneyu
 
 from docmatch.metrics.score import percentile_of, share_of
-from docmatch.resolution.arms import Fetched, trigram, vector
+from docmatch.resolution.arms import Fetched, hybrid, trigram, vector
 from docmatch.resolution.catalog import Catalog, CatalogCounts
 from docmatch.resolution.models import ModelLoader, ModelVersions
 from docmatch.resolution.queries import (
@@ -84,6 +89,7 @@ from docmatch.resolution.store import (
     connect,
     machine,
 )
+from docmatch.resolution.sweep import DEPTH, DEPTHS, Point, Sweep
 
 EXACT_WEIGHT = 2 / 3
 """The share of a headline the exact queries carry, inside #116's 0.65 to
@@ -155,21 +161,15 @@ class ArmResult:
 
     @property
     def top1(self) -> float | None:
-        return headline(self._exact("top1"), self._noisy("top1"))
+        return _headline_of(self.kinds, "top1")
 
     @property
     def top5(self) -> float | None:
-        return headline(self._exact("top5"), self._noisy("top5"))
+        return _headline_of(self.kinds, "top5")
 
     @property
     def tie_rate(self) -> float | None:
         return share_of(self.tied_at_1, self.queries)
-
-    def _exact(self, at: str) -> float | None:
-        return _rate_over([each for each in self.kinds if each.kind == "exact"], at)
-
-    def _noisy(self, at: str) -> float | None:
-        return _rate_over([each for each in self.kinds if each.kind != "exact"], at)
 
 
 def headline(exact: float | None, noisy: float | None) -> float | None:
@@ -180,6 +180,14 @@ def headline(exact: float | None, noisy: float | None) -> float | None:
     if noisy is None:
         return exact
     return EXACT_WEIGHT * exact + (1 - EXACT_WEIGHT) * noisy
+
+
+def _headline_of(kinds: Sequence[KindScore], at: str) -> float | None:
+    """The headline at top-1 or top-5 over queries scored by kind."""
+    return headline(
+        _rate_over([each for each in kinds if each.kind == "exact"], at),
+        _rate_over([each for each in kinds if each.kind != "exact"], at),
+    )
 
 
 def _rate_over(kinds: Sequence[KindScore], at: str) -> float | None:
@@ -253,6 +261,9 @@ class Measured:
     """What the arms answered, with what, and where."""
 
     arms: tuple[ArmResult, ...]
+    depth_sweep: Sweep
+    """The depth sweep on the development slice, beside the constant the
+    hybrid arm was measured at."""
     versions: ServerVersions
     models: ModelVersions
     load_s: float
@@ -297,6 +308,13 @@ def resolve(
             embedder = loaded.embedder
             build = store.rebuild(catalog.entries, embedder)
             out_of_catalog = query_set.scored.out_of_catalog
+
+            def hybrid_at(depth: int) -> Arm:
+                return lambda text: hybrid(store, embedder, text, depth)
+
+            depth_sweep = sweep(
+                "d", DEPTH, DEPTHS, hybrid_at, query_set.development.queries
+            )
             arms = (
                 measure(
                     "trigram", lambda text: trigram(store, text), scored, out_of_catalog
@@ -307,12 +325,14 @@ def resolve(
                     scored,
                     out_of_catalog,
                 ),
+                measure("hybrid", hybrid_at(DEPTH), scored, out_of_catalog),
             )
             return ResolveResult(
                 catalog.counts,
                 query_set,
                 Measured(
                     arms,
+                    depth_sweep,
                     store.versions(),
                     loaded.versions,
                     loaded.load_s,
@@ -350,10 +370,7 @@ def measure(
     outcomes = Counter(fetched.over_fetch for _, fetched in answered)
     return ArmResult(
         name=name,
-        kinds=tuple(
-            _score(kind, [each for each in answered if each[0].kind == kind])
-            for kind in QUERY_KINDS
-        ),
+        kinds=_by_kind(answered),
         queries=len(queries),
         tied_at_1=sum(fetched.tied_at_1 for _, fetched in answered),
         p50_ms=percentile_of(latencies, 50),
@@ -364,6 +381,39 @@ def measure(
             short=outcomes["short"],
         ),
         separability=separability(_top1(answered), _top1(out_of_catalog_answered)),
+    )
+
+
+def sweep(
+    name: str,
+    constant: int,
+    grid: Sequence[int],
+    arm_at: Callable[[int], Arm],
+    queries: Sequence[Query],
+) -> Sweep:
+    """Every value of the grid through the arm over the development queries
+    once, each scored by its headline top-5, untimed."""
+    return Sweep(
+        name,
+        constant,
+        tuple(
+            Point(value, _top5(arm_at(value), queries), len(queries)) for value in grid
+        ),
+    )
+
+
+def _top5(arm: Arm, queries: Sequence[Query]) -> float | None:
+    """The headline top-5 of the arm over the queries."""
+    return _headline_of(
+        _by_kind([(query, arm(query.text)) for query in queries]), "top5"
+    )
+
+
+def _by_kind(answered: Sequence[tuple[Query, Fetched]]) -> tuple[KindScore, ...]:
+    """One score per kind, in the report's order, n 0 for a kind not there."""
+    return tuple(
+        _score(kind, [each for each in answered if each[0].kind == kind])
+        for kind in QUERY_KINDS
     )
 
 

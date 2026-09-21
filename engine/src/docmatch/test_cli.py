@@ -46,6 +46,7 @@ from docmatch.resolution.queries import (
     SliceName,
 )
 from docmatch.resolution.store import Build, Machine, ServerVersions
+from docmatch.resolution.sweep import Point, Sweep
 
 EXPECTED_SHOW_OUTPUT = "\n".join(
     [
@@ -2021,12 +2022,14 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  arm      top-1  top-5     n",
         "  trigram  0.922  0.980  4608",
         "  vector   0.946  0.989  4608",
+        "  hybrid   0.947  0.992  4608",
         "",
         "Separability, top-1 score, 4608 answerable against 813 out of catalog, "
         "both weighted by w",
         "  arm      rejected at 0.99  rejected at 0.95  rejected at 0.90  AUROC",
         "  trigram             0.101             0.352             0.498  0.874",
         "  vector              0.050             0.210             0.330  0.795",
+        "  hybrid              0.080             0.301             0.440  0.851",
         "  each cut keeps that share of the arm's own answerable scores; a "
         "reporting device, no threshold is chosen",
         "",
@@ -2037,6 +2040,8 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "                    3              8",
         "  vector             0.017   14.21   22.83          4608  "
         "                    0              0",
+        "  hybrid             0.033   14.95   23.46          4608  "
+        "                    2              0",
         "  latency over every scored query, answerable and out of catalog; "
         "fetches over the answerable ones",
         "  a boundary equal to the cut means a tie group may reach past the "
@@ -2047,19 +2052,29 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  catalog embedding  1.23 s",
         "  hnsw build         0.46 s",
         "",
+        "Sweep over d per hybrid half, development top-5 at each value",
+        "  d    top-5     n",
+        "  25   0.991  1152",
+        "  50   0.993  1152",
+        "  100  0.994  1152",
+        "  constant d, the scored slice's  50",
+        "  procedure's d                   25",
+        "  rule: the smallest d whose development top-5 is within 0.010 of the "
+        "grid's best, the smaller on a tie",
+        "",
         "By kind, the same scored queries regrouped, report only",
         "  kind                    n  trigram top-1  trigram top-5  "
-        "vector top-1  vector top-5",
+        "vector top-1  vector top-5  hybrid top-1  hybrid top-5",
         "  exact                1536          0.970          0.999  "
-        "       0.977         0.999",
+        "       0.977         0.999         0.973         1.000",
         "  extra words          1110          0.811          0.901  "
-        "       0.856         0.946",
+        "       0.856         0.946         0.865         0.955",
         "  letters substituted   744          0.941          0.995  "
-        "       0.968         0.997",
+        "       0.968         0.997         0.974         0.999",
         "  digits dropped        670          0.597          0.896  "
-        "       0.746         0.955",
+        "       0.746         0.955         0.776         0.970",
         "  punctuation           548          0.985          1.000  "
-        "       0.995         1.000",
+        "       0.995         1.000         0.996         1.000",
         "",
         "Provenance, read at run time",
         "  postgres               16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
@@ -2086,7 +2101,9 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
     `w` times the exact rate plus `1 - w` times the noisy rate: 0.970 and
     0.826 at top-1 give 0.922, 0.999 and 0.942 at top-5 give 0.980 for the
     trigram arm; 0.977 and 0.884 give 0.946, 0.999 and 0.970 give 0.989 for
-    the vector arm."""
+    the vector arm; 0.973 and 0.896 give 0.947, 1.000 and 0.977 give 0.992
+    for the hybrid. The sweep's constant is 50 and its procedure 25, since
+    0.991 is within a point of 0.994, so the disagreement shows."""
     result = resolution.ResolveResult(
         CatalogCounts(documents=5180, lines=36147, distinct=8855, entries=1920),
         query_set_of(
@@ -2129,6 +2146,31 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
                     22.834,
                     resolution.OverFetch(full=4608, equal=0, short=0),
                     resolution.Separability((0.05, 0.21, 0.33), 0.795),
+                ),
+                resolution.ArmResult(
+                    "hybrid",
+                    (
+                        resolution.KindScore("exact", 1536, 1495, 1536),
+                        resolution.KindScore("extra words", 1110, 960, 1060),
+                        resolution.KindScore("letters substituted", 744, 725, 743),
+                        resolution.KindScore("digits dropped", 670, 520, 650),
+                        resolution.KindScore("punctuation", 548, 546, 548),
+                    ),
+                    4608,
+                    150,
+                    14.953,
+                    23.461,
+                    resolution.OverFetch(full=4608, equal=2, short=0),
+                    resolution.Separability((0.0801, 0.3012, 0.4401), 0.8512),
+                ),
+            ),
+            Sweep(
+                "d",
+                50,
+                (
+                    Point(25, 0.99124, 1152),
+                    Point(50, 0.99312, 1152),
+                    Point(100, 0.99401, 1152),
                 ),
             ),
             ServerVersions(
@@ -2263,10 +2305,11 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
     """The real path over the fixture, the one CI's Resolve step runs with
     the real models: the six descriptions the two train documents share are
     the catalog, the split leaves one development entry, the scored slice's
-    fifteen queries are measured on both arms, and rule 6 holds on the
-    output. The run is pointed at the test schema so a real run's
-    `resolution` is left for inspection, and at the fake embedder so no
-    weights are loaded; the command itself has a flag for neither."""
+    fifteen queries are measured on every arm, the depth sweep runs over the
+    development entry's three, and rule 6 holds on the output. The run is
+    pointed at the test schema so a real run's `resolution` is left for
+    inspection, and at the fake embedder so no weights are loaded; the
+    command itself has a flag for neither."""
     monkeypatch.setattr(
         resolution, "resolve", partial(resolution.resolve, schema=TEST_SCHEMA)
     )
@@ -2311,6 +2354,9 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
     assert "\n  vector   1.000  1.000  15\n" in out, (
         "a one-hot fake still puts the exact entry first"
     )
+    assert "\n  hybrid   1.000  1.000  15\n" in out
+    assert "\n  25   1.000  3\n" in out, "the sweep runs over the one development entry"
+    assert "\n  procedure's d                   25\n" in out
     assert "\n  exact                5          1.000          1.000" in out
     assert "\n  model load         0.50 s\n" in out
     assert "Provenance, read at run time" in out
