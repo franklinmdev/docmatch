@@ -753,22 +753,38 @@ traceback. Nothing is written to disk.
 It builds the catalog from the train labels by one rule with no draw and no
 size parameter, every normalized description that appears in two or more
 train documents, minted as `SKU-` plus eight hex characters of the SHA-256 of
-that description; val is out entirely. It drops and recreates schema
-`resolution` in the database, loads the catalog with a GiST trigram index and
-leaves it there for inspection, then sends every query through every arm one
-at a time on one connection, after a discarded warmup pass, and scores the
-answers against the SKU each query was generated from.
+that description; val is out entirely. Every entry then carries three
+queries: its canonical description unchanged, and two noisy variants that
+imitate how a backend's reading differs from the label, each drawing one of
+four noise kinds and keeping it (extra words, a letter or two substituted,
+digits dropped, punctuation) at the shares measured on the saved runs, with
+each kind's strength calibrated so the variants' similarity to their entry
+reproduces the measured bands. The extra text never comes from a catalog
+entry: it is numeric or unit-shaped tokens standing for a row's other cells,
+or a fragment of a train description that appears in one document only. The
+entries split one in five to a development slice and the rest to a scored
+slice under one seed pinned in code, the catalog whole in both; every knob is
+set on the development slice and the table is measured once on the scored
+slice. It drops and recreates schema `resolution` in the database, loads the
+catalog with a GiST trigram index and leaves it there for inspection, then
+sends every scored query through every arm one at a time on one connection,
+after a discarded warmup pass, and scores the answers against the SKU each
+query was generated from.
 
 It prints the catalog counts (documents, lines, distinct descriptions,
-entries), the query counts per kind, the headline table (top-1 and top-5 per
-arm at the exact weight, a constant in code printed beside the table), per
-arm the rank-1 tie rate, p50 and p95 latency per query and what the over-fetch
-check found, and a provenance block read at run time: the Postgres, pgvector
-and pg_trgm versions from the server, and the CPU, logical CPUs, memory and
-kernel from the OS, since latency is a property of a named machine. No
-description is ever printed. CI runs the command on the same synthetic corpus
-against a pinned `pgvector/pgvector` container; its latency means nothing, and
-the README's numbers come from the command run locally.
+entries), the query set per slice (entries, exact, noisy, queries), the noise
+model's kind shares and similarity bands beside their measured targets, the
+headline table (top-1 and top-5 per arm over the scored slice, the exact
+queries and the noisy variants weighted at the exact weight, a constant in
+code printed beside the table), per arm the rank-1 tie rate, p50 and p95
+latency per query and what the over-fetch check found, the same scored
+queries regrouped by kind with top-1 and top-5 per arm, a diagnostic that
+never reaches this README, and a provenance block read at run time: the
+Postgres, pgvector and pg_trgm versions from the server, and the CPU, logical
+CPUs, memory and kernel from the OS, since latency is a property of a named
+machine. No description is ever printed. CI runs the command on the same
+synthetic corpus against a pinned `pgvector/pgvector` container; its latency
+means nothing, and the README's numbers come from the command run locally.
 
 ### The baseline run
 
@@ -934,7 +950,7 @@ docmatch/
     src/docmatch/      extraction, validation, resolution, matching, metrics
       evals/           the pinned subset, the run that scores it, the corpus survey
       matching/        records, pairing, the rules, the case generator, the scorer
-      resolution/      the catalog, the Postgres working space, the arms, the run
+      resolution/      the catalog, the query set, the Postgres working space, the arms, the run
     tests/evals/       the synthetic corpus CI runs the eval, the match and the resolve on
   apps/review/         Next.js review inbox, from phase 4
   data/                ignored: datasets, generated fixtures, private sets

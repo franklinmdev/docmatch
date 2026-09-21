@@ -4,7 +4,8 @@ Postgres: seam 2 of the Phase 3 spec. Every value is made up."""
 import pytest
 
 from docmatch.resolution.arms import FETCH, Answer, Fetched, ordered
-from docmatch.resolution.catalog import Entry, Query, build_catalog, mint
+from docmatch.resolution.catalog import Entry, build_catalog, mint
+from docmatch.resolution.queries import Query
 from docmatch.resolution.run import (
     EXACT_WEIGHT,
     ArmResult,
@@ -96,7 +97,8 @@ def test_resolve_over_an_empty_catalog_touches_no_database() -> None:
     result = resolve(catalog, "postgresql://localhost:1/nothing")
 
     assert result.measured is None
-    assert [(each.kind, each.queries) for each in result.kinds] == [("exact", 0)]
+    assert result.queries.scored.queries == ()
+    assert result.queries.development.queries == ()
     assert result.catalog.entries == 0
 
 
@@ -115,9 +117,11 @@ def test_resolve_answers_every_exact_query_with_its_own_entry_first(
     assert result.measured is not None
     (arm,) = result.measured.arms
     assert arm.name == "trigram"
-    assert arm.kinds == (KindScore("exact", 3, 3, 3),)
-    assert arm.top1 == 1.0
-    assert arm.over_fetch == OverFetch(full=0, equal=0, short=3)
+    assert arm.kinds[0] == KindScore("exact", 3, 3, 3)
+    assert arm.queries == 9, "three exact and six variants, no development entry"
+    assert sum(each.n for each in arm.kinds[1:]) == 6
+    assert arm.over_fetch == OverFetch(full=0, equal=0, short=9)
+    assert result.queries.development.entries == 0
     assert result.measured.versions.pg_trgm
     assert result.measured.machine.logical_cpus >= 1
 

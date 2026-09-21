@@ -1,19 +1,22 @@
-"""One resolution run: the catalog into Postgres, every query through every
-arm, scored against the truth the queries carry.
+"""One resolution run: the catalog into Postgres, every scored query through
+every arm, scored against the truth the queries carry.
 
 Scoring is by construction (#119): an arm is correct at top-1 when the first
 SKU it returns is the query's, and at top-5 when the query's SKU is among the
 five. The headline is `w` times the rate over the exact queries plus `1 - w`
 times the rate over the noisy variants, every kind but exact, with `w`
-pinned in code at #116's measured share of exact readings. Until #128 adds
-the variants there is no noisy rate, the exact rate stands alone, and the
-formula is in place from the first run.
+pinned in code at #116's measured share of exact readings, the same for
+every arm. Beside it the same queries regroup by kind, exact and the four
+noise kinds, top-1 and top-5 per arm with n, a diagnostic that says where an
+arm wins and never reaches the README.
 
-Latency is everything a query pays on arrival, measured one query at a time
-on one connection, after a discarded warmup pass over the same queries, as
-p50 and p95 over the scored pass (#120). For the trigram arm that is the SQL
-and the ordering; the embedding and the rerank join the count with their
-arms, and model load is reported once, never per query.
+Only the scored slice is measured: the table is produced once over queries
+no knob was set on, and the development slice waits for the depth sweep
+(#130). Latency is everything a query pays on arrival, measured one query at
+a time on one connection, after a discarded warmup pass over the same
+queries, as p50 and p95 over the scored pass (#120). For the trigram arm
+that is the SQL and the ordering; the embedding and the rerank join the
+count with their arms, and model load is reported once, never per query.
 
 The run also tallies what the over-fetch check found: on how many full
 fetches the score at the fetched boundary equalled the score at the cut, and
@@ -30,12 +33,13 @@ import psycopg
 
 from docmatch.metrics.score import percentile_of
 from docmatch.resolution.arms import Fetched, trigram
-from docmatch.resolution.catalog import (
-    Catalog,
-    CatalogCounts,
+from docmatch.resolution.catalog import Catalog, CatalogCounts
+from docmatch.resolution.queries import (
+    QUERY_KINDS,
     Query,
     QueryKind,
-    exact_queries,
+    QuerySet,
+    build_query_set,
 )
 from docmatch.resolution.store import (
     SCHEMA,
@@ -85,10 +89,11 @@ class OverFetch:
 
 @dataclass(frozen=True)
 class ArmResult:
-    """One arm over the whole query set."""
+    """One arm over the scored slice."""
 
     name: str
     kinds: tuple[KindScore, ...]
+    """One row per kind the slice carries, in the report's order."""
     queries: int
     tied_at_1: int
     """Queries whose first two answers shared a score."""
@@ -132,14 +137,6 @@ def _rate_over(kinds: Sequence[KindScore], at: str) -> float | None:
 
 
 @dataclass(frozen=True)
-class KindCount:
-    """How many queries of one kind the set carries."""
-
-    kind: QueryKind
-    queries: int
-
-
-@dataclass(frozen=True)
 class Measured:
     """What the arms answered, and where."""
 
@@ -153,10 +150,10 @@ class ResolveResult:
     """One run, as the report renders it."""
 
     catalog: CatalogCounts
-    kinds: tuple[KindCount, ...]
+    queries: QuerySet
     measured: Measured | None
-    """None when the catalog had no entry, so there was nothing to resolve
-    and no database was touched."""
+    """None when the scored slice had no query, so there was nothing to
+    resolve and no database was touched."""
 
 
 Arm = Callable[[str], Fetched]
@@ -164,20 +161,20 @@ Arm = Callable[[str], Fetched]
 
 
 def resolve(catalog: Catalog, url: str, schema: str = SCHEMA) -> ResolveResult:
-    """The catalog rebuilt in the database at `url`, every exact query through
+    """The catalog rebuilt in the database at `url`, the scored slice through
     the trigram arm, scored and timed. The schema is the command's; tests
     build in their own so a run's is left for inspection."""
-    queries = exact_queries(catalog)
-    kinds = (KindCount("exact", len(queries)),)
-    if not queries:
-        return ResolveResult(catalog.counts, kinds, None)
+    query_set = build_query_set(catalog)
+    scored = query_set.scored.queries
+    if not scored:
+        return ResolveResult(catalog.counts, query_set, None)
     try:
         with connect(url) as connection:
             store = Store(connection, schema)
             store.rebuild(catalog.entries)
-            arms = (measure("trigram", lambda text: trigram(store, text), queries),)
+            arms = (measure("trigram", lambda text: trigram(store, text), scored),)
             return ResolveResult(
-                catalog.counts, kinds, Measured(arms, store.versions(), machine())
+                catalog.counts, query_set, Measured(arms, store.versions(), machine())
             )
     except psycopg.Error as error:
         # A refusal after the connection, a schema that cannot be dropped or
@@ -196,13 +193,14 @@ def measure(name: str, arm: Arm, queries: Sequence[Query]) -> ArmResult:
         fetched = arm(query.text)
         latencies.append((time.perf_counter() - started) * 1000)
         answered.append((query, fetched))
-    kinds = sorted({query.kind for query in queries})
+    present = {query.kind for query in queries}
     outcomes = Counter(fetched.over_fetch for _, fetched in answered)
     return ArmResult(
         name=name,
         kinds=tuple(
             _score(kind, [each for each in answered if each[0].kind == kind])
-            for kind in kinds
+            for kind in QUERY_KINDS
+            if kind in present
         ),
         queries=len(queries),
         tied_at_1=sum(fetched.tied_at_1 for _, fetched in answered),
