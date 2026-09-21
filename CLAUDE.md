@@ -48,7 +48,3 @@ The five canonical roles use their default names: `needs-triage`, `needs-info`, 
 ### Domain docs
 
 Single-context: `CONTEXT.md` at the root plus `docs/adr/`. See `docs/agents/domain.md`.
-
-### PR Judge
-
-A CI job comments a typed Jev verdict on every pull request. Read it when the PR is opened and before landing. It is a signal, not a review, and never blocks a merge. See `docs/agents/pr-judge.md`.

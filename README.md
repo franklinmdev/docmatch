@@ -973,7 +973,7 @@ docmatch/
   data/                ignored: datasets, generated fixtures, private sets
   docs/                decision records
   scripts/             the markdown-location check CI runs
-  .github/workflows/   CI: ruff, mypy and pytest against a pgvector container on every push; a PR judge that only comments
+  .github/workflows/   CI: ruff, mypy and pytest against a pgvector container on every push
 ```
 
 Tests live next to the code they test, so `src/docmatch/docile/dataset.py` is
