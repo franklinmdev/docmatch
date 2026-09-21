@@ -1955,9 +1955,9 @@ def slice_of(name: SliceName, entries: int, out: tuple[int, int] = (0, 0)) -> Sl
         queries.append(Query("x", f"SKU-{index}", "extra words"))
         queries.append(Query("x", f"SKU-{index}", "digits dropped"))
     exact, noisy = out
-    unanswerable = [Query("x", None, "exact")] * exact
-    unanswerable += [Query("x", None, "punctuation")] * noisy
-    return Slice(name, tuple(queries), tuple(unanswerable))
+    out_of_catalog = [Query("x", None, "exact")] * exact
+    out_of_catalog += [Query("x", None, "punctuation")] * noisy
+    return Slice(name, tuple(queries), tuple(out_of_catalog))
 
 
 def query_set_of(
@@ -1998,7 +1998,7 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  development      384    384    768     1152",
         "",
         "Out of catalog, one train singleton each below 0.95 to every entry, "
-        "0.150 of the set",
+        "0.150 of the set against a target of 0.150",
         "  slice        exact  noisy  queries",
         "  scored         271    542      813",
         "  development     68    135      203",
@@ -2177,7 +2177,7 @@ def test_resolve_renders_an_empty_catalog_as_nothing_to_resolve() -> None:
             "  development        0      0      0        0",
             "",
             "Out of catalog, one train singleton each below 0.95 to every entry, "
-            "0.150 of the set",
+            "none of the set against a target of 0.150",
             "  slice        exact  noisy  queries",
             "  scored           0      0        0",
             "  development      0      0        0",
@@ -2291,7 +2291,7 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
                 "  development        1      1      2        3",
                 "",
                 "Out of catalog, one train singleton each below 0.95 to every "
-                "entry, 0.150 of the set",
+                "entry, 0.143 of the set against a target of 0.150",
                 "  slice        exact  noisy  queries",
                 "  scored           1      2        3",
                 "  development      0      0        0",

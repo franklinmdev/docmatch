@@ -116,7 +116,7 @@ from docmatch.metrics.line_items import (
     labeled_line_items,
     score_line_items,
 )
-from docmatch.metrics.score import Score, ratio
+from docmatch.metrics.score import Score, ratio, share_of
 from docmatch.resolution import run as resolution
 from docmatch.resolution.catalog import (
     SPLIT as CATALOG_SPLIT,
@@ -128,6 +128,7 @@ from docmatch.resolution.queries import (
     GUARD,
     OUT_OF_CATALOG_SHARE,
     VARIANTS,
+    QuerySet,
     Slice,
 )
 from docmatch.resolution.store import (
@@ -1079,7 +1080,8 @@ def render_resolve(result: resolution.ResolveResult) -> str:
         ),
         "",
         f"Out of catalog, one train singleton each below {GUARD:.2f} to every "
-        f"entry, {OUT_OF_CATALOG_SHARE:.3f} of the set",
+        f"entry, {_rate(_out_of_catalog_share(queries))} of the set against a "
+        f"target of {OUT_OF_CATALOG_SHARE:.3f}",
         *_table(
             ("slice", "exact", "noisy", "queries"),
             [_out_of_catalog_row(each) for each in queries.slices],
@@ -1203,6 +1205,13 @@ def render_resolve(result: resolution.ResolveResult) -> str:
         ),
     ]
     return "\n".join([*lines, ""])
+
+
+def _out_of_catalog_share(queries: QuerySet) -> float | None:
+    """The share drawn, which falls short of the target when too few
+    singletons clear the guard."""
+    out = sum(len(each.out_of_catalog) for each in queries.slices)
+    return share_of(out, out + sum(len(each.queries) for each in queries.slices))
 
 
 def _out_of_catalog_row(one: Slice) -> tuple[str, str, str, str]:

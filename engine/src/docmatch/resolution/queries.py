@@ -85,7 +85,8 @@ comparing all 6,935 singletons to all 1,920 entries.
 A third of them stay exact and two thirds become noisy variants by the same
 noise model an entry's variants come from, so the exact weight applies to
 them as it does to the answerable queries; a noisy one must itself clear
-the guard, or it would be an entry respelled after all. Each stratum splits
+the guard, or it would be an entry respelled after all, and repeat no other
+out-of-catalog query's text. Each stratum splits
 one in five to development, rounded rather than truncated, which gives
 #119's 813 scored and 203 development, 271 and 68 of them exact. The draw
 comes last on the stream, after every entry's variants, so the answerable
@@ -283,10 +284,10 @@ def build_query_set(catalog: Catalog, seed: int = SEED) -> QuerySet:
             variants.append((entry, variant))
             own.append(variant)
         (development if entry.sku in development_skus else scored).extend(own)
-    unanswerable = _out_of_catalog(rng, noise, catalog)
+    out_of_catalog = _out_of_catalog(rng, noise, catalog)
     return QuerySet(
-        Slice("scored", tuple(scored), unanswerable["scored"]),
-        Slice("development", tuple(development), unanswerable["development"]),
+        Slice("scored", tuple(scored), out_of_catalog["scored"]),
+        Slice("development", tuple(development), out_of_catalog["development"]),
         _kind_shares(variants),
         _band_shares(variants),
     )
@@ -299,19 +300,28 @@ def _out_of_catalog(
     guard, a third exact and the rest noisy, each stratum split alike."""
     answerable = (1 + VARIANTS) * len(catalog.entries)
     wanted = round(OUT_OF_CATALOG_SHARE * answerable / (1 - OUT_OF_CATALOG_SHARE))
+    guard = _Guard(catalog)
     order = list(catalog.singletons)
     rng.shuffle(order)
     drawn: list[str] = []
     for text in order:
         if len(drawn) == wanted:
             break
-        if noise.clear(text):
+        if guard.clear(text):
             drawn.append(text)
     exact = round(len(drawn) / (1 + VARIANTS))
-    strata = (
-        [Query(text, None, "exact") for text in drawn[:exact]],
-        [noise.variant(text, None, noise.clear) for text in drawn[exact:]],
-    )
+    taken = set(drawn)
+
+    def fresh(text: str) -> bool:
+        """A noisy text clear of the guard and no other query's text."""
+        return text not in taken and guard.clear(text)
+
+    noisy = []
+    for text in drawn[exact:]:
+        variant = noise.variant(text, None, fresh)
+        taken.add(variant.text)
+        noisy.append(variant)
+    strata = ([Query(text, None, "exact") for text in drawn[:exact]], noisy)
     split: dict[SliceName, tuple[Query, ...]] = {"scored": (), "development": ()}
     for stratum in strata:
         cut = round(len(stratum) / DEVELOPMENT_ONE_IN)
@@ -337,6 +347,31 @@ def _band_shares(variants: Sequence[tuple[Entry, Query]]) -> tuple[Share, ...]:
     )
 
 
+class _Guard:
+    """The out-of-catalog guard over one catalog, its entries indexed by
+    length so a text is compared only with those whose length lets them
+    reach `GUARD`."""
+
+    def __init__(self, catalog: Catalog) -> None:
+        self.by_length: dict[int, list[str]] = {}
+        for each in catalog.entries:
+            self.by_length.setdefault(len(each.description), []).append(
+                each.description
+            )
+        self.lengths = sorted(self.by_length)
+
+    def clear(self, text: str) -> bool:
+        """Whether the text sits below `GUARD` to every entry."""
+        slack = int((1 - GUARD) * len(text) / GUARD) + 1
+        low = bisect.bisect_left(self.lengths, len(text) - slack)
+        high = bisect.bisect_right(self.lengths, len(text) + slack)
+        return not any(
+            at_least(text, description, GUARD)
+            for length in self.lengths[low:high]
+            for description in self.by_length[length]
+        )
+
+
 class _Noise:
     """The noise model over one catalog, drawing on one stream."""
 
@@ -353,24 +388,6 @@ class _Noise:
         """How often a variant whose text can drop digits does: the rate that
         lands the kind's share over every entry's variants on its target,
         applied alike to an out-of-catalog query's."""
-        self.by_length: dict[int, list[str]] = {}
-        for each in catalog.entries:
-            self.by_length.setdefault(len(each.description), []).append(
-                each.description
-            )
-        self.lengths = sorted(self.by_length)
-
-    def clear(self, text: str) -> bool:
-        """Whether the text sits below `GUARD` to every entry. Only entries
-        whose length lets them reach the guard are compared."""
-        slack = int((1 - GUARD) * len(text) / GUARD) + 1
-        low = bisect.bisect_left(self.lengths, len(text) - slack)
-        high = bisect.bisect_right(self.lengths, len(text) + slack)
-        return not any(
-            at_least(text, description, GUARD)
-            for length in self.lengths[low:high]
-            for description in self.by_length[length]
-        )
 
     def variant(
         self, text: str, sku: str | None, accepts: Callable[[str], bool] | None = None

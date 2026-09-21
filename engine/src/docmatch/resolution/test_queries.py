@@ -382,6 +382,7 @@ def test_the_targets_are_the_measured_shares() -> None:
 
 
 def out_of_catalog(query_set: QuerySet) -> list[Query]:
+    """Every out-of-catalog query, scored slice first."""
     return [each for one in query_set.slices for each in one.out_of_catalog]
 
 
@@ -411,8 +412,8 @@ def test_out_of_catalog_is_0_150_of_the_set_split_and_stratified_like_entries() 
             assert query.text in catalog.singletons
         else:
             assert query.kind in NOISE_KINDS
-    exact = [each.text for each in out_of_catalog(query_set) if each.kind == "exact"]
-    assert len(set(exact)) == len(exact), "one query per description"
+    texts = [each.text for each in out_of_catalog(query_set)]
+    assert len(set(texts)) == len(texts), "one query per description"
     assert (len(query_set.scored.queries), len(query_set.development.queries)) == (
         4608,
         1152,

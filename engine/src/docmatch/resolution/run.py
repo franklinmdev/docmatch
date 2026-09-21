@@ -16,12 +16,11 @@ no knob was set on, and the development slice waits for the depth sweep
 a time on one connection, after a discarded warmup pass over the same
 queries, as p50 and p95 over the scored pass, answerable and out of catalog
 alike, since a line pays the same whether it is in the catalog or not
-(#120, #132). For the trigram arm
-that is the SQL and the ordering; for the vector arm the embedding of the
-query too, and the warmup pass covers the model with it. The rerank joins
-the count with its arm. Model load, embedding the catalog and building the
-HNSW index are each timed once and reported beside the table, never per
-query. The models are loaded through the loader given, after the database
+(#120, #132). For the trigram arm that is the SQL and the ordering; for the
+vector arm the embedding of the query too, and the warmup pass covers the
+model with it. The rerank joins the count with its arm. Model load,
+embedding the catalog and building the HNSW index are each timed once and
+reported beside the table, never per query. The models are loaded through the loader given, after the database
 has answered with both extensions and only when there is something to
 resolve, so a database that does not answer, or one missing an extension,
 is reported without loading anything.
@@ -189,65 +188,63 @@ def _rate_over(kinds: Sequence[KindScore], at: str) -> float | None:
     return share_of(correct, sum(each.n for each in kinds))
 
 
-Scored = Sequence[tuple[QueryKind, float]]
+TopScores = Sequence[tuple[QueryKind, float]]
 """A population's top-1 scores, each beside its query's kind."""
 
 
-def separability(answerable: Scored, out_of_catalog: Scored) -> Separability:
+def separability(answerable: TopScores, out_of_catalog: TopScores) -> Separability:
     """The weighted share of out-of-catalog queries beyond each cut in `KEPT`
     of the answerable distribution, and the weighted AUROC."""
     if not answerable or not out_of_catalog:
         return Separability(tuple(None for _ in KEPT), None)
-    kept = sorted(
-        (score, weight)
-        for (_, score), weight in zip(answerable, _weights(answerable), strict=True)
-    )
-    beyond = list(zip(out_of_catalog, _weights(out_of_catalog), strict=True))
+    answerable_strata = _strata(answerable)
+    out_of_catalog_strata = _strata(out_of_catalog)
+    ascending = sorted(_weighted(answerable_strata))
     rejected = []
     for keep in KEPT:
-        cut = _cut(kept, keep)
-        rejected.append(sum(weight for (_, score), weight in beyond if score > cut))
+        cut = _cut(ascending, keep)
+        rejected.append(
+            sum(
+                weight
+                for score, weight in _weighted(out_of_catalog_strata)
+                if score > cut
+            )
+        )
     auroc = 0.0
-    for positives, positive_weight in _strata(answerable):
-        for negatives, negative_weight in _strata(out_of_catalog):
-            pairs = len(positives) * len(negatives)
-            u = mannwhitneyu(negatives, positives).statistic
-            auroc += positive_weight * negative_weight * float(u) / pairs
+    for answerable_scores, answerable_weight in answerable_strata:
+        for out_of_catalog_scores, out_of_catalog_weight in out_of_catalog_strata:
+            farther = mannwhitneyu(out_of_catalog_scores, answerable_scores).statistic
+            pairs = len(answerable_scores) * len(out_of_catalog_scores)
+            auroc += answerable_weight * out_of_catalog_weight * float(farther) / pairs
     return Separability(tuple(rejected), auroc)
 
 
-def _cut(kept: Sequence[tuple[float, float]], keep: float) -> float:
+def _cut(ascending: Sequence[tuple[float, float]], keep: float) -> float:
     """The smallest score at or under which `keep` of the weight lies; a
     hair of slack so a sum of weights that should reach it does."""
     total = 0.0
-    for score, weight in kept:
+    for score, weight in ascending:
         total += weight
         if total >= keep - 1e-9:
             return score
-    return kept[-1][0]
+    return ascending[-1][0]
 
 
-def _strata(scored: Scored) -> list[tuple[list[float], float]]:
+def _strata(scores: TopScores) -> list[tuple[list[float], float]]:
     """The exact and the noisy scores apart, each with its population's
-    weight: `w` and `1 - w` when both are present, all of it otherwise."""
-    exact = [score for kind, score in scored if kind == "exact"]
-    noisy = [score for kind, score in scored if kind != "exact"]
+    weight: `w` and `1 - w` when both are present, all of it otherwise, the
+    headline's rule."""
+    exact = [score for kind, score in scores if kind == "exact"]
+    noisy = [score for kind, score in scores if kind != "exact"]
     if exact and noisy:
         return [(exact, EXACT_WEIGHT), (noisy, 1 - EXACT_WEIGHT)]
     return [(exact or noisy, 1.0)]
 
 
-def _weights(scored: Scored) -> list[float]:
-    """Each query's weight, in order: its stratum's weight shared evenly over
-    the stratum."""
-    exact = sum(kind == "exact" for kind, _ in scored)
-    strata = _strata(scored)
-    if len(strata) == 1:
-        return [1 / len(scored)] * len(scored)
-    (_, exact_weight), (noisy, noisy_weight) = strata
+def _weighted(strata: Sequence[tuple[list[float], float]]) -> list[tuple[float, float]]:
+    """Every score with its own weight, its stratum's shared evenly."""
     return [
-        exact_weight / exact if kind == "exact" else noisy_weight / len(noisy)
-        for kind, _ in scored
+        (score, weight / len(scores)) for scores, weight in strata for score in scores
     ]
 
 
@@ -299,16 +296,16 @@ def resolve(
             loaded = load()
             embedder = loaded.embedder
             build = store.rebuild(catalog.entries, embedder)
-            unanswerable = query_set.scored.out_of_catalog
+            out_of_catalog = query_set.scored.out_of_catalog
             arms = (
                 measure(
-                    "trigram", lambda text: trigram(store, text), scored, unanswerable
+                    "trigram", lambda text: trigram(store, text), scored, out_of_catalog
                 ),
                 measure(
                     "vector",
                     lambda text: vector(store, embedder, text),
                     scored,
-                    unanswerable,
+                    out_of_catalog,
                 ),
             )
             return ResolveResult(
@@ -347,7 +344,9 @@ def measure(
         fetches.append(arm(query.text))
         latencies.append((time.perf_counter() - started) * 1000)
     answered = list(zip(queries, fetches[: len(queries)], strict=True))
-    unanswerable = list(zip(out_of_catalog, fetches[len(queries) :], strict=True))
+    out_of_catalog_answered = list(
+        zip(out_of_catalog, fetches[len(queries) :], strict=True)
+    )
     outcomes = Counter(fetched.over_fetch for _, fetched in answered)
     return ArmResult(
         name=name,
@@ -364,11 +363,11 @@ def measure(
             equal=outcomes["equal"],
             short=outcomes["short"],
         ),
-        separability=separability(_top1(answered), _top1(unanswerable)),
+        separability=separability(_top1(answered), _top1(out_of_catalog_answered)),
     )
 
 
-def _top1(answered: Sequence[tuple[Query, Fetched]]) -> Scored:
+def _top1(answered: Sequence[tuple[Query, Fetched]]) -> TopScores:
     """Each query's top-1 score beside its kind, farthest when unanswered."""
     return [
         (query.kind, fetched.answers[0].score if fetched.answers else math.inf)

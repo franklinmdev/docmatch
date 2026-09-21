@@ -277,6 +277,9 @@ def test_separability_with_no_out_of_catalog_query_has_no_numbers() -> None:
     result = separability(exact_at(0.1), [])
 
     assert result == Separability((None, None, None), None)
+
+
+def test_the_cuts_keep_the_shares_119_named() -> None:
     assert KEPT == (0.99, 0.95, 0.90)
 
 
