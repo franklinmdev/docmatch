@@ -186,6 +186,10 @@ _Avoid_: test set, holdout, evaluation set
 Per arm, how well its top-1 score tells an answerable query from an out-of-catalog one: the share of out-of-catalog queries rejected at each of three cuts that keep a fixed high share of the answerable, plus the AUROC, the area under the receiver operating characteristic curve, with answerable positive. Each cut anchors to the arm's own answerable quantile, which is what makes the arms' incommensurable scores comparable. It chooses no operating threshold, that point is Phase 4's, and it was printed beside the keep-or-drop verdict and never weighed in it.
 _Avoid_: threshold, cutoff, rejection rate
 
+**Operating threshold**:
+The hybrid arm's top-1 score below which a line resolves to no entry and carries no SKU. It is set on the development slice at the cut that keeps 0.95 of the answerable scores, lives in code, and every run prints the procedure's value beside it, the pairing-floor pattern. It only annotates: a line with no entry is shown to the reviewer with its score and is never a routing reason.
+_Avoid_: threshold (on its own), cutoff, confidence
+
 **Depth sweep**:
 The procedure that sets the depth constant on the development slice: d, the rows each hybrid half keeps before fusion, over its grid on the hybrid arm. The rule picks the smallest value whose development top-5 is within one point of the grid's best, ties to the cheaper. The constant lives in code, and every run repeats the sweep and prints the procedure's value beside the constant, the pairing-floor pattern. A second sweep, N, the pairs sent to the reranker, ran by the same rule until the reranker was dropped.
 _Avoid_: hyperparameter search, tuning, grid search
