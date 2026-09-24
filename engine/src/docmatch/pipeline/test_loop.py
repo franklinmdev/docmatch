@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from docmatch.extraction.conftest import write_pdf
 from docmatch.extraction.extractor import Extractor
-from docmatch.pipeline import api, loop
+from docmatch.pipeline import api, loop, replay
 from docmatch.pipeline.conftest import CATALOG, SAVED, case_text, ordered, pdf
 from docmatch.pipeline.labels import Labels
 from docmatch.pipeline.loop import (
@@ -166,7 +166,7 @@ def test_the_match_result_is_the_same_with_and_without_resolution(
         prepare(database_url, schema)
         with (
             open_schema(database_url, schema) as opened,
-            TestClient(api.create(database_url, schema)) as client,
+            TestClient(api.create(database_url, schema, replay.BACKEND)) as client,
         ):
             document = uploaded(client, invoice, case)
             settle(opened, replayed, resolve)

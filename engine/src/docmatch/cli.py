@@ -802,6 +802,7 @@ def _serve(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
     serve.serve(
         resolve_database_url(arguments.database_url),
         arguments.schema,
+        arguments.backend,
         extractor,
         load_catalog(dataset),
         load_models,

@@ -65,6 +65,7 @@ def resolving(database_url: str, schema: str, embedder: Embedder) -> Iterator[Re
 def serve(
     database_url: str,
     schema: str,
+    backend: str,
     extractor: Extractor,
     catalog: Catalog,
     load: ModelLoader,
@@ -85,7 +86,7 @@ def serve(
     )
     worker.start()
     try:
-        uvicorn.run(api.create(database_url, schema), host=HOST, port=port)
+        uvicorn.run(api.create(database_url, schema, backend), host=HOST, port=port)
     finally:
         stopped.set()
         worker.join()
