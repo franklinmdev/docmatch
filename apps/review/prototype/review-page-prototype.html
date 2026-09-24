@@ -1,0 +1,635 @@
+<title>docmatch review prototype</title>
+<!--
+PROTOTYPE, throwaway. Ticket #156: what the review page shows, and how a reviewer approves or corrects.
+Three structurally different layouts on one page, switched from the bottom bar (or the arrow keys):
+  A  Split: page on the left, reading and findings on the right.
+  B  Ledger: purchase order, receipt and invoice side by side per line; the page is a sheet.
+  C  Walk-through: one routing reason or finding at a time, then decide.
+  D  Chosen with the owner: B's ledger with A's page pinned beside it, confidence as a gray number,
+     a failed extraction approved or rejected on the page alone, a confirmation only when approving with something open.
+All data is invented. No DocILE content. State lives in memory; the gate and the match rerun in the page
+after every edit so the rerun of #150 point 5 can be felt. Accent hue is a placeholder, not a slot decision.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:oklch(0.99 0 0); --surface:oklch(0.965 0 0); --surface-2:oklch(0.94 0 0);
+  --border:oklch(0 0 0 / 0.10); --border-strong:oklch(0 0 0 / 0.18);
+  --text:oklch(0.18 0 0); --muted:oklch(0.48 0 0);
+  --primary:oklch(0.52 0.13 245); --primary-text:oklch(0.47 0.13 245); --on-primary:oklch(0.99 0 0);
+  --primary-wash:oklch(0.52 0.13 245 / 0.08);
+  --danger:oklch(0.55 0.19 27); --danger-wash:oklch(0.55 0.19 27 / 0.08);
+  --ok:oklch(0.52 0.13 150); --ok-wash:oklch(0.58 0.14 150 / 0.10);
+  --warn:oklch(0.55 0.13 75); --warn-wash:oklch(0.70 0.15 75 / 0.14);
+  --paper:oklch(0.995 0 0); --paper-ink:oklch(0.25 0 0);
+  --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+  --float:0 0 0 1px oklch(0 0 0 / 0.05),0 4px 12px oklch(0 0 0 / 0.08);
+  --sheet:0 0 0 1px oklch(0 0 0 / 0.05),0 16px 40px oklch(0 0 0 / 0.16);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --bg:oklch(0.15 0 0); --surface:oklch(0.20 0 0); --surface-2:oklch(0.24 0 0);
+  --border:oklch(1 0 0 / 0.10); --border-strong:oklch(1 0 0 / 0.18);
+  --text:oklch(0.93 0 0); --muted:oklch(0.68 0 0);
+  --primary:oklch(0.68 0.13 245); --primary-text:oklch(0.76 0.11 245); --on-primary:oklch(0.15 0 0);
+  --primary-wash:oklch(0.68 0.13 245 / 0.14);
+  --danger:oklch(0.70 0.17 27); --danger-wash:oklch(0.70 0.17 27 / 0.14);
+  --ok:oklch(0.72 0.14 150); --ok-wash:oklch(0.72 0.14 150 / 0.14);
+  --warn:oklch(0.80 0.14 75); --warn-wash:oklch(0.80 0.14 75 / 0.14);
+  --paper:oklch(0.93 0 0); --paper-ink:oklch(0.22 0 0);
+  --float:0 0 0 1px oklch(1 0 0 / 0.08); --sheet:0 0 0 1px oklch(1 0 0 / 0.08),0 16px 40px oklch(0 0 0 / 0.5);
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:oklch(0.15 0 0); --surface:oklch(0.20 0 0); --surface-2:oklch(0.24 0 0);
+  --border:oklch(1 0 0 / 0.10); --border-strong:oklch(1 0 0 / 0.18);
+  --text:oklch(0.93 0 0); --muted:oklch(0.68 0 0);
+  --primary:oklch(0.68 0.13 245); --primary-text:oklch(0.76 0.11 245); --on-primary:oklch(0.15 0 0);
+  --primary-wash:oklch(0.68 0.13 245 / 0.14);
+  --danger:oklch(0.70 0.17 27); --danger-wash:oklch(0.70 0.17 27 / 0.14);
+  --ok:oklch(0.72 0.14 150); --ok-wash:oklch(0.72 0.14 150 / 0.14);
+  --warn:oklch(0.80 0.14 75); --warn-wash:oklch(0.80 0.14 75 / 0.14);
+  --paper:oklch(0.93 0 0); --paper-ink:oklch(0.22 0 0);
+  --float:0 0 0 1px oklch(1 0 0 / 0.08); --sheet:0 0 0 1px oklch(1 0 0 / 0.08),0 16px 40px oklch(0 0 0 / 0.5);
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font:400 0.9375rem/1.5 var(--sans);padding-inline:16px;padding-block:0 96px}
+::selection{background:var(--primary-wash);color:var(--text)}
+h1,h2,h3{margin:0;text-wrap:balance}
+h1{font-size:1.25rem;font-weight:600;letter-spacing:-0.01em}
+h2{font-size:1.0625rem;font-weight:600}
+h3{font-size:0.9375rem;font-weight:600}
+p{margin:0}
+.mono,.num{font-family:var(--mono);font-size:0.8125rem;font-variant-numeric:tabular-nums}
+.num{text-align:right}
+.muted{color:var(--muted)}
+.label{font-size:0.75rem;font-weight:500;letter-spacing:0.04em;color:var(--muted)}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.btn{height:36px;padding:0 14px;border-radius:0.125rem;border:1px solid var(--border);background:var(--surface);font-size:0.75rem;font-weight:500;letter-spacing:0.04em;transition:background-color .12s ease-out,transform .12s ease-out}
+.btn:active{transform:scale(0.97)}
+@media (hover:hover){.btn:hover{background:var(--surface-2)}}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+@media (hover:hover){.btn.primary:hover{background:var(--primary-text)}}
+.btn.ghost{background:transparent;border-color:transparent}
+.btn.danger{color:var(--danger)}
+.btn.sm{height:28px;padding:0 10px}
+.btn[disabled]{opacity:.45;cursor:default}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:0.125rem;background:var(--surface);color:var(--muted);font:400 0.75rem/1.3 var(--mono);white-space:nowrap}
+.chip.hold{background:var(--danger-wash);color:var(--danger)}
+.chip.note{background:var(--warn-wash);color:var(--warn)}
+.chip.ok{background:var(--ok-wash);color:var(--ok)}
+.chip.info{background:var(--primary-wash);color:var(--primary-text)}
+.dot{width:8px;height:8px;border-radius:9999px;background:currentColor;display:inline-block}
+.panel{border:1px solid var(--border);border-radius:0.25rem;background:var(--bg)}
+.panel>header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border)}
+.panel>.body{padding:12px}
+input.cell{width:100%;min-width:0;height:30px;padding:0 6px;border:1px solid transparent;border-radius:0.25rem;background:transparent;font:400 0.8125rem var(--mono);font-variant-numeric:tabular-nums}
+input.cell.txt{font-family:var(--sans);font-size:0.875rem}
+input.cell.r{text-align:right}
+input.cell:hover{border-color:var(--border)}
+input.cell:focus{border-color:var(--primary);background:var(--bg);outline:2px solid var(--primary-wash);outline-offset:0}
+input.cell.edited{background:var(--primary-wash)}
+input.cell[readonly]{pointer-events:none}
+.was{display:block;font:400 0.6875rem/1.2 var(--mono);color:var(--muted);text-decoration:line-through;padding-left:7px}
+.was.r{text-align:right;padding-right:7px}
+.conf{font:400 0.6875rem var(--mono);color:var(--muted)}
+.conf.low{color:var(--warn)}
+table{border-collapse:collapse;width:100%}
+th{font-size:0.75rem;font-weight:500;letter-spacing:0.04em;color:var(--muted);text-align:left;padding:6px 6px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:3px 2px;border-bottom:1px solid var(--border);vertical-align:top}
+tr.removed td{opacity:.45}
+tr.removed input{text-decoration:line-through}
+.scroll-x{overflow-x:auto}
+
+/* top bar */
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding-block:14px;border-bottom:1px solid var(--border);margin-bottom:16px}
+.top .brand{font-weight:600;display:flex;align-items:baseline;gap:8px}
+.queue{display:flex;gap:4px;flex-wrap:wrap}
+.queue button{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:0.125rem;background:var(--bg);font-size:0.8125rem}
+.queue button[aria-current="true"]{border-color:var(--primary);background:var(--primary-wash)}
+.docmeta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-left:auto}
+
+/* paper, the fake scanned page */
+.paper{background:var(--paper);color:var(--paper-ink);border:1px solid var(--border-strong);border-radius:0.125rem;padding:22px 22px 28px;font:400 11px/1.45 "Courier New",var(--mono);aspect-ratio:1/1.3;max-width:100%;overflow:hidden;position:relative;filter:contrast(0.96)}
+.paper .pv{font:600 15px/1.2 Georgia,serif;letter-spacing:0.02em}
+.paper .row{display:flex;justify-content:space-between;gap:12px}
+.paper table{margin-top:14px}
+.paper th{color:var(--paper-ink);font:600 10px "Courier New",monospace;letter-spacing:0;border-bottom:1px solid oklch(0.2 0 0 / 0.5);padding:3px 4px}
+.paper td{border:0;padding:3px 4px;font-size:10.5px}
+.paper .t{text-align:right}
+.paper [data-k]{border-radius:2px;transition:background-color .15s ease-out,box-shadow .15s ease-out}
+.paper [data-k].hl{background:oklch(0.85 0.12 85 / 0.55);box-shadow:0 0 0 2px oklch(0.75 0.14 85 / 0.8)}
+.paper .stamp{position:absolute;right:18px;bottom:18px;font:600 10px var(--mono);opacity:.35}
+
+/* variant A */
+.a-grid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:20px;align-items:start}
+.a-doc{position:sticky;top:12px}
+.a-side{display:flex;flex-direction:column;gap:14px}
+.reasons{display:flex;flex-direction:column;gap:6px}
+.reason{display:flex;gap:10px;align-items:baseline;padding:8px 10px;border:1px solid var(--border);border-radius:0.25rem}
+.reason.cleared{opacity:.6}
+.reason .what{flex:1}
+.hdr-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px}
+.field{display:flex;flex-direction:column;gap:2px;padding:4px 0}
+.field .lbl{display:flex;justify-content:space-between;gap:6px}
+.find{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:8px 0;border-bottom:1px solid var(--border);cursor:default}
+.find:last-child{border-bottom:0}
+.find .expl{grid-column:2;font-size:0.8125rem;color:var(--muted)}
+.find[data-k]{cursor:pointer}
+@media (hover:hover){.find[data-k]:hover{background:var(--surface)}}
+.decide{position:sticky;bottom:64px;display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:0.25rem}
+.decide .summary{margin-right:auto;font-size:0.8125rem}
+
+/* variant B */
+.b-head{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;margin-bottom:14px}
+.b-reasons{display:flex;gap:6px;flex-wrap:wrap}
+.b-hdr{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0;border:1px solid var(--border);border-radius:0.25rem;margin-bottom:14px}
+.b-hdr .field{padding:8px 10px;border-right:1px solid var(--border)}
+.ledger th.grp{text-align:center;border-bottom:1px solid var(--border-strong)}
+.ledger td.side{background:var(--surface)}
+.ledger td.inv{background:var(--bg)}
+.ledger td.fnd{min-width:150px;padding:6px}
+.ledger tr.hot td{box-shadow:inset 0 1px 0 var(--danger-wash),inset 0 -1px 0 var(--danger-wash)}
+.ledger .gap{width:8px;padding:0;border:0}
+.sheet-scrim{position:fixed;inset:0;background:oklch(0 0 0 / 0.3);opacity:0;pointer-events:none;transition:opacity .25s ease-out;z-index:30}
+.sheet{position:fixed;top:0;right:0;bottom:0;width:min(520px,92vw);background:var(--bg);box-shadow:var(--sheet);border-radius:0.375rem 0 0 0.375rem;padding:16px;overflow:auto;transform:translateX(100%);transition:transform .28s cubic-bezier(0.22,1,0.36,1);z-index:31}
+.sheet-open .sheet{transform:none}
+.sheet-open .sheet-scrim{opacity:1;pointer-events:auto}
+
+/* variant D, the chosen one */
+.d-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,380px);gap:20px;align-items:start}
+.d-page{position:sticky;top:12px}
+.d-main .b-hdr{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+@media (max-width:1100px){.d-grid{grid-template-columns:minmax(0,1fr)}.d-page{position:static;order:-1}.d-page details:not([open]) .paper{display:none}}
+/* variant C */
+.c-grid{display:grid;grid-template-columns:240px minmax(0,1fr);gap:20px;align-items:start}
+.steps{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:0.25rem}
+.steps button{display:flex;gap:10px;align-items:flex-start;text-align:left;padding:10px 12px;border:0;border-bottom:1px solid var(--border);background:transparent}
+.steps button:last-child{border-bottom:0}
+.steps button[aria-current="true"]{background:var(--primary-wash)}
+.steps .tick{flex:none;width:16px;height:16px;margin-top:3px;border:1px solid var(--border-strong);border-radius:9999px;display:grid;place-items:center;font-size:10px}
+.steps .done .tick{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+.c-main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+.cmp{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:14px 0;align-items:baseline}
+.cmp .v{font:500 1rem var(--mono);font-variant-numeric:tabular-nums}
+.c-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.fixrow{display:flex;gap:8px;align-items:center;margin-top:12px}
+.fixrow input{height:36px;border:1px solid var(--border-strong);border-radius:0.25rem;padding:0 10px;background:var(--bg);font:400 1rem var(--mono);width:12ch}
+
+/* state panel and switcher */
+.state{margin-top:28px}
+.state summary{cursor:pointer;font-size:0.8125rem;color:var(--muted);padding:6px 0}
+.state-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.state pre{margin:0;font:400 0.75rem/1.45 var(--mono);white-space:pre-wrap;word-break:break-word;background:var(--surface);padding:10px;border-radius:0.25rem;max-height:320px;overflow:auto}
+.switcher{position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;align-items:center;gap:4px;padding:4px;background:oklch(0.2 0 0);color:oklch(0.97 0 0);border-radius:9999px;box-shadow:0 6px 20px oklch(0 0 0 / 0.3);z-index:40;font-size:0.8125rem;white-space:nowrap}
+.switcher button{width:36px;height:36px;border-radius:9999px;border:0;background:transparent;color:inherit;font-size:1rem}
+@media (hover:hover){.switcher button:hover{background:oklch(1 0 0 / 0.12)}}
+.switcher .lbl{padding:0 8px;min-width:190px;text-align:center}
+.switcher .tag{font-family:var(--mono);opacity:.6;margin-right:6px}
+.locked{padding:10px 12px;border-radius:0.25rem;background:var(--surface);font-size:0.875rem}
+.empty{border:1px dashed var(--border-strong);border-radius:0.25rem;padding:20px;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.stack{display:flex;flex-direction:column;gap:14px}
+.row-flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+@media (max-width:860px){
+  .a-grid,.c-grid,.c-main{grid-template-columns:minmax(0,1fr)}
+  .a-doc{position:static}
+  .a-doc details:not([open]) .paper{display:none}
+  .decide{bottom:64px}
+  .hdr-grid{grid-template-columns:minmax(0,1fr)}
+  .switcher .lbl{min-width:0}
+  .docmeta{margin-left:0}
+  .queue{flex-wrap:nowrap;overflow-x:auto;max-width:100%}
+  .queue button{flex:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .sheet{transition:none} .sheet-scrim{transition:none} .btn{transition:none}
+}
+</style>
+
+<div id="app"></div>
+<div id="sheetRoot"></div>
+
+<script>
+// ---------- fake data (invented; no DocILE content) ----------
+const OPERATING_THRESHOLD = 0.62; // placeholder for the hybrid's cut
+const TOL = {pct:0.01, cent:0.01};
+const CATALOG = {
+  "nitrile gloves m box 100":["SKU-3fa0c1d2",0.91],
+  "pipette tips 200ul racked":["SKU-8b21e4a7",0.88],
+  "centrifuge tubes 50ml sterile":["SKU-a07c9e13",0.84],
+  "ethanol 70 percent 4l":["SKU-5d6e02bf",0.79],
+  "lab coat disposable l":["SKU-c4419a80",0.58],
+  "microscope slides frosted 72":["SKU-1e9f7d33",0.93],
+  "cryo labels 1x0.5 roll":["SKU-6620b1ce",0.47],
+  "petri dish 90mm 500":["SKU-e3b8f010",0.86],
+};
+const HEADER_FIELDS=[
+  ["vendor","Vendor","txt"],["invoice_id","Invoice number","mono"],["order_id","PO number","mono"],
+  ["date_issue","Issue date","mono"],["date_due","Due date","mono"],["currency","Currency","mono"],
+  ["amount_tax","Tax","money"],["amount_total","Total","money"],
+];
+const CELLS=[["code","Code","mono",90],["desc","Description","txt",220],["qty","Qty","num",60],["unit","Unit","mono",60],["price","Unit price","money",90],["amount","Amount","money",96]];
+
+const DOCS=[
+ { id:"d1", file:"inv-harbor-2291.pdf", backend:"azure", hasConf:true, cost:0.0100, ms:7900,
+   page:{vendor:"Harbor Lab Supply",invoice_id:"HL-2291",order_id:"PO-40018",date_issue:"2026-08-04",date_due:"2026-09-03",currency:"USD",amount_tax:"61.62",amount_total:"838.02",
+     lines:[
+      {code:"GL-100M",desc:"Nitrile gloves M box 100",qty:"20",unit:"box",price:"9.40",amount:"188.00"},
+      {code:"PT-200",desc:"Pipette tips 200ul racked",qty:"12",unit:"rack",price:"14.20",amount:"170.40"},
+      {code:"CT-50S",desc:"Centrifuge tubes 50ml sterile",qty:"40",unit:"pk",price:"8.75",amount:"350.00"},
+      {code:"ET-70",desc:"Ethanol 70 percent 4L",qty:"2",unit:"jug",price:"34.00",amount:"68.00"},
+     ]},
+   conf:{vendor:.97,invoice_id:.94,order_id:.88,date_issue:.91,date_due:.72,currency:null,amount_tax:.86,amount_total:.93,
+     lines:[{code:.95,desc:.92,qty:.97,unit:.81,price:.96,amount:.97},{code:.93,desc:.90,qty:.96,unit:.64,price:.94,amount:.95},{code:.91,desc:.88,qty:.58,unit:.77,price:.95,amount:.96},{code:.96,desc:.85,qty:.98,unit:.70,price:.97,amount:.97}]},
+   misread:{}, // reading equals the page
+   po:{number:"PO-40018",tax:"61.62",lines:[
+      {id:"P1",code:"GL-100M",desc:"Nitrile gloves M box 100",qty:20,unit:"box",price:9.40},
+      {id:"P2",code:"PT-200",desc:"Pipette tips 200ul racked",qty:12,unit:"rack",price:12.80},
+      {id:"P3",code:"CT-50S",desc:"Centrifuge tubes 50ml sterile",qty:40,unit:"pk",price:8.75},
+      {id:"P4",code:"ET-70",desc:"Ethanol 70 percent 4L",qty:2,unit:"jug",price:34.00},
+      {id:"P5",code:"SL-72F",desc:"Microscope slides frosted 72",qty:5,unit:"box",price:11.30},
+   ]},
+   receipt:{P1:20,P2:12,P3:30,P4:2,P5:0},
+ },
+ { id:"d2", file:"inv-cedar-0457.pdf", backend:"openai", hasConf:false, cost:0.0034, ms:16700,
+   page:{vendor:"Cedar Scientific",invoice_id:"CS-0457",order_id:"",date_issue:"2026-08-11",date_due:"2026-09-10",currency:"USD",amount_tax:"47.25",amount_total:"717.25",
+     lines:[
+      {code:"",desc:"Lab coat disposable L",qty:"30",unit:"ea",price:"6.50",amount:"195.00"},
+      {code:"",desc:"Petri dish 90mm 500",qty:"2",unit:"case",price:"118.00",amount:"236.00"},
+      {code:"",desc:"Cryo labels 1x0.5 roll",qty:"6",unit:"roll",price:"39.83",amount:"239.00"},
+     ]},
+   conf:null,
+   misread:{amount_total:"771.25","lines.2.desc":"Cryo labels 1x05 roll"},
+   po:{number:"PO-40102",tax:"47.25",lines:[
+      {id:"P1",code:"",desc:"Lab coat disposable L",qty:30,unit:"ea",price:6.50},
+      {id:"P2",code:"",desc:"Petri dish 90mm 500",qty:2,unit:"case",price:118.00},
+      {id:"P3",code:"",desc:"Cryo labels 1x0.5 roll",qty:6,unit:"roll",price:39.83},
+   ]},
+   receipt:{P1:30,P2:2,P3:6},
+ },
+ { id:"d3", file:"inv-northfield-118.pdf", backend:"gemini", hasConf:false, cost:0.0061, ms:0, failed:"three attempts, each refused by the response schema",
+   page:{vendor:"Northfield Glass",invoice_id:"NG-118",order_id:"PO-40077",date_issue:"2026-08-19",date_due:"2026-09-18",currency:"USD",amount_tax:"12.60",amount_total:"192.60",
+     lines:[{code:"BK-250",desc:"Beaker borosilicate 250ml",qty:"12",unit:"ea",price:"15.00",amount:"180.00"}]},
+   conf:null, misread:{},
+   po:{number:"PO-40077",tax:"12.60",lines:[{id:"P1",code:"BK-250",desc:"Beaker borosilicate 250ml",qty:12,unit:"ea",price:15.00}]},
+   receipt:{P1:12},
+ },
+];
+
+// ---------- state ----------
+const S = { variant:"A", docId:"d1", docs:{}, focus:null, sheet:false, cStep:0, cAck:{}, cFixing:null };
+function initDoc(d){
+  let reading=null;
+  if(!d.failed){
+    const hdr={}; HEADER_FIELDS.forEach(([k])=>hdr[k]=d.misread[k]??d.page[k]);
+    const lines=d.page.lines.map((l,i)=>{const o={key:"r"+i,read:{},removed:false,added:false};CELLS.forEach(([c])=>o.read[c]=d.misread[`lines.${i}.${c}`]??l[c]);o.cur={...o.read};return o;});
+    reading={hdr, cur:{...hdr}, lines};
+  }
+  const t0="2026-09-24T10:02";
+  const st={reading, edits:[], transitions:[], status:"received", decided:null, settled:null, addSeq:0};
+  const path=d.failed?[["received","needs_review"]]:[["received","extracted"],["extracted","validated"],["validated","resolved"],["resolved","matched"]];
+  path.forEach(([f,t])=>st.transitions.push({from:f,to:t,actor:"system",at:t0}));
+  st.status=path[path.length-1][1];
+  S.docs[d.id]=st;
+  if(!d.failed){
+    const r=reasons(d,st);
+    const to=r.length?"needs_review":"approved";
+    st.transitions.push({from:"matched",to,actor:"system",at:t0,reasons:r.map(x=>x.kind)});
+    st.status=to;
+  } else {
+    st.transitions[0].reasons=["extraction failed"];
+  }
+}
+const doc=()=>DOCS.find(d=>d.id===S.docId);
+const st=()=>S.docs[S.docId];
+
+// ---------- deterministic reruns: gate, resolution, match ----------
+const n=v=>{const x=parseFloat(String(v??"").replace(/,/g,""));return Number.isFinite(x)?x:null};
+const money=v=>v==null?"":v.toFixed(2);
+const norm=s=>String(s??"").toLowerCase().replace(/[^a-z0-9. ]+/g," ").replace(/\s+/g," ").trim();
+function liveLines(s){return s.reading.lines.filter(l=>!l.removed)}
+function gate(s){
+  const h=s.reading.cur, rules=[];
+  const amts=liveLines(s).map(l=>n(l.cur.amount));
+  const tax=n(h.amount_tax), tot=n(h.amount_total);
+  if(amts.length && amts.every(a=>a!=null) && tax!=null && tot!=null){
+    const sum=amts.reduce((a,b)=>a+b,0)+tax;
+    rules.push({rule:"totals agree",ok:Math.abs(sum-tot)<=0.01,detail:`lines ${money(sum-tax)} + tax ${money(tax)} = ${money(sum)}, total read ${money(tot)}`,keys:["hdr.amount_total"]});
+  }
+  if(/^\d{4}-\d{2}-\d{2}$/.test(h.date_issue)&&/^\d{4}-\d{2}-\d{2}$/.test(h.date_due)){
+    rules.push({rule:"dates in order",ok:h.date_issue<=h.date_due,detail:`issued ${h.date_issue}, due ${h.date_due}`,keys:["hdr.date_due"]});
+  }
+  const result=!rules.length?"not checked":rules.some(r=>!r.ok)?"failed":"passed";
+  return {result,rules};
+}
+function resolveLine(l){
+  const hit=CATALOG[norm(l.cur.desc)];
+  if(hit) return hit[1]>=OPERATING_THRESHOLD?{sku:hit[0],score:hit[1]}:{sku:null,score:hit[1]};
+  return {sku:null,score:0.41};
+}
+function match(d,s){
+  const inv=liveLines(s), po=d.po.lines, used=new Set(), pairs=[], findings=[], extras=[];
+  inv.forEach(l=>{
+    let p=po.find(p=>!used.has(p.id)&&l.cur.code&&p.code===l.cur.code)||po.find(p=>!used.has(p.id)&&norm(p.desc)===norm(l.cur.desc));
+    if(!p){ // closeness fallback: shared words
+      let best=null,bs=0; po.forEach(p=>{if(used.has(p.id))return;const a=new Set(norm(p.desc).split(" ")),b=norm(l.cur.desc).split(" ");const sc=b.filter(w=>a.has(w)).length/Math.max(a.size,b.length);if(sc>bs){bs=sc;best=p}});
+      if(best&&bs>=0.4)p=best;
+    }
+    if(p){used.add(p.id);pairs.push({line:l,po:p})}else extras.push(l);
+  });
+  pairs.forEach(({line:l,po:p})=>{
+    const place=p.id, key=l.key, rq=d.receipt[p.id];
+    const up=n(l.cur.price), q=n(l.cur.qty);
+    if(norm(l.cur.unit)!==norm(p.unit)){findings.push({type:"unit variant",sev:"hold",place,key,cell:"unit",poV:p.unit,invV:l.cur.unit,expl:`invoice bills per ${l.cur.unit||"(empty)"}, the order is per ${p.unit}; compared exactly`});return;}
+    if(up!=null){const margin=Math.round(p.price*TOL.pct*100)/100+TOL.cent;if(up>p.price+margin+1e-9)findings.push({type:"price variance",sev:"hold",place,key,cell:"price",poV:money(p.price),invV:money(up),expl:`over by ${money(up-p.price)}; tolerance 1 percent plus a cent, margin ${money(margin)}`});}
+    if(q!=null&&rq!=null&&q>rq)findings.push({type:"short-ship",sev:"hold",place,key,cell:"qty",poV:String(p.qty),recV:String(rq),invV:String(q),expl:`billed ${q}, received ${rq}; compared exactly`});
+    if(rq!=null&&rq>p.qty)findings.push({type:"over-ship",sev:"hold",place,key,cell:"qty",poV:String(p.qty),recV:String(rq),invV:String(q),expl:`received ${rq}, ordered ${p.qty}; compared exactly`});
+  });
+  extras.forEach(l=>findings.push({type:"extra line",sev:"hold",place:"invoice "+l.key,key:l.key,cell:"desc",invV:l.cur.desc,expl:`no purchase-order line agrees above the pairing floor`}));
+  po.filter(p=>!used.has(p.id)).forEach(p=>findings.push({type:"missing line",sev:"note",place:p.id,key:null,poV:p.desc,expl:`${p.desc}, ordered ${p.qty}, not billed`}));
+  const tax=n(s.reading.cur.amount_tax), ptax=n(d.po.tax);
+  if(tax!=null&&ptax!=null){const margin=Math.round(ptax*TOL.pct*100)/100+TOL.cent;if(tax>ptax+margin+1e-9)findings.push({type:"tax mismatch",sev:"hold",place:"header",key:"hdr",cell:"amount_tax",poV:money(ptax),invV:money(tax),expl:`over by ${money(tax-ptax)}; margin ${money(margin)}`});}
+  const held=findings.some(f=>f.sev==="hold");
+  return {pairs,findings,held,verdict:held?"held":"approvable"};
+}
+function reasons(d,s){
+  if(d.failed) return [{kind:"extraction failed",detail:d.failed}];
+  const r=[], g=gate(s), m=match(d,s);
+  if(g.result==="failed") r.push({kind:"gate failed",detail:g.rules.filter(x=>!x.ok).map(x=>x.rule).join(", ")});
+  if(m.held) r.push({kind:"match held",detail:m.findings.filter(f=>f.sev==="hold").map(f=>f.type).join(", ")});
+  return r;
+}
+DOCS.forEach(initDoc);
+function routedWith(s){const t=s.transitions.find(t=>t.to==="needs_review");return t?t.reasons:[]}
+
+// ---------- edits and corrections ----------
+function now(){return new Date().toISOString().slice(0,16)}
+function setValue(target,val){
+  const s=st(); if(s.decided) return;
+  let from;
+  if(target.startsWith("hdr.")){const k=target.slice(4);from=s.reading.cur[k];if(from===val)return;s.reading.cur[k]=val;}
+  else{const [,key,c]=target.split(".");const l=s.reading.lines.find(x=>x.key===key);from=l.cur[c];if(from===val)return;l.cur[c]=val;}
+  s.edits.push({target,from,to:val,at:now()});
+  render();
+}
+function removeLine(key){const s=st();if(s.decided)return;const l=s.reading.lines.find(x=>x.key===key);l.removed=!l.removed;s.edits.push({target:`line.${key}`,from:l.removed?"present":"removed",to:l.removed?"removed":"present",at:now()});render();}
+function addLine(){const s=st();if(s.decided)return;const key="a"+(++s.addSeq);const o={key,read:null,removed:false,added:true,cur:{code:"",desc:"",qty:"",unit:"",price:"",amount:""}};s.reading.lines.push(o);s.edits.push({target:`line.${key}`,from:"absent",to:"present",at:now()});render();}
+function corrections(s){
+  if(!s.reading) return [];
+  const out=[];
+  HEADER_FIELDS.forEach(([k,label])=>{if(s.reading.cur[k]!==s.reading.hdr[k])out.push({what:label,read:s.reading.hdr[k],now:s.reading.cur[k]})});
+  s.reading.lines.forEach((l,i)=>{
+    if(l.added){if(!l.removed)out.push({what:`line added`,read:"",now:Object.values(l.cur).filter(Boolean).join(" · ")});return;}
+    if(l.removed){out.push({what:`line ${i+1} removed`,read:l.read.desc,now:""});return;}
+    CELLS.forEach(([c,label])=>{if(l.cur[c]!==l.read[c])out.push({what:`line ${i+1} ${label.toLowerCase()}`,read:l.read[c],now:l.cur[c]})});
+  });
+  return out;
+}
+function decide(to){
+  const s=st(); if(s.decided) return;
+  s.settled=corrections(s); s.decided=to;
+  s.transitions.push({from:"needs_review",to,actor:"reviewer",at:now()}); s.status=to;
+  render();
+}
+function undoDecision(){ // prototype only: lets the owner try both buttons
+  const s=st(); if(!s.decided) return; s.transitions.pop(); s.decided=null; s.settled=null; s.status="needs_review"; render();
+}
+
+// ---------- shared rendering helpers ----------
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function confTag(v){if(v==null)return"";return `<span class="conf" title="Backend confidence">${v.toFixed(2)}</span>`}
+function hdrConf(d,k){return d.hasConf&&d.conf?d.conf[k]:null}
+function cellConf(d,s,l,c){if(!d.hasConf||!d.conf||l.added)return null;const i=s.reading.lines.indexOf(l);return d.conf.lines[i]?.[c]??null}
+function inputFor(target,read,cur,kind,opts={}){
+  const s=st(); const edited=read!==cur && read!=null;
+  const cls=["cell",kind==="txt"?"txt":"",kind==="money"||kind==="num"?"r":"",edited?"edited":""].join(" ");
+  const ro=s.decided?"readonly":"";
+  return `<input class="${cls}" data-t="${target}" value="${esc(cur)}" ${ro} aria-label="${esc(opts.label||target)}" spellcheck="false" id="in-${S.variant}-${target.replace(/\./g,'-')}">${edited&&opts.showWas!==false?`<span class="was ${kind==="money"||kind==="num"?"r":""}">${esc(read||"(empty)")}</span>`:""}`;
+}
+function sevChip(f){return `<span class="chip ${f.sev}">${f.sev}</span>`}
+function reasonChips(list){return list.map(r=>`<span class="chip hold">${esc(r)}</span>`).join(" ")}
+function statusChip(s){
+  const map={needs_review:["hold","needs review"],approved:["ok","approved"],rejected:["hold","rejected"]};
+  const [c,l]=map[s.status]||["info",s.status];return `<span class="chip ${c}">${l}</span>`;
+}
+function paper(d,hl){
+  const p=d.page;
+  const k=x=>hl&&hl.includes(x)?"hl":"";
+  const rows=p.lines.map((l,i)=>`<tr data-k="r${i}" class="${k("r"+i)}"><td>${esc(l.code)}</td><td>${esc(l.desc)}</td><td class="t">${l.qty}</td><td>${esc(l.unit)}</td><td class="t">${l.price}</td><td class="t">${l.amount}</td></tr>`).join("");
+  return `<div class="paper" aria-label="Scanned page, invented example">
+    <div class="row"><div><div class="pv" data-k="hdr.vendor">${esc(p.vendor)}</div><div>12 Wharf Road, Unit 4</div></div>
+    <div style="text-align:right"><div style="font-weight:600">INVOICE</div><div data-k="hdr.invoice_id" class="${k("hdr.invoice_id")}">No. ${esc(p.invoice_id)}</div>${p.order_id?`<div>Your order ${esc(p.order_id)}</div>`:""}</div></div>
+    <div class="row" style="margin-top:12px"><div>Bill to: Research Stores, Bldg 2</div><div style="text-align:right"><div data-k="hdr.date_issue" class="${k("hdr.date_issue")}">Date ${p.date_issue}</div><div data-k="hdr.date_due" class="${k("hdr.date_due")}">Due ${p.date_due}</div></div></div>
+    <table><thead><tr><th>Item</th><th>Description</th><th class="t">Qty</th><th>UoM</th><th class="t">Price</th><th class="t">Amount</th></tr></thead><tbody>${rows}</tbody></table>
+    <div style="margin-top:14px;text-align:right"><div data-k="hdr.amount_tax" class="${k("hdr.amount_tax")}">Tax ${p.amount_tax}</div><div data-k="hdr.amount_total" class="${k("hdr.amount_total")}" style="font-weight:600">Total ${p.currency} ${p.amount_total}</div></div>
+    <div class="stamp">example, not a real document</div>
+  </div>`;
+}
+function hlFor(f,s){
+  if(!f) return [];
+  if(f.key==="hdr") return ["hdr."+f.cell];
+  if(!f.key) return [];
+  const l=s.reading.lines.find(x=>x.key===f.key); if(!l||l.added) return [];
+  return ["r"+s.reading.lines.indexOf(l)];
+}
+function decideBar(d,s,wrapClass="decide"){
+  const corr=corrections(s), m=match(d,s), g=gate(s), now=reasons(d,s).map(r=>r.kind);
+  if(s.decided) return `<div class="${wrapClass}"><span class="summary">${statusChip(s)} by reviewer, ${s.settled.length} correction${s.settled.length===1?"":"s"} settled</span><button class="btn ghost sm" data-act="undo">Undo (prototype only)</button></div>`;
+  if(S.confirm===S.docId) return `<div class="${wrapClass}">${confirmOr(d,s,"")}</div>`;
+  return `<div class="${wrapClass}"><span class="summary">${corr.length?`<span class="chip info">${corr.length} correction${corr.length===1?"":"s"}</span> `:""}After edits: gate <b>${g.result}</b>, match <b>${m.verdict}</b>${now.length?"":" · no reason left"}</span>
+    <button class="btn danger" data-act="reject">Reject</button><button class="btn primary" data-act="approve">Approve</button></div>`;
+}
+function openItems(d,s){
+  if(d.failed) return ["extraction failed"];
+  const out=[]; const g=gate(s), m=match(d,s);
+  g.rules.filter(r=>!r.ok).forEach(r=>out.push("gate: "+r.rule));
+  m.findings.filter(f=>f.sev==="hold").forEach(f=>out.push(f.type+" on "+f.place));
+  return out;
+}
+function confirmOr(d,s,normal){
+  if(S.confirm!==S.docId) return normal;
+  return `<span class="summary" style="margin-right:auto"><b>Approve with these still open?</b> ${openItems(d,s).map(x=>`<span class="chip hold">${esc(x)}</span>`).join(" ")}</span><span class="row-flex"><button class="btn" data-act="cancel">Keep reviewing</button><button class="btn primary" data-act="confirm">Approve anyway</button></span>`;
+}
+function failedView(d,s){
+  return `<div class="empty"><h2>No reading</h2><p class="muted">Extraction failed on the ${esc(d.backend)} row: ${esc(d.failed)}. Cost so far $${d.cost.toFixed(4)}.</p>
+  <p class="muted">Decide from the page alone. There is no reading to correct.</p>
+  ${s.decided?`<div class="row-flex">${statusChip(s)}<button class="btn ghost sm" data-act="undo">Undo (prototype only)</button></div>`:confirmOr(d,s,`<div class="row-flex"><button class="btn danger" data-act="reject">Reject</button><button class="btn primary" data-act="approve">Approve</button></div>`)}</div>`;
+}
+
+// ---------- Variant A: split ----------
+function renderA(d,s){
+  const hl=S.focus?hlFor(S.focus,s):[];
+  const left=`<div class="a-doc"><details open><summary class="label" style="cursor:pointer;padding:4px 0">Page 1 of 1</summary>${paper(d,hl)}</details></div>`;
+  if(!s.reading) return `<div class="a-grid">${left}<div class="a-side">${reasonsBlock(d,s)}${failedView(d,s)}</div></div>`;
+  const g=gate(s), m=match(d,s);
+  const findings=m.findings.map((f,i)=>`<div class="find" data-fi="${i}" ${f.key?`data-k="1"`:""}>${sevChip(f)}<div><b>${esc(f.type)}</b> <span class="mono muted">${esc(f.place)}</span></div><div class="expl">${esc(f.expl)}${f.poV!=null?` · PO <span class="mono">${esc(f.poV)}</span>`:""}${f.recV!=null?` · received <span class="mono">${esc(f.recV)}</span>`:""}${f.invV!=null?` · invoice <span class="mono">${esc(f.invV)}</span>`:""}</div></div>`).join("")||`<p class="muted">No findings. The match is approvable.</p>`;
+  const gateRows=g.rules.map(r=>`<div class="find">${r.ok?`<span class="chip ok">passed</span>`:`<span class="chip hold">failed</span>`}<div><b>${esc(r.rule)}</b></div><div class="expl mono">${esc(r.detail)}</div></div>`).join("")||`<p class="muted">Not checked: no rule had the values it needs.</p>`;
+  const hdr=HEADER_FIELDS.map(([k,label,kind])=>`<div class="field"><div class="lbl"><span class="label">${label}</span>${d.hasConf?confTag(hdrConf(d,k)):""}</div>${inputFor("hdr."+k,s.reading.hdr[k],s.reading.cur[k],kind,{label})}</div>`).join("");
+  return `<div class="a-grid">${left}<div class="a-side">
+    ${reasonsBlock(d,s)}
+    <section class="panel"><header><h2>Findings</h2><span class="chip ${m.held?"hold":"ok"}">${m.verdict}</span></header><div class="body">${findings}</div></section>
+    <section class="panel"><header><h2>Gate</h2><span class="chip ${g.result==="failed"?"hold":g.result==="passed"?"ok":""}">${g.result}</span></header><div class="body">${gateRows}</div></section>
+    <section class="panel"><header><h2>Reading</h2><span class="muted" style="font-size:0.8125rem">${d.hasConf?"Confidence from the backend beside each value":"This backend reports no confidence"}</span></header>
+      <div class="body"><div class="hdr-grid">${hdr}</div></div>
+      ${linesTable(d,s,{resolution:true})}
+    </section>
+    ${decideBar(d,s)}
+  </div></div>`;
+}
+function reasonsBlock(d,s){
+  const routed=routedWith(s), live=reasons(d,s).map(r=>r.kind);
+  const rows=routed.map(r=>{const still=live.includes(r)||r==="extraction failed";return `<div class="reason ${still?"":"cleared"}"><span class="chip ${still?"hold":"ok"}">${still?"open":"cleared"}</span><span class="what"><b>${esc(r)}</b></span></div>`}).join("");
+  return `<section class="stack"><div class="row-flex" style="justify-content:space-between"><h1>${esc(d.page.vendor)} <span class="mono muted">${esc(d.page.invoice_id)}</span></h1>${statusChip(s)}</div>
+    <div class="reasons"><span class="label">Routed to review because</span>${rows}</div></section>`;
+}
+function linesTable(d,s,{resolution}){
+  const rows=s.reading.lines.map((l,i)=>{
+    const res=l.removed?null:resolveLine(l);
+    const cells=CELLS.map(([c,label,kind,w])=>{const cf=cellConf(d,s,l,c);return `<td style="min-width:${w}px">${inputFor(`line.${l.key}.${c}`,l.read?.[c],l.cur[c],kind,{label:`Line ${i+1} ${label}`})}${cf!=null?`<div style="padding-left:7px">${confTag(cf)}</div>`:""}</td>`}).join("");
+    const resCell=resolution?`<td style="min-width:120px;padding:6px">${res?res.sku?`<span class="chip">${res.sku}</span> <span class="conf">${res.score.toFixed(2)}</span>`:`<span class="chip note">no entry</span> <span class="conf">${res.score.toFixed(2)}</span>`:""}</td>`:"";
+    return `<tr class="${l.removed?"removed":""}"><td class="mono muted" style="padding:8px 6px">${i+1}${l.added?"+":""}</td>${cells}${resCell}<td><button class="btn ghost sm" data-rm="${l.key}" ${s.decided?"disabled":""} aria-label="${l.removed?"Restore":"Remove"} line ${i+1}">${l.removed?"Restore":"Remove"}</button></td></tr>`;
+  }).join("");
+  return `<div class="scroll-x"><table><thead><tr><th>#</th>${CELLS.map(([,l,k])=>`<th class="${k==="money"||k==="num"?"num":""}">${l}</th>`).join("")}${resolution?`<th>Catalog</th>`:""}<th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div style="padding:8px 12px"><button class="btn sm" data-act="addline" ${s.decided?"disabled":""}>Add a line</button></div>`;
+}
+
+// ---------- Variant B: ledger ----------
+function renderB(d,s){
+  const head=`<div class="b-head"><div class="stack" style="gap:6px;flex:1;min-width:240px"><div class="row-flex"><h1>${esc(d.page.vendor)} <span class="mono muted">${esc(d.page.invoice_id)}</span></h1>${statusChip(s)}</div>
+    <div class="b-reasons"><span class="label" style="align-self:center">Routed because</span>${routedWith(s).map(r=>{const live=reasons(d,s).map(x=>x.kind);const still=live.includes(r)||r==="extraction failed";return `<span class="chip ${still?"hold":"ok"}">${esc(r)}${still?"":", cleared"}</span>`}).join("")}</div></div>
+    ${S.pinned?"":`<button class="btn" data-act="sheet">Show the page</button>`}</div>`;
+  const sh=S.pinned?"":sheet(d,s);
+  if(!s.reading) return head+failedView(d,s)+sh;
+  const g=gate(s), m=match(d,s);
+  const hdr=`<div class="b-hdr">${HEADER_FIELDS.map(([k,label,kind])=>`<div class="field"><div class="lbl"><span class="label">${label}</span>${d.hasConf?confTag(hdrConf(d,k)):""}</div>${inputFor("hdr."+k,s.reading.hdr[k],s.reading.cur[k],kind,{label})}${k==="amount_tax"?`<span class="conf">PO ${esc(d.po.tax)}</span>`:""}${k==="amount_total"?`<span class="conf" style="color:${g.result==="failed"?"var(--danger)":"var(--muted)"}">gate ${g.result}</span>`:""}</div>`).join("")}</div>`;
+  const byPo={}; m.pairs.forEach(p=>byPo[p.po.id]=p.line);
+  const fOf=(pred)=>m.findings.filter(pred);
+  const invCells=(l)=>["desc","qty","unit","price","amount"].map(c=>{const kind=CELLS.find(x=>x[0]===c)[2];const cf=l?cellConf(d,s,l,c):null;return `<td class="inv" style="min-width:${c==="desc"?200:70}px">${l?inputFor(`line.${l.key}.${c}`,l.read?.[c],l.cur[c],kind,{label:c})+(cf!=null?`<div style="padding-left:7px">${confTag(cf)}</div>`:""):`<span class="muted" style="padding:6px;display:block">not billed</span>`}</td>`}).join("");
+  const rows=d.po.lines.map(p=>{
+    const l=byPo[p.id], fs=fOf(f=>f.place===p.id), hot=fs.some(f=>f.sev==="hold");
+    const res=l?resolveLine(l):null;
+    return `<tr class="${hot?"hot":""}"><td class="side mono" style="padding:8px 6px">${p.id}</td><td class="side" style="padding:8px 6px;min-width:170px">${esc(p.desc)}</td><td class="side num" style="padding:8px 6px">${p.qty}</td><td class="side mono" style="padding:8px 6px">${esc(p.unit)}</td><td class="side num" style="padding:8px 6px">${money(p.price)}</td>
+      <td class="gap"></td><td class="side num" style="padding:8px 6px">${d.receipt[p.id]}</td><td class="gap"></td>${invCells(l)}
+      <td class="fnd">${fs.map(f=>`<div>${sevChip(f)} <b>${esc(f.type)}</b><div class="conf">${esc(f.expl)}</div></div>`).join("")||(l?`<span class="chip ok">agrees</span>`:"")}${res?`<div style="margin-top:4px">${res.sku?`<span class="chip">${res.sku}</span> <span class="conf">${res.score.toFixed(2)}</span>`:`<span class="chip note">no entry</span> <span class="conf">${res.score.toFixed(2)}</span>`}</div>`:""}</td>
+      <td>${l?`<button class="btn ghost sm" data-rm="${l.key}" ${s.decided?"disabled":""}>Remove</button>`:""}</td></tr>`;
+  }).join("");
+  const extra=m.findings.filter(f=>f.type==="extra line").map(f=>{const l=s.reading.lines.find(x=>x.key===f.key);return `<tr class="hot"><td class="side muted" colspan="5" style="padding:8px 6px">no purchase-order line</td><td class="gap"></td><td class="side"></td><td class="gap"></td>${invCells(l)}<td class="fnd">${sevChip(f)} <b>extra line</b><div class="conf">${esc(f.expl)}</div></td><td><button class="btn ghost sm" data-rm="${l.key}" ${s.decided?"disabled":""}>Remove</button></td></tr>`}).join("");
+  const removed=s.reading.lines.filter(l=>l.removed).map(l=>`<tr class="removed"><td colspan="8" class="muted" style="padding:8px 6px">removed from the reading</td>${invCells(l)}<td></td><td><button class="btn ghost sm" data-rm="${l.key}" ${s.decided?"disabled":""}>Restore</button></td></tr>`).join("");
+  const table=`<div class="scroll-x panel"><table class="ledger"><thead>
+    <tr><th class="grp" colspan="5">Purchase order ${esc(d.po.number)}</th><th class="gap"></th><th class="grp">Receipt</th><th class="gap"></th><th class="grp" colspan="5">Invoice, as read (editable)</th><th class="grp">Finding and catalog</th><th></th></tr>
+    <tr><th>Line</th><th>Description</th><th class="num">Qty</th><th>Unit</th><th class="num">Price</th><th class="gap"></th><th class="num">Qty</th><th class="gap"></th><th>Description</th><th class="num">Qty</th><th>Unit</th><th class="num">Price</th><th class="num">Amount</th><th></th><th></th></tr></thead>
+    <tbody>${rows}${extra}${removed}</tbody></table></div>
+    <div style="padding:8px 0"><button class="btn sm" data-act="addline" ${s.decided?"disabled":""}>Add a line to the reading</button></div>`;
+  return head+hdr+table+decideBar(d,s)+sh;
+}
+function renderD(d,s){
+  S.pinned=true; const inner=renderB(d,s); S.pinned=false;
+  return `<div class="d-grid"><div class="d-main">${inner}</div><aside class="d-page"><details open><summary class="label" style="cursor:pointer;padding:4px 0">Page 1 of 1</summary>${paper(d,[])}</details></aside></div>`;
+}
+function sheet(d,s){
+  return `<div class="sheet-scrim" data-act="sheet"></div><aside class="sheet" aria-label="Scanned page"><div class="row-flex" style="justify-content:space-between;margin-bottom:12px"><h2>Page 1 of 1</h2><button class="btn sm" data-act="sheet">Close</button></div>${paper(d,[])}</aside>`;
+}
+
+// ---------- Variant C: walk-through ----------
+function cItems(d,s){
+  if(!s.reading) return [{id:"fail",title:"Extraction failed",kind:"fail"},{id:"decide",title:"Decide",kind:"decide"}];
+  const g=gate(s), m=match(d,s), items=[];
+  g.rules.filter(r=>!r.ok).forEach(r=>items.push({id:"g:"+r.rule,title:"Gate: "+r.rule,kind:"gate",rule:r}));
+  // keep cleared gate items visible once they were there
+  (s._cSeen||[]).forEach(id=>{if(id.startsWith("g:")&&!items.find(x=>x.id===id))items.push({id,title:"Gate: "+id.slice(2),kind:"gate",cleared:true,rule:g.rules.find(r=>"g:"+r.rule===id)})});
+  m.findings.forEach(f=>items.push({id:`f:${f.type}:${f.place}`,title:`${f.type[0].toUpperCase()+f.type.slice(1)}, ${f.place}`,kind:"finding",f}));
+  (s._cSeen||[]).forEach(id=>{if(id.startsWith("f:")&&!items.find(x=>x.id===id)){const [,type,place]=id.split(":");items.push({id,title:`${type[0].toUpperCase()+type.slice(1)}, ${place}`,kind:"finding",cleared:true})}});
+  s._cSeen=[...new Set([...(s._cSeen||[]),...items.map(i=>i.id)])];
+  items.push({id:"decide",title:"Decide",kind:"decide"});
+  return items;
+}
+function renderC(d,s){
+  const items=cItems(d,s); if(S.cStep>=items.length)S.cStep=items.length-1;
+  const cur=items[S.cStep];
+  const steps=items.map((it,i)=>{const done=it.cleared||S.cAck[S.docId+it.id];return `<button data-step="${i}" aria-current="${i===S.cStep}" class="${done?"done":""}"><span class="tick">${done?"✓":""}</span><span><span style="display:block;font-weight:${i===S.cStep?600:400}">${esc(it.title)}</span>${it.cleared?`<span class="conf">cleared by a correction</span>`:it.f?`<span class="conf">${it.f.sev}</span>`:""}</span></button>`}).join("");
+  let main="", hl=[];
+  if(cur.kind==="fail") main=failedView(d,s);
+  else if(cur.kind==="gate"){
+    hl=["hdr.amount_total"];
+    main=`<h2>${esc(cur.title)}</h2>${cur.cleared?`<p class="chip ok" style="margin-top:8px">cleared by a correction</p>`:""}<p class="mono" style="margin-top:12px">${esc(cur.rule?.detail||"")}</p>
+      <p class="muted" style="margin-top:10px">The gate compares the reading with itself. Check the highlighted value on the page.</p>
+      ${fixControls(s,"hdr.amount_total","Total",s.reading.hdr.amount_total,s.reading.cur.amount_total)}
+      <div class="c-actions"><button class="btn" data-act="next" data-ack="${cur.id}">The reading is right</button></div>`;
+  } else if(cur.kind==="finding"){
+    const f=cur.f;
+    if(!f){main=`<h2>${esc(cur.title)}</h2><p class="chip ok" style="margin-top:8px">cleared by a correction</p><div class="c-actions"><button class="btn" data-act="next">Next</button></div>`;}
+    else{
+      hl=hlFor(f,s);
+      const tgt=f.key==="hdr"?`hdr.${f.cell}`:f.key?`line.${f.key}.${f.cell}`:null;
+      const l=f.key&&f.key!=="hdr"?s.reading.lines.find(x=>x.key===f.key):null;
+      main=`<div class="row-flex">${sevChip(f)}<h2>${esc(cur.title)}</h2></div>
+        <div class="cmp">${f.poV!=null?`<span class="label">Purchase order</span><span class="v">${esc(f.poV)}</span>`:""}${f.recV!=null?`<span class="label">Received</span><span class="v">${esc(f.recV)}</span>`:""}${f.invV!=null?`<span class="label">Invoice, as read</span><span class="v">${esc(f.invV)}</span>`:""}</div>
+        <p class="muted">${esc(f.expl)}</p>
+        ${tgt&&l?fixControls(s,tgt,"Invoice value",l.read?.[f.cell],l.cur[f.cell]):""}
+        <div class="c-actions"><button class="btn" data-act="next" data-ack="${cur.id}">${f.sev==="note"?"Noted":"The reading is right"}</button></div>
+        <p class="conf" style="margin-top:10px">A real discrepancy is decided at the end, not corrected. Only the invoice's reading can be fixed.</p>`;
+    }
+  } else {
+    const corr=corrections(s), g=s.reading?gate(s):null, m=s.reading?match(d,s):null;
+    main=`<h2>Decide</h2>
+      ${s.reading?`<p style="margin-top:10px">Now: gate <b>${g.result}</b>, match <b>${m.verdict}</b>. ${m.findings.filter(f=>f.sev==="hold").length} hold, ${m.findings.filter(f=>f.sev==="note").length} note.</p>`:""}
+      <h3 style="margin-top:16px">Corrections</h3>${corr.length?`<table style="margin-top:6px"><tbody>${corr.map(c=>`<tr><td style="padding:6px">${esc(c.what)}</td><td class="mono muted" style="padding:6px;text-decoration:line-through">${esc(c.read)}</td><td class="mono" style="padding:6px">${esc(c.now)}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">None. The reading stands as read.</p>`}
+      <div style="margin-top:16px">${s.reading?decideBar(d,s,"row-flex"):""}</div>`;
+  }
+  return `<div class="row-flex" style="justify-content:space-between;margin-bottom:14px"><h1>${esc(d.page.vendor)} <span class="mono muted">${esc(d.page.invoice_id)}</span></h1>${statusChip(s)}</div>
+    <div class="c-grid"><nav class="steps" aria-label="Review steps">${steps}</nav>
+    <div class="c-main"><section class="stack">${main}</section><div>${paper(d,hl)}</div></div></div>`;
+}
+function fixControls(s,target,label,read,cur){
+  if(s.decided) return "";
+  return `<div class="fixrow"><label class="label" for="fix-${target}">${esc(label)}</label><input id="fix-${target}" data-t="${target}" value="${esc(cur)}" spellcheck="false">${read!==cur?`<span class="conf">read <s>${esc(read)}</s></span>`:""}</div>`;
+}
+
+// ---------- page shell ----------
+const VARIANTS={D:["Chosen: ledger + page",renderD],A:["Split",renderA],B:["Ledger",renderB],C:["Walk-through",renderC]};
+S.variant="D";
+function render(){
+  const d=doc(), s=st();
+  const queue=DOCS.map(x=>{const xs=S.docs[x.id];return `<button data-doc="${x.id}" aria-current="${x.id===S.docId}"><span class="mono">${esc(x.page.invoice_id)}</span>${statusChip(xs)}</button>`}).join("");
+  const meta=`<span class="chip">${esc(d.file)}</span><span class="chip">${d.backend}</span><span class="chip">$${d.cost.toFixed(4)}</span>${d.ms?`<span class="chip">${(d.ms/1000).toFixed(1)} s</span>`:""}`;
+  const body=VARIANTS[S.variant][1](d,s);
+  const corr=corrections(s);
+  const state=`<details class="state"><summary>State (prototype): status, routing reasons, edits, corrections, transitions</summary><div class="state-grid">
+    <pre>${esc(JSON.stringify({status:s.status,routed_with:routedWith(s),reasons_now:reasons(d,s).map(r=>r.kind),gate:s.reading?gate(s).result:null,match:s.reading?match(d,s).verdict:null},null,2))}</pre>
+    <pre>${esc(JSON.stringify({corrections_net:corr,settled:s.settled},null,2))}</pre>
+    <pre>${esc(JSON.stringify({edits_append_only:s.edits},null,2))}</pre>
+    <pre>${esc(JSON.stringify({transitions:s.transitions},null,2))}</pre></div></details>`;
+  document.getElementById("app").innerHTML=`<div class="top"><div class="brand">docmatch <span class="label">review</span></div><div class="queue" aria-label="Documents in review">${queue}</div><div class="docmeta">${meta}</div></div>${body}${state}`;
+  document.getElementById("app").classList.toggle("sheet-open",S.sheet);
+  let sw=document.getElementById("sw"); if(!sw){sw=document.createElement("div");sw.id="sw";document.body.appendChild(sw);}
+  sw.innerHTML=`<div class="switcher" role="toolbar" aria-label="Prototype variant"><button data-sw="-1" aria-label="Previous variant">‹</button><span class="lbl"><span class="tag">${S.variant}</span>${VARIANTS[S.variant][0]}</span><button data-sw="1" aria-label="Next variant">›</button></div>`;
+}
+document.addEventListener("change",e=>{const t=e.target.closest("[data-t]");if(t)setValue(t.dataset.t,t.value.trim())});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&e.target.matches("[data-t]")){e.target.blur();return}
+  if(e.target.closest("input,textarea,[contenteditable]"))return;
+  if(e.key==="ArrowLeft"||e.key==="ArrowRight")cycle(e.key==="ArrowRight"?1:-1);
+});
+document.addEventListener("click",e=>{
+  const b=e.target.closest("[data-doc],[data-act],[data-rm],[data-sw],[data-step],.find[data-k]");if(!b)return;
+  if(b.dataset.doc){S.confirm=null;S.docId=b.dataset.doc;S.focus=null;S.cStep=0;S.sheet=false;render();return}
+  if(b.dataset.sw){cycle(+b.dataset.sw);return}
+  if(b.dataset.rm){removeLine(b.dataset.rm);return}
+  if(b.dataset.step){S.cStep=+b.dataset.step;render();return}
+  if(b.classList.contains("find")){const m=match(doc(),st());S.focus=m.findings[+b.dataset.fi];render();return}
+  const a=b.dataset.act;
+  if(a==="approve"){if(openItems(doc(),st()).length&&S.confirm!==S.docId){S.confirm=S.docId;render()}else decide("approved")}
+  else if(a==="confirm"){S.confirm=null;decide("approved")} else if(a==="cancel"){S.confirm=null;render()} else if(a==="reject")decide("rejected"); else if(a==="undo")undoDecision();
+  else if(a==="addline")addLine(); else if(a==="sheet"){S.sheet=!S.sheet;render()}
+  else if(a==="next"){if(b.dataset.ack)S.cAck[S.docId+b.dataset.ack]=true;S.cStep++;render()}
+});
+function cycle(k){const keys=Object.keys(VARIANTS);S.variant=keys[(keys.indexOf(S.variant)+k+keys.length)%keys.length];S.sheet=false;try{localStorage.setItem("proto-variant",S.variant)}catch(_){};render()}
+try{const v=localStorage.getItem("proto-variant");if(v&&VARIANTS[v])S.variant=v}catch(_){}
+const h=location.hash.slice(1).toUpperCase();if(VARIANTS[h])S.variant=h;
+render();
+</script>
