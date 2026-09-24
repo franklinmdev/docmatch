@@ -552,16 +552,15 @@ def decide(connection: Connection, document: int, to: Decision) -> None:
 def queue(connection: Connection, status: Status) -> list[dict[str, object]]:
     """The documents at one status, oldest first, each with its routing
     reasons: what the review page's strip lists."""
-    rows = connection.execute(
-        "SELECT id FROM documents WHERE status = %s ORDER BY id", (status,)
-    ).fetchall()
+    ids = [
+        _id(row[0])
+        for row in connection.execute(
+            "SELECT id FROM documents WHERE status = %s ORDER BY id", (status,)
+        ).fetchall()
+    ]
     return [
-        {
-            "id": _id(row[0]),
-            "status": status,
-            "routing_reasons": _reasons(connection, _id(row[0])),
-        }
-        for row in rows
+        {"id": each, "status": status, "routing_reasons": _reasons(connection, each)}
+        for each in ids
     ]
 
 

@@ -207,9 +207,9 @@ function Header({ view }: { view: View }) {
           </div>
         ))}
       </dl>
-      {gate && (
-        <ul className="flex flex-col gap-1 text-data" aria-label={`Gate ${gate.verdict}`}>
-          {gate.checks.map((check) => (
+      {(gate || tax.length > 0) && (
+        <ul className="flex flex-col gap-1 text-data">
+          {gate?.checks.map((check) => (
             <li key={check.rule} className="flex flex-wrap items-baseline gap-x-2">
               <span className={check.outcome === "failed" ? "text-hold" : check.outcome === "passed" ? "text-ok" : "text-muted"}>
                 Gate, {check.rule}: {check.outcome === "absent" ? "not checked" : check.outcome}
@@ -244,7 +244,7 @@ function Severity({ severity }: { severity: "hold" | "note" }) {
 }
 
 function Value({ read, ordered, align = "right" }: { read: Read | undefined; ordered?: string; align?: "left" | "right" }) {
-  const differs = ordered != null && ordered !== read?.text;
+  const unlike = ordered != null && ordered !== read?.text;
   return (
     <div className={align === "right" ? "text-right" : ""}>
       {read ? (
@@ -253,7 +253,7 @@ function Value({ read, ordered, align = "right" }: { read: Read | undefined; ord
           <Confidence value={read.confidence} />
         </span>
       ) : null}
-      {differs && <span className="block font-mono text-[0.6875rem] text-muted">PO {ordered}</span>}
+      {unlike && <span className="block font-mono text-[0.6875rem] text-muted">PO {ordered}</span>}
     </div>
   );
 }
@@ -456,7 +456,7 @@ function NoReading({ view }: { view: View }) {
     <section className="flex flex-col gap-2 rounded-sm border border-dashed border-line-strong p-5">
       <h2 className="text-title font-semibold">No reading</h2>
       <p className="max-w-prose text-muted">
-        The {view.backend} backend returned nothing usable, so there is no ledger and nothing to correct.
+        The loop saved no reading ({view.routing_reasons.join(", ")}), so there is no ledger and nothing to correct.
         {view.status === "needs_review" ? " Decide from the scanned page alone." : ""} Spent on reading it: ${view.cost}.
       </p>
     </section>

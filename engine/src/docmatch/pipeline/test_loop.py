@@ -15,16 +15,23 @@ import pytest
 from fastapi.testclient import TestClient
 
 from docmatch.extraction.conftest import write_pdf
-from docmatch.extraction.extractor import Extractor
 from docmatch.pipeline import api, loop, replay
-from docmatch.pipeline.conftest import CATALOG, SAVED, case_text, ordered, pdf
+from docmatch.pipeline.conftest import (
+    CATALOG,
+    SAVED,
+    case_text,
+    no_wait,
+    ordered,
+    pdf,
+    settle,
+    uploaded,
+)
 from docmatch.pipeline.labels import Labels
 from docmatch.pipeline.loop import (
     LAPSES,
     Claim,
     Refused,
     Resolve,
-    Status,
     advance,
     claim,
     claim_and_advance,
@@ -35,34 +42,6 @@ from docmatch.resolution.arms import RRF_K
 from docmatch.resolution.catalog import mint
 from docmatch.resolution.operating import Resolved
 from docmatch.resolution.store import connect
-
-
-def uploaded(client: TestClient, invoice: Path, case: str, expected: int = 201) -> int:
-    response = client.post(
-        "/documents",
-        files={"invoice": ("invoice.pdf", invoice.read_bytes(), "application/pdf")},
-        data={"case": case},
-    )
-    assert response.status_code == expected, response.text
-    document = response.json()["id"]
-    assert isinstance(document, int)
-    return document
-
-
-def settle(
-    connection: Connection, extractor: Extractor, resolver: Resolve
-) -> list[Status]:
-    """Every status the worker moves a document to until nothing is pending."""
-    moved = []
-    while (
-        status := claim_and_advance(connection, extractor, resolver, wait=_no_wait)
-    ) is not None:
-        moved.append(status)
-    return moved
-
-
-def _no_wait(_: float) -> None:
-    pass
 
 
 def test_a_clean_case_is_approved_by_the_system(
@@ -307,7 +286,7 @@ def test_a_second_transition_from_the_same_status_is_refused(
     document = uploaded(
         client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
     )
-    claim_and_advance(connection, replayed, resolver, wait=_no_wait)
+    claim_and_advance(connection, replayed, resolver, wait=no_wait)
     taken = claim(connection)
     assert taken is not None and taken.status == "extracted"
 
@@ -502,12 +481,12 @@ def test_the_third_lapse_at_one_status_routes_as_pipeline_failed(
     document = uploaded(
         client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
     )
-    claim_and_advance(connection, replayed, resolver, wait=_no_wait)
+    claim_and_advance(connection, replayed, resolver, wait=no_wait)
     for _ in range(LAPSES):
         lapse(connection)
 
     assert (
-        claim_and_advance(connection, replayed, resolver, wait=_no_wait)
+        claim_and_advance(connection, replayed, resolver, wait=no_wait)
         == "needs_review"
     )
     view = client.get(f"/documents/{document}").json()
@@ -547,7 +526,7 @@ def test_lapses_are_counted_per_status(
     for status in ("received", "extracted", "validated"):
         for _ in range(LAPSES - 1):
             assert lapse(connection).status == status
-        assert claim_and_advance(connection, replayed, resolver, wait=_no_wait) != (
+        assert claim_and_advance(connection, replayed, resolver, wait=no_wait) != (
             "needs_review"
         )
 
@@ -567,11 +546,11 @@ def test_a_pipeline_failure_carries_the_reasons_known_where_it_stands(
         client, pdf(tmp_path, "eval0003"), case_text(ordered("eval0003"))
     )
     for _ in range(3):
-        claim_and_advance(connection, replayed, resolver, wait=_no_wait)
+        claim_and_advance(connection, replayed, resolver, wait=no_wait)
     for _ in range(LAPSES):
         assert lapse(connection).status == "resolved"
 
-    claim_and_advance(connection, replayed, resolver, wait=_no_wait)
+    claim_and_advance(connection, replayed, resolver, wait=no_wait)
 
     view = client.get(f"/documents/{document}").json()
     assert view["status"] == "needs_review"
@@ -589,7 +568,7 @@ def test_a_lapsed_lease_is_retaken_from_the_last_checkpoint_and_written_once(
     document = uploaded(
         client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
     )
-    claim_and_advance(connection, replayed, resolver, wait=_no_wait)
+    claim_and_advance(connection, replayed, resolver, wait=no_wait)
     stale = lapse(connection)
 
     retaken = claim(connection)
@@ -623,11 +602,11 @@ def test_a_vendor_call_under_a_lapsed_lease_still_counts(
     )
     stale = lapse(connection)
     assert (
-        claim_and_advance(connection, replayed, resolver, wait=_no_wait) == "extracted"
+        claim_and_advance(connection, replayed, resolver, wait=no_wait) == "extracted"
     )
 
     with pytest.raises(Refused):
-        advance(connection, stale, replayed, resolver, wait=_no_wait)
+        advance(connection, stale, replayed, resolver, wait=no_wait)
 
     calls = client.get(f"/documents/{document}/trace").json()["vendor_calls"]
     assert len(calls) == 2
@@ -653,7 +632,7 @@ def test_a_document_stuck_at_received_carries_pipeline_failed_alone(
         lapse(connection)
 
     assert (
-        claim_and_advance(connection, replayed, resolver, wait=_no_wait)
+        claim_and_advance(connection, replayed, resolver, wait=no_wait)
         == "needs_review"
     )
     view = client.get(f"/documents/{document}").json()
@@ -675,7 +654,7 @@ def test_a_worker_that_raises_lets_its_lease_go_at_once(
     document = uploaded(
         client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
     )
-    claim_and_advance(connection, replayed, resolver, wait=_no_wait)
+    claim_and_advance(connection, replayed, resolver, wait=no_wait)
 
     def broken(_: object) -> None:
         raise RuntimeError("the gate broke")
@@ -683,10 +662,10 @@ def test_a_worker_that_raises_lets_its_lease_go_at_once(
     monkeypatch.setattr(loop, "gate", broken)
     for _ in range(LAPSES):
         with pytest.raises(RuntimeError, match="the gate broke"):
-            claim_and_advance(connection, replayed, resolver, wait=_no_wait)
+            claim_and_advance(connection, replayed, resolver, wait=no_wait)
 
     assert (
-        claim_and_advance(connection, replayed, resolver, wait=_no_wait)
+        claim_and_advance(connection, replayed, resolver, wait=no_wait)
         == "needs_review"
     )
     view = client.get(f"/documents/{document}").json()

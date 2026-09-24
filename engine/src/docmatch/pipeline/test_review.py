@@ -6,11 +6,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from docmatch.pipeline.conftest import case_text, ordered, pdf
+from docmatch.pipeline.conftest import case_text, ordered, pdf, settle, uploaded
 from docmatch.pipeline.loop import Resolve
 from docmatch.pipeline.replay import Replay
 from docmatch.pipeline.store import Connection
-from docmatch.pipeline.test_loop import settle, uploaded
 
 PNG = b"\x89PNG\r\n\x1a\n"
 

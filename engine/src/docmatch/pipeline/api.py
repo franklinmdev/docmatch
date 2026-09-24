@@ -104,7 +104,7 @@ def create(database_url: str, schema: str, backend: str) -> FastAPI:
     def decision(
         document: int, decided: Decided, connection: Connected
     ) -> dict[str, object]:
-        shown(connection, document)
+        _found(loop.view(connection, document))
         try:
             loop.decide(connection, document, decided.decision)
         except loop.Refused as refused:
