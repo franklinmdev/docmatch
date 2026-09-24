@@ -21,6 +21,7 @@ from docmatch.resolution.run import (
     Separability,
     headline,
     measure,
+    operating_threshold,
     resolve,
     separability,
     sweep,
@@ -324,6 +325,32 @@ def test_separability_with_no_out_of_catalog_query_has_no_numbers() -> None:
     result = separability(exact_at(0.1), [])
 
     assert result == Separability((None, None, None), None)
+
+
+def test_the_operating_threshold_is_the_score_keeping_0_95_of_answerable() -> None:
+    """Twenty exact queries, nineteen at the top fused score: the cut keeping
+    0.95 sits on them and leaves the twentieth below. With one more low, 0.90
+    lies at the top and the cut falls to the next score."""
+    top, low = 2 / 61, 1 / 61
+
+    assert operating_threshold(exact_at(*[-top] * 19, -low)) == top
+    assert operating_threshold(exact_at(*[-top] * 18, -low, -low)) == low
+
+
+def test_the_operating_threshold_weights_the_exact_queries_at_w() -> None:
+    """The exact query carries 2/3 and each noisy one 1/9, so 0.95 is only
+    reached at the lowest noisy score, whatever the exact one scores."""
+    answerable = exact_at(-0.0328) + [
+        ("extra words", -0.03),
+        ("punctuation", -0.02),
+        ("digits dropped", -0.01),
+    ]
+
+    assert operating_threshold(answerable) == 0.01
+
+
+def test_the_operating_threshold_is_none_with_no_development_query() -> None:
+    assert operating_threshold([]) is None
 
 
 def test_the_cuts_keep_the_shares_119_named() -> None:

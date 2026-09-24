@@ -900,7 +900,9 @@ exact weight; a reporting device, no threshold is chosen), per arm the rank-1
 tie rate, p50 and p95 latency per query and what the over-fetch check found,
 what was paid once outside the latency (model load, catalog embedding, HNSW
 build), the sweep's development top-5 at each d with the constant, the
-procedure's value and the rule, the same scored queries regrouped by kind with
+procedure's value and the rule, the operating threshold the loop runs at
+beside the procedure's value (the hybrid's top-1 score keeping 0.95 of the
+development slice's answerable queries), the same scored queries regrouped by kind with
 top-1 and top-5 per arm, a diagnostic that never reaches this README, and a
 provenance block read at run time: the Postgres, pgvector and pg_trgm versions
 and the `hnsw.ef_search` in effect from the server, the embedder and its
@@ -924,6 +926,11 @@ afterwards, at the same `--database-url` precedence as `resolve`. The backend
 is fixed at start: `gemini`, `azure` or `openai` read live, and `replay`
 answers from a saved run's readings, recognizing each uploaded PDF by the
 digest its manifest pins, at no cost beyond what the saved run already paid.
+Before serving, it loads the embedder and rebuilds the train catalog from
+`--data-dir` in a schema of its own beside the loop's, named with `_catalog`
+after it, and every line read is resolved against it: its top-1 SKU and score
+at or above the operating threshold, otherwise no entry with its score. It
+only annotates; it never sends a document to review.
 
 ```bash
 curl -F invoice=@invoice.pdf -F 'case=<case.json' localhost:8000/documents

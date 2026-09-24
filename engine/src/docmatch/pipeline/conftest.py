@@ -1,6 +1,8 @@
-"""Fixtures for the loop tests: a saved run to replay, cases, and a schema.
+"""Fixtures for the loop tests: a saved run to replay, cases, a schema, and a
+catalog to resolve against.
 
-No vendor is called and no model is loaded. The saved run is the committed
+No vendor is called and no model is loaded: the catalog is embedded by the
+resolution tests' fake. The saved run is the committed
 synthetic fixture's readings, each pinned to a PDF these helpers write, with
 a `run.json` saying what each document cost, so replay answers exactly as a
 backend once did. The database is the resolution tests' own, skipped when
@@ -20,15 +22,26 @@ from docmatch.evals.run import read_predictions
 from docmatch.extraction.conftest import write_pdf
 from docmatch.matching.records import ReceiptLine, ReceivingRecord, Record
 from docmatch.metrics.fields import FieldValues
+from docmatch.metrics.normalization import normalize_text
 from docmatch.pipeline import api, replay
 from docmatch.pipeline.case import Case, case_json
+from docmatch.pipeline.loop import Resolve
 from docmatch.pipeline.replay import Replay
+from docmatch.pipeline.serve import catalog_schema, resolving
 from docmatch.pipeline.store import Connection, drop_schema, open_schema, prepare
-from docmatch.resolution.store import connect
+from docmatch.resolution.catalog import Entry, mint
+from docmatch.resolution.conftest import BucketEmbedder
+from docmatch.resolution.store import Store, connect
 
 SYNTHETIC = Path(__file__).parents[3] / "tests" / "evals" / "synthetic"
 
 TEST_SCHEMA = "pipeline_test"
+
+CATALOG = tuple(
+    normalize_text(each) for each in ("Cable reel, 25 m", "Junction box", "Work gloves")
+)
+"""The test catalog: two of eval0005's three descriptions and one of
+eval0003's, so eval0005's `Delivery` line is out of catalog."""
 
 SAVED = {
     "eval0003": {"cost": "0.00211", "input_tokens": 1800, "output_tokens": 240},
@@ -140,3 +153,16 @@ def connection(database_url: str, schema: str) -> Iterator[Connection]:
 def client(database_url: str, schema: str) -> Iterator[TestClient]:
     with TestClient(api.create(database_url, schema)) as client:
         yield client
+
+
+@pytest.fixture
+def resolver(database_url: str) -> Iterator[Resolve]:
+    """What the worker resolves with, over `CATALOG` built afresh beside the
+    test schema, the fake embedding both sides."""
+    embedder = BucketEmbedder()
+    with connect(database_url) as opened:
+        Store(opened, catalog_schema(TEST_SCHEMA)).rebuild(
+            [Entry(mint(each), each) for each in CATALOG], embedder
+        )
+    with resolving(database_url, TEST_SCHEMA, embedder) as resolve:
+        yield resolve

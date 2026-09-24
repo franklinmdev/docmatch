@@ -71,6 +71,26 @@ jobs:
           -c "CREATE EXTENSION IF NOT EXISTS vector"
           -c "CREATE EXTENSION IF NOT EXISTS pg_trgm"
 
+      # The embedder, cached by its pinned revision so the weights download
+      # once and a bump of the pin misses on purpose. The key is read from
+      # the code, so it never drifts from it. Restored before the tests: every
+      # test drives the arms with a fake, but the loop's CLI test starts a
+      # real server, which loads the embedder at startup, as do the Resolve
+      # and Pipeline steps.
+      - name: Name the pinned embedder
+        id: embedder
+        run: >-
+          uv run python -c
+          "from docmatch.resolution.models import EMBEDDER_REVISION as r;
+          print(f'revision={r}')"
+          >> "$GITHUB_OUTPUT"
+
+      - name: Cache the embedder
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/huggingface/hub
+          key: huggingface-${{ steps.embedder.outputs.revision }}
+
       - name: Test
         run: uv run pytest
 
@@ -99,25 +119,6 @@ jobs:
           --data-dir engine/tests/evals/synthetic
           --manifest engine/tests/evals/synthetic/subset.json
           --run engine/tests/evals/synthetic
-
-      # The embedder the Resolve step loads, cached by its pinned revision so
-      # the weights download once and a bump of the pin misses on purpose.
-      # The key is read from the code, so it never drifts from it. Only the
-      # Resolve step touches the cache: every test drives the arms with a
-      # fake, so pytest loads no weights.
-      - name: Name the pinned embedder
-        id: embedder
-        run: >-
-          uv run python -c
-          "from docmatch.resolution.models import EMBEDDER_REVISION as r;
-          print(f'revision={r}')"
-          >> "$GITHUB_OUTPUT"
-
-      - name: Cache the embedder
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/huggingface/hub
-          key: huggingface-${{ steps.embedder.outputs.revision }}
 
       # The resolution report on the same fixture: the catalog its train
       # split yields, rebuilt in the service container and answered by every

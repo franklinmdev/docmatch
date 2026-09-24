@@ -41,8 +41,14 @@ document stands: a failed extraction, with extraction failed, and a document
 whose lease lapsed a third time at one status, with pipeline failed naming
 that status and every reason already known there (ADR 0002, #155).
 
-Resolution is a pass-through checkpoint for now: `resolved` saves no output
-and the match never reads one (#170 fills it in).
+Resolution
+----------
+
+At `validated` every line of the reading is resolved against the train
+catalog through the resolver the worker was given, the hybrid at the
+operating threshold, and saved at `resolved`: per line its top-1 SKU and
+score, or no entry with its score, or null for a line with no description.
+It annotates and never routes, and the match never reads it (#151).
 """
 
 import json
@@ -75,6 +81,7 @@ from docmatch.metrics.fields import Prediction
 from docmatch.pipeline.case import CASE, Case, case_json, digest
 from docmatch.pipeline.routing import P4, RoutingReason, route, standing
 from docmatch.pipeline.store import Connection
+from docmatch.resolution.operating import Resolved, description_of
 
 Status = Literal[
     "received",
@@ -123,6 +130,11 @@ the same three #35 gives a reading's attempts (ADR 0002)."""
 
 GATE = TypeAdapter(GateResult)
 MATCH = TypeAdapter(MatchResult)
+RESOLUTION = TypeAdapter(list[Resolved | None])
+
+Resolve = Callable[[str], Resolved]
+"""A line's description to its resolution: `serve` gives the hybrid over the
+catalog at the operating threshold, a test whatever it needs."""
 
 
 class Reading(BaseModel):
@@ -234,6 +246,7 @@ def advance(
     connection: Connection,
     taken: Claim,
     extractor: Extractor,
+    resolve: Resolve,
     *,
     wait: Callable[[float], None] = time.sleep,
 ) -> Status:
@@ -262,7 +275,19 @@ def advance(
             ("gate", GATE.dump_python(checked, mode="json")),
         )
     if taken.status == "validated":
-        return _commit(connection, taken, "resolved")
+        reading = _reading(connection, taken.document)
+        resolution = [
+            None
+            if (description := description_of(row)) is None
+            else resolve(description)
+            for row in reading.prediction.rows
+        ]
+        return _commit(
+            connection,
+            taken,
+            "resolved",
+            ("resolution", RESOLUTION.dump_python(resolution, mode="json")),
+        )
     if taken.status == "resolved":
         reading = _reading(connection, taken.document)
         case = _case(connection, taken.document)
@@ -290,6 +315,7 @@ def advance(
 def claim_and_advance(
     connection: Connection,
     extractor: Extractor,
+    resolve: Resolve,
     *,
     lease: timedelta = LEASE,
     wait: Callable[[float], None] = time.sleep,
@@ -303,7 +329,7 @@ def claim_and_advance(
     if taken is None:
         return None
     try:
-        return advance(connection, taken, extractor, wait=wait)
+        return advance(connection, taken, extractor, resolve, wait=wait)
     except Refused:
         raise
     except Exception:
@@ -424,7 +450,7 @@ def _reading_json(prediction: Prediction) -> str:
     return json.dumps(prediction.model_dump(exclude_defaults=True), ensure_ascii=False)
 
 
-Output = tuple[Literal["reading", "gate", "match"], object]
+Output = tuple[Literal["reading", "gate", "resolution", "match"], object]
 """The checkpoint column a transition saves, and what it saves there."""
 
 
@@ -494,24 +520,27 @@ def _id(value: object) -> int:
 
 
 def view(connection: Connection, document: int) -> dict[str, object] | None:
-    """One document as the API shows it: status, case, reading, gate, match
-    result with each finding explained, routing reasons, cost and latency;
+    """One document as the API shows it: status, case, reading, gate,
+    resolution per line, match result with each finding explained, routing
+    reasons, cost and latency;
     None when there is no such document. An output not yet saved is null."""
     row = connection.execute(
         """
-        SELECT status, "case", reading, gate, match FROM documents WHERE id = %s
+        SELECT status, "case", reading, gate, resolution, match
+        FROM documents WHERE id = %s
         """,
         (document,),
     ).fetchone()
     if row is None:
         return None
-    status, case, reading, checked, matched = row
+    status, case, reading, checked, resolution, matched = row
     return {
         "id": document,
         "status": status,
         "case": case,
         "reading": reading,
         "gate": None if checked is None else _gate_view(GATE.validate_python(checked)),
+        "resolution": resolution,
         "match": None
         if matched is None
         else _match_view(MATCH.validate_python(matched)),

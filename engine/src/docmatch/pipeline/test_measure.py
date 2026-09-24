@@ -24,6 +24,7 @@ from docmatch.pipeline.loop import PENDING
 from docmatch.pipeline.measure import LoopError, _Server
 from docmatch.pipeline.report import report
 from docmatch.pipeline.saved import read_loop_run
+from docmatch.pipeline.serve import catalog_schema
 from docmatch.pipeline.store import drop_schema
 from docmatch.resolution.catalog import ResolutionError
 from docmatch.resolution.store import connect, resolve_database_url
@@ -47,7 +48,9 @@ def database_url() -> str:
 def looped(
     database_url: str, tmp_path_factory: pytest.TempPathFactory
 ) -> Iterator[Path]:
-    """The fixture's loop run on replay, run once, its schema dropped after."""
+    """The fixture's loop run on replay, run once, its schemas dropped after.
+    The server loads the real embedder, the one test that does, since it is
+    a subprocess no fake reaches; CI restores it from cache before pytest."""
     out = tmp_path_factory.mktemp("loop")
     code = main(
         [
@@ -72,9 +75,11 @@ def looped(
     try:
         yield out
     finally:
+        schema = read_loop_run(out).database_schema
         with connect(database_url) as connection:
             connection.autocommit = True
-            drop_schema(connection, read_loop_run(out).database_schema)
+            drop_schema(connection, schema)
+            drop_schema(connection, catalog_schema(schema))
 
 
 def test_the_fixture_settles_each_case_as_pinned(looped: Path) -> None:
