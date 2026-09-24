@@ -51,8 +51,12 @@ _Avoid_: actual model, resolved model
 ### Measurement
 
 **Regression**:
-A change that lowers field F1 or line-item F1 on the fixed subset below the benchmark row of a backend it touches. A backend's first row has nothing to regress from.
+A change that lowers field F1 or line-item F1 on the fixed subset, for a backend it touches, below what that backend scored before the change. When the change only re-scores that backend's saved readings, any drop is a regression; when it re-extracts them, only a drop larger than the backend's extraction noise. A backend's first row has nothing to regress from.
 _Avoid_: degradation
+
+**Extraction noise**:
+The largest difference in a backend's field F1 or line-item F1 between any two runs that re-extract the same documents with nothing changed, measured on train documents and never on the fixed subset. Each backend has its own for each of the two metrics.
+_Avoid_: noise margin, variance
 
 **Cost per document**:
 What reading one document costs at the vendor's list price for the units the vendor reported processing, tokens or pages, including attempts that failed. When a vendor that charges per page accepts an attempt but reports no pages, the pages sent are counted. Free tiers and what was actually billed play no part, so every backend's cost means the same thing.
