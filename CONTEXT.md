@@ -211,3 +211,11 @@ _Avoid_: exception, flag, review trigger
 **Transition**:
 One change of a document's status, kept for good: from and to, when, who made it (the system or a reviewer), and the routing reasons when it goes to review. A document's transitions are its history; nothing rewrites them.
 _Avoid_: event, status change log, audit entry
+
+**Routing ladder**:
+The routing policies the Phase 4 number is drawn over, each adding one routing reason to the one before: none, then extraction failed, gate failed, a held match on price or tax, every held match, and on a backend that reports one, confidence below a fixed edge. Every step is read from the same saved run, so the ladder shows what each reason buys in review against what it stops from escaping. Every held match is the policy the loop runs; confidence only ever sends a document to review.
+_Avoid_: gate strictness, threshold sweep
+
+**Escaped document**:
+A document the system approves, with no reviewer, that should have been held: its injected discrepancy is of a type that holds, or a value the gate uses differs from its label. A missing line is a note, so approving one is no escape. Counted over the documents the system approves, by cause.
+_Avoid_: false negative, miss (on its own), leak
