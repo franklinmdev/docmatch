@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from docmatch.extraction.conftest import write_pdf
 from docmatch.pipeline.conftest import SAVED, case_text, ordered, pdf
 from docmatch.pipeline.loop import (
+    LAPSES,
     Claim,
     Refused,
     Status,
@@ -317,6 +318,7 @@ def lapse(connection: Connection) -> Claim:
 
 
 def moves(client: TestClient, document: int) -> list[tuple[str | None, str]]:
+    """A document's transitions, from and to."""
     transitions = client.get(f"/documents/{document}/trace").json()["transitions"]
     return [(each["from"], each["to"]) for each in transitions]
 
@@ -328,7 +330,7 @@ def test_the_third_lapse_at_one_status_routes_as_pipeline_failed(
         client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
     )
     claim_and_advance(connection, replayed, wait=_no_wait)
-    for _ in range(3):
+    for _ in range(LAPSES):
         lapse(connection)
 
     assert claim_and_advance(connection, replayed, wait=_no_wait) == "needs_review"
@@ -344,7 +346,7 @@ def test_two_lapses_leave_the_document_to_move_on(
     document = uploaded(
         client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
     )
-    for _ in range(2):
+    for _ in range(LAPSES - 1):
         lapse(connection)
 
     settle(connection, replayed)
@@ -359,7 +361,7 @@ def test_lapses_are_counted_per_status(
         client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
     )
     for status in ("received", "extracted", "validated"):
-        for _ in range(2):
+        for _ in range(LAPSES - 1):
             assert lapse(connection).status == status
         assert claim_and_advance(connection, replayed, wait=_no_wait) != (
             "needs_review"
@@ -378,7 +380,7 @@ def test_a_pipeline_failure_carries_the_reasons_known_where_it_stands(
     )
     for _ in range(3):
         claim_and_advance(connection, replayed, wait=_no_wait)
-    for _ in range(3):
+    for _ in range(LAPSES):
         assert lapse(connection).status == "resolved"
 
     claim_and_advance(connection, replayed, wait=_no_wait)
@@ -437,3 +439,19 @@ def test_a_vendor_call_under_a_lapsed_lease_still_counts(
         (None, "received"),
         ("received", "extracted"),
     ]
+
+
+def test_a_document_stuck_at_received_carries_pipeline_failed_alone(
+    client: TestClient, connection: Connection, replayed: Replay, tmp_path: Path
+) -> None:
+    document = uploaded(
+        client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
+    )
+    for _ in range(LAPSES):
+        lapse(connection)
+
+    assert claim_and_advance(connection, replayed, wait=_no_wait) == "needs_review"
+    view = client.get(f"/documents/{document}").json()
+    assert view["routing_reasons"] == ["pipeline failed at received"]
+    assert view["reading"] is None
+    assert client.get(f"/documents/{document}/trace").json()["vendor_calls"] == []

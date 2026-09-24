@@ -27,7 +27,8 @@ end-to-end latency starts where the upload was accepted.
 
 A lease that lapses without a commit means the worker holding it stopped;
 the next claim retakes the document from its last saved status and counts
-the lapse against that status.
+the lapse against that status. The claim that finds the third lapse is the
+one that routes the document.
 
 Routing
 -------
@@ -85,16 +86,36 @@ Status = Literal[
     "rejected",
 ]
 
-RoutingReason = Literal["extraction failed", "gate failed", "match held"]
-"""The reasons routing names alone; pipeline failed also names a status."""
+RoutingReason = Literal[
+    "extraction failed",
+    "gate failed",
+    "match held",
+    "pipeline failed at received",
+    "pipeline failed at extracted",
+    "pipeline failed at validated",
+    "pipeline failed at resolved",
+    "pipeline failed at matched",
+]
+"""Why a document goes to review. Pipeline failed names the status the loop
+kept failing to move the document past, one reason per pending status."""
+
+PIPELINE_FAILED: dict[Status, RoutingReason] = {
+    "received": "pipeline failed at received",
+    "extracted": "pipeline failed at extracted",
+    "validated": "pipeline failed at validated",
+    "resolved": "pipeline failed at resolved",
+    "matched": "pipeline failed at matched",
+}
+"""The pipeline-failed reason for each status a worker can claim at."""
 
 LEASE = timedelta(minutes=10)
 """How long a claim holds a document before another worker may retake it.
 
-Above the slowest bounded extraction (#35): every backend gives one attempt
-120 s before it gives up, so three attempts plus the 2 s and 4 s backoffs
-come to 366 s. Ten minutes leaves room for rendering and saving beside it,
-so a lapse means the worker stopped, never that a live reading was slow."""
+Above the slowest bounded extraction: #35's three attempts, each ended by
+its backend's 120 s timeout, plus the 2 s and 4 s backoffs come to 366 s.
+Azure's timeout bounds the polling, not the analyze request before it, so
+ten minutes leaves room for that, rendering and saving beside it: a lapse
+means the worker stopped, never that a live reading was slow."""
 
 LAPSES = 3
 """Lapsed leases at one status that route a document as pipeline failed:
@@ -195,13 +216,18 @@ def claim(connection: Connection, lease: timedelta = LEASE) -> Claim | None:
             LIMIT 1
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, status, taken_at, coalesce((lapses ->> status)::int, 0)
+        RETURNING id, status, taken_at, (lapses ->> status)::int
         """,
         (lease,),
     ).fetchone()
     if row is None:
         return None
-    return Claim(_id(row[0]), cast(Status, row[1]), cast(datetime, row[2]), _id(row[3]))
+    return Claim(
+        _id(row[0]),
+        cast(Status, row[1]),
+        cast(datetime, row[2]),
+        cast(int, row[3] or 0),
+    )
 
 
 def advance(
@@ -221,7 +247,7 @@ def advance(
             "needs_review",
             reasons=(
                 *_known(connection, taken.document),
-                pipeline_failed(taken.status),
+                PIPELINE_FAILED[taken.status],
             ),
         )
     if taken.status == "received":
@@ -279,22 +305,15 @@ def claim_and_advance(
 def route(
     checked: GateResult | None, result: MatchResult | None
 ) -> tuple[RoutingReason, ...]:
-    """Every reason a matched document goes to review, in the order a
-    reviewer reads them; none means the system approves it. An output not
-    yet saved gives no reason, so the same reading serves a document routed
-    before `matched`."""
+    """Every reason the saved gate and match results give, in the order a
+    reviewer reads them; an output not yet saved gives none. At `matched`,
+    none means the system approves the document."""
     reasons: list[RoutingReason] = []
     if checked is not None and checked.verdict == "failed":
         reasons.append("gate failed")
     if result is not None and result.verdict == "held":
         reasons.append("match held")
     return tuple(reasons)
-
-
-def pipeline_failed(status: Status) -> str:
-    """The routing reason of a document the loop kept failing to move past
-    `status`."""
-    return f"pipeline failed at {status}"
 
 
 def _known(connection: Connection, document: int) -> tuple[RoutingReason, ...]:
@@ -403,7 +422,7 @@ def _commit(
     to: Status,
     output: Output | None = None,
     *,
-    reasons: Sequence[str] = (),
+    reasons: Sequence[RoutingReason] = (),
 ) -> Status:
     """The new status, its output and its transition in one transaction, only
     if the document still stands where it was claimed; the lease is let go."""
