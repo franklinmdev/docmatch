@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from docmatch.extraction.conftest import write_pdf
-from docmatch.extraction.pages import LONG_EDGE, PageError, render, total_size
+from docmatch.extraction.pages import LONG_EDGE, PageError, count, render, total_size
 
 PNG = b"\x89PNG\r\n\x1a\n"
 
@@ -112,3 +112,14 @@ def test_names_the_page_it_could_not_render(tmp_path: Path) -> None:
 
     assert "page 2 of" in str(raised.value)
     assert "broken.pdf" in str(raised.value)
+
+
+def test_counts_the_pages_of_a_pdf_in_memory(tmp_path: Path) -> None:
+    assert count(write_pdf(tmp_path / "three.pdf", pages=3).read_bytes()) == 3
+
+
+def test_refuses_bytes_that_are_not_a_pdf() -> None:
+    with pytest.raises(PageError) as raised:
+        count(b"not a pdf")
+
+    assert "not a PDF" in str(raised.value)

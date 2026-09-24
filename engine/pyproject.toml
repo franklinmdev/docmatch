@@ -5,15 +5,18 @@ description = "Document reconciliation engine: extract, validate, match, review,
 requires-python = ">=3.12"
 dependencies = [
     "azure-ai-documentintelligence>=1.0.2,<2",
+    "fastapi>=0.141.1,<0.142",
     "google-genai>=2.23,<3",
     "openai>=3.14.1,<4",
     "pillow>=12.3,<13",
     "psycopg[binary]>=3.3.6,<4",
     "pydantic>=2.13.5,<3",
     "pypdfium2>=5.13,<6",
+    "python-multipart>=0.0.32,<0.1",
     "scipy>=1.18,<2",
     "sentence-transformers>=6.1.0,<7",
     "torch>=2.2,<3",
+    "uvicorn>=0.53.0,<0.54",
 ]
 
 [project.scripts]
