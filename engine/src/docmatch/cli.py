@@ -32,6 +32,10 @@ Postgres, sends every query through every arm and scores the answers, which
 is where the resolution table comes from. It prints and writes nothing to
 disk; the catalog is left in the database for inspection.
 
+`docmatch serve` runs the loop's HTTP API and its worker over one Postgres
+schema with one backend, `replay` answering from a saved run, which is how an
+uploaded case goes from received to approved or review.
+
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
 """
@@ -73,7 +77,7 @@ from docmatch.evals.run import (
     score_subset,
 )
 from docmatch.extraction import azure, backends, gemini, pages
-from docmatch.extraction.extractor import ExtractionError
+from docmatch.extraction.extractor import ExtractionError, Extractor
 from docmatch.extraction.run import (
     ATTEMPTS,
     COST_CAP,
@@ -117,6 +121,7 @@ from docmatch.metrics.line_items import (
     score_line_items,
 )
 from docmatch.metrics.score import Score, ratio, share_of
+from docmatch.pipeline import replay, serve
 from docmatch.resolution import run as resolution
 from docmatch.resolution import sweep as resolution_sweep
 from docmatch.resolution.catalog import (
@@ -437,6 +442,41 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"(default: ${DATABASE_URL_VARIABLE}, else {DEFAULT_DATABASE_URL})"
         ),
     )
+    serving = subcommands.add_parser(
+        "serve",
+        help="run the loop's API and worker over one schema with one backend",
+    )
+    serving.add_argument(
+        "--backend",
+        choices=(*backends.BACKENDS, replay.BACKEND),
+        required=True,
+        help="the backend every uploaded document is read with",
+    )
+    serving.add_argument(
+        "--run",
+        type=Path,
+        default=None,
+        help="the saved run `replay` answers from, a directory `extract --out` wrote",
+    )
+    serving.add_argument(
+        "--schema",
+        required=True,
+        help="the Postgres schema the loop keeps its documents in, kept afterwards",
+    )
+    serving.add_argument(
+        "--database-url",
+        default=None,
+        help=(
+            "the Postgres the schema lives in "
+            f"(default: ${DATABASE_URL_VARIABLE}, else {DEFAULT_DATABASE_URL})"
+        ),
+    )
+    serving.add_argument(
+        "--port",
+        type=positive,
+        default=serve.PORT,
+        help=f"the port on {serve.HOST} (default: {serve.PORT})",
+    )
     counts = subcommands.add_parser(
         "corpus",
         parents=[dataset],
@@ -573,6 +613,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     arguments = parser.parse_args(argv)
+    if arguments.command == "serve" and (
+        (arguments.backend == replay.BACKEND) != (arguments.run is not None)
+    ):
+        serving.error("--run is the saved run replay answers from, and only replay's")
     if arguments.command == "subset" and not arguments.write:
         drawing = [
             flag
@@ -606,6 +650,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
     A command reports a number even when the answer is bad news, so the exit
     code travels beside the report rather than in an exception.
     """
+    if arguments.command == "serve":
+        return _serve(arguments)
     dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
     if arguments.command == "subset":
         return _subset(arguments, dataset)
@@ -644,6 +690,22 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
         ),
         0,
     )
+
+
+def _serve(arguments: argparse.Namespace) -> tuple[str, int]:
+    """Serve until stopped; nothing to print after."""
+    extractor: Extractor = (
+        replay.load(arguments.run)
+        if arguments.backend == replay.BACKEND
+        else backends.extractor(arguments.backend, None, long_edge=pages.LONG_EDGE)
+    )
+    serve.serve(
+        resolve_database_url(arguments.database_url),
+        arguments.schema,
+        extractor,
+        port=arguments.port,
+    )
+    return "", 0
 
 
 def _subset(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:

@@ -912,6 +912,32 @@ printed. CI runs the command on the same synthetic corpus against a pinned
 latency means nothing, and the README's numbers come from the command run
 locally.
 
+### The loop
+
+```bash
+uv run docmatch serve --backend replay --run data/runs/gemini --schema loop_gemini
+```
+
+Runs the loop's HTTP API on `127.0.0.1:8000` (`--port` to move it) and its
+worker in one process, over one Postgres schema created when missing and kept
+afterwards, at the same `--database-url` precedence as `resolve`. The backend
+is fixed at start: `gemini`, `azure` or `openai` read live, and `replay`
+answers from a saved run's readings, recognizing each uploaded PDF by the
+digest its manifest pins, at no cost beyond what the saved run already paid.
+
+```bash
+curl -F invoice=@invoice.pdf -F 'case=<case.json' localhost:8000/documents
+curl localhost:8000/documents/1
+curl localhost:8000/documents/1/trace
+```
+
+An upload is the invoice PDF and its case, the purchase order and receiving
+record as JSON text. A real AP desk would find the purchase order in its ERP;
+here the upload carries it. The same content uploaded again returns the same
+document. Each document moves from received to approved or to review, one
+status at a time, and its trace lists every status change with when it was
+taken up and committed, and every vendor call with its units and cost.
+
 ### The baseline run
 
 `docmatch eval` scores a predictions file. `docmatch extract` is what produces

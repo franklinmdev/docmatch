@@ -55,6 +55,7 @@ import json
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -66,6 +67,7 @@ from docmatch.extraction.extractor import (
     Confidence,
     CurrencySymbols,
     Document,
+    Extraction,
     ExtractionError,
     Extractor,
     Usage,
@@ -221,7 +223,7 @@ def _document(
     cost_cap: Decimal,
     wait: Callable[[float], None],
 ) -> DocumentRun:
-    """One document, retried until it is read, given up on, or too expensive."""
+    """One document of the subset: its annotation's page count, then its reading."""
     try:
         pages = dataset.annotation(document_id).metadata.page_count
     except DatasetNotFoundError:
@@ -236,7 +238,40 @@ def _document(
             document_id, pages=0, attempts=0, latency=0.0, failure=str(error)
         )
     document = Document(document_id, public.path(copies, document_id), pages)
+    return read_document(
+        extractor, document, attempts=attempts, cost_cap=cost_cap, wait=wait
+    )
 
+
+@dataclass(frozen=True)
+class Attempt:
+    """One request sent for one document, as it came back.
+
+    What the loop keeps as a vendor call, one per attempt, the moment the
+    attempt returns and whether or not its reading is ever saved.
+    """
+
+    number: int
+    """1 for the first attempt."""
+    started: datetime
+    ended: datetime
+    outcome: Extraction | ExtractionError
+
+
+def read_document(
+    extractor: Extractor,
+    document: Document,
+    *,
+    attempts: int = ATTEMPTS,
+    cost_cap: Decimal = COST_CAP,
+    wait: Callable[[float], None] = time.sleep,
+    attempted: Callable[[Attempt], None] = lambda _: None,
+) -> DocumentRun:
+    """One document, retried until it is read, given up on, or too expensive.
+
+    `attempted` hears of every attempt as it returns, before the next is
+    sent, so a caller can keep each one even when the document is never read.
+    """
     spent = Decimal(0)
     used = NOTHING
     elapsed = 0.0
@@ -250,21 +285,24 @@ def _document(
             wait(BACKOFF * 2 ** (attempt - 2))
         made = attempt
         started = time.perf_counter()
+        started_at = datetime.now(UTC)
         try:
             read = extractor.extract(document)
         except ExtractionError as error:
             elapsed += time.perf_counter() - started
+            attempted(Attempt(attempt, started_at, datetime.now(UTC), error))
             spent += error.cost
             used = used + error.usage
             last = str(error)
             if not error.retryable:
                 break
             continue
+        attempted(Attempt(attempt, started_at, datetime.now(UTC), read))
         spent += read.cost
         used = used + read.usage
         return DocumentRun(
-            document_id=document_id,
-            pages=pages,
+            document_id=document.document_id,
+            pages=document.pages,
             attempts=attempt,
             usage=used,
             cost=spent,
@@ -276,8 +314,8 @@ def _document(
             currency_symbols=read.currency_symbols,
         )
     return _failed(
-        document_id,
-        pages=pages,
+        document.document_id,
+        pages=document.pages,
         attempts=made,
         latency=elapsed,
         failure=last,

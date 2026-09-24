@@ -98,6 +98,23 @@ def render(pdf: Path, long_edge: int = LONG_EDGE) -> tuple[PageImage, ...]:
     return tuple(pages)
 
 
+def count(pdf: bytes) -> int:
+    """How many pages a PDF held in memory has, or a `PageError` when pdfium
+    cannot open it or it has none, which is how an upload is refused before
+    it enters the loop."""
+    try:
+        document = pdfium.PdfDocument(pdf)
+    except Exception as error:  # pdfium raises its own types for a bad file
+        raise PageError(f"not a PDF pdfium can open: {error}") from error
+    try:
+        pages = len(document)
+    finally:
+        document.close()
+    if pages < 1:
+        raise PageError("the PDF has no pages")
+    return pages
+
+
 def _page(page: "pdfium.PdfPage", number: int, long_edge: int) -> PageImage:
     width, height = page.get_size()
     if width <= 0 or height <= 0:

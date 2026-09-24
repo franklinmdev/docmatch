@@ -25,9 +25,11 @@ from docmatch.extraction.extractor import (
 from docmatch.extraction.run import (
     ATTEMPTS,
     COST_CAP,
+    Attempt,
     DocumentRun,
     Run,
     extract_subset,
+    read_document,
     write_confidence,
     write_currency_symbols,
     write_manifest,
@@ -633,3 +635,23 @@ def test_a_backend_with_no_confidence_writes_empty_files(
 
     assert json.loads((tmp_path / "confidence.json").read_text()) == {}
     assert json.loads((tmp_path / "currency_symbols.json").read_text()) == {}
+
+
+def test_hears_of_every_attempt_as_it_returns(tmp_path: Path) -> None:
+    """Each attempt reaches the caller, the failed one with its error and
+    what it was billed, so the loop can keep both as vendor calls."""
+    failure = ExtractionError("answer did not fit", Decimal("0.002"))
+    extractor = FakeExtractor([failure, READING])
+    heard: list[Attempt] = []
+
+    read_document(
+        extractor,
+        Document("doc", write_pdf(tmp_path / "doc.pdf"), 1),
+        wait=lambda _: None,
+        attempted=heard.append,
+    )
+
+    assert [each.number for each in heard] == [1, 2]
+    assert heard[0].outcome is failure
+    assert isinstance(heard[1].outcome, Extraction)
+    assert all(each.started <= each.ended for each in heard)
