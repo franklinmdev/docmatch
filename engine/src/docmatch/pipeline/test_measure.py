@@ -1,5 +1,6 @@
-"""The CLI on the synthetic fixture: `docmatch loop --backend replay` against a
-real Postgres, then `docmatch pipeline --run` on what it saved.
+"""The CLI on the synthetic fixture: `docmatch loop` on replay and on the
+labels against a real Postgres, then `docmatch pipeline --run` on what it
+saved.
 
 Skipped without a database. It pins what is deterministic by exact equality,
 each case's final status, routing reasons and cost per document, and of
@@ -151,8 +152,6 @@ def test_the_labels_run_settles_every_case_with_its_labels_as_the_reading(
     }
     with open_schema(database_url, run.database_schema) as connection:
         for each in run.cases:
-            assert each.status in ("approved", "needs_review")
-            assert "extraction failed" not in each.routing_reasons
             assert (each.vendor_calls, each.misread) == ((), ())
             found = connection.execute(
                 "SELECT reading FROM documents WHERE id = %s", (each.id,)
@@ -163,6 +162,35 @@ def test_the_labels_run_settles_every_case_with_its_labels_as_the_reading(
             assert reading.header == labeled_fields(annotation)
             assert reading.rows == labeled_line_items(annotation)
     assert report(run).cost_per_document == Decimal(0)
+
+
+def test_the_labels_run_settles_each_case_and_its_ladder_as_pinned(
+    looped_on_labels: Path,
+) -> None:
+    """eval0003's labeled totals disagree (412.50 against 400.00 due), so the
+    gate fails on the labels too; eval0004's missing line is a note, so it
+    approves and never escapes; eval0006's short-ship holds from P4 up. No
+    P5, as labels carry no confidence."""
+    run = read_loop_run(looped_on_labels)
+
+    assert {
+        each.document_id: (each.status, each.routing_reasons) for each in run.cases
+    } == {
+        "eval0004": ("approved", ()),
+        "eval0006": ("needs_review", ("match held",)),
+        "eval0003": ("needs_review", ("gate failed",)),
+        "eval0005": ("approved", ()),
+    }
+    assert [
+        (each.policy.name, each.reviewed, each.approved, each.escaped)
+        for each in report(run).ladder
+    ] == [
+        ("P0", 0, 4, 1),
+        ("P1", 0, 4, 1),
+        ("P2", 1, 3, 1),
+        ("P3", 1, 3, 1),
+        ("P4", 2, 2, 0),
+    ]
 
 
 def test_the_loop_run_keeps_each_cases_truth(looped: Path) -> None:
