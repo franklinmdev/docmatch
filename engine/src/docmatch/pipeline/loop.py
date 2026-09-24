@@ -330,13 +330,15 @@ def _known(connection: Connection, document: int) -> tuple[RoutingReason, ...]:
     ).fetchone()
     assert row is not None
     checked, matched = row
-    return route(
+    reasons = route(
         standing(
             None if checked is None else GATE.validate_python(checked),
             None if matched is None else MATCH.validate_python(matched),
         ),
         P4,
     )
+    # P4 has no confidence edge, so every reason it gives is the loop's own.
+    return cast(tuple[RoutingReason, ...], reasons)
 
 
 def _extract(

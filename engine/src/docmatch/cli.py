@@ -129,6 +129,7 @@ from docmatch.pipeline import replay, serve
 from docmatch.pipeline.ladder import Rung
 from docmatch.pipeline.measure import RUNS, LoopError, measure
 from docmatch.pipeline.report import LABELS, Report, Spread, report
+from docmatch.pipeline.routing import P0
 from docmatch.pipeline.saved import LOOP_FILE, LoopRun, LoopRunError, read_loop_run
 from docmatch.resolution import run as resolution
 from docmatch.resolution import sweep as resolution_sweep
@@ -841,8 +842,8 @@ def render_loop(where: Path, run: LoopRun) -> str:
 def render_pipeline(reports: Sequence[tuple[Path, Report]]) -> str:
     """Each loop run on its own, never mixed: latency end to end and per
     status with wait and work apart, cost per document per status, and the
-    routing ladder. The labels control closes the report, and when no labels
-    run was given a line says so and how to make one."""
+    routing ladder. A labels run is the labels control and prints like any
+    other; when none was given, the report ends saying so and how to make one."""
     lines: list[str] = []
     for where, reported in reports:
         run, end_to_end = reported.run, reported.end_to_end_spread
@@ -906,7 +907,7 @@ def _ladder(rungs: Sequence[Rung]) -> list[str]:
             ),
             [
                 (
-                    f"{each.policy.name} {'' if each.policy.name == 'P0' else '+ '}"
+                    f"{each.policy.name} {'' if each.policy == P0 else '+ '}"
                     f"{each.policy.adds}",
                     f"{each.review_rate:.3f}",
                     str(each.approved),

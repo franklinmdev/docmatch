@@ -6,7 +6,7 @@ import pytest
 from docmatch.extraction import azure, gemini, openai
 from docmatch.extraction.run import ATTEMPTS, BACKOFF
 from docmatch.gate import gate
-from docmatch.matching.matcher import match
+from docmatch.matching.matcher import DiscrepancyType, match
 from docmatch.matching.records import ReceivingRecord, Record
 from docmatch.pipeline.loop import LEASE
 from docmatch.pipeline.routing import (
@@ -17,8 +17,9 @@ from docmatch.pipeline.routing import (
     P2,
     P3,
     P4,
+    Shortcut,
     Standing,
-    below,
+    p5,
     route,
     standing,
 )
@@ -90,8 +91,8 @@ def test_p0_routes_nothing() -> None:
 @pytest.mark.parametrize(
     "shortcut", ["extraction failed", "pipeline failed at validated"]
 )
-def test_p1_adds_both_shortcuts(shortcut: str) -> None:
-    both = Standing(shortcut=shortcut, gate="failed")  # type: ignore[arg-type]
+def test_p1_adds_both_shortcuts(shortcut: Shortcut) -> None:
+    both = Standing(shortcut=shortcut, gate="failed")
 
     assert route(both, P1) == (shortcut,)
 
@@ -103,8 +104,8 @@ def test_p2_adds_a_failed_gate_and_only_a_failed_one() -> None:
 
 
 @pytest.mark.parametrize("held", ["price variance", "tax mismatch"])
-def test_p3_adds_a_hold_on_price_or_tax(held: str) -> None:
-    on = Standing(holds=(held,))  # type: ignore[arg-type]
+def test_p3_adds_a_hold_on_price_or_tax(held: DiscrepancyType) -> None:
+    on = Standing(holds=(held,))
 
     assert route(on, P2) == ()
     assert route(on, P3) == ("match held",)
@@ -113,8 +114,8 @@ def test_p3_adds_a_hold_on_price_or_tax(held: str) -> None:
 @pytest.mark.parametrize(
     "held", ["short-ship", "over-ship", "extra line", "unit variant"]
 )
-def test_p4_adds_every_other_hold_type(held: str) -> None:
-    on = Standing(holds=(held,))  # type: ignore[arg-type]
+def test_p4_adds_every_other_hold_type(held: DiscrepancyType) -> None:
+    on = Standing(holds=(held,))
 
     assert route(on, P3) == ()
     assert route(on, P4) == ("match held",)
@@ -137,15 +138,15 @@ def test_p5_adds_a_gated_value_below_the_edge_to_p4() -> None:
     unsure = Standing(gated_confidence=(0.95, 0.25))
 
     assert route(unsure, P4) == ()
-    assert route(unsure, below(0.3)) == (CONFIDENCE,)
-    assert route(unsure, below(0.2)) == ()
-    assert route(Standing(holds=("short-ship",)), below(0.5)) == ("match held",)
+    assert route(unsure, p5(0.3)) == (CONFIDENCE,)
+    assert route(unsure, p5(0.2)) == ()
+    assert route(Standing(holds=("short-ship",)), p5(0.5)) == ("match held",)
 
 
 def test_a_gated_value_with_no_confidence_is_never_below_an_edge() -> None:
     """A missing confidence is not a low one (the sweep's own rule, #23)."""
-    assert route(Standing(gated_confidence=(None,)), below(0.9)) == ()
-    assert route(Standing(gated_confidence=(None, 0.5)), below(0.9)) == (CONFIDENCE,)
+    assert route(Standing(gated_confidence=(None,)), p5(0.9)) == ()
+    assert route(Standing(gated_confidence=(None, 0.5)), p5(0.9)) == (CONFIDENCE,)
 
 
 def test_a_lease_outlasts_the_slowest_bounded_extraction() -> None:

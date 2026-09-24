@@ -33,23 +33,6 @@ from docmatch.evals.confidence import EDGES, below_edge
 from docmatch.gate import GateResult, Verdict
 from docmatch.matching.matcher import SEVERITY, TYPES, DiscrepancyType, MatchResult
 
-RoutingReason = Literal[
-    "extraction failed",
-    "gate failed",
-    "match held",
-    "confidence below the edge",
-    "pipeline failed at received",
-    "pipeline failed at extracted",
-    "pipeline failed at validated",
-    "pipeline failed at resolved",
-    "pipeline failed at matched",
-]
-"""Why a document goes to review. Pipeline failed names the status the loop
-kept failing to move the document past, one reason per pending status.
-Confidence below the edge is P5's alone, so the loop never gives it."""
-
-CONFIDENCE: RoutingReason = "confidence below the edge"
-
 Shortcut = Literal[
     "extraction failed",
     "pipeline failed at received",
@@ -58,7 +41,20 @@ Shortcut = Literal[
     "pipeline failed at resolved",
     "pipeline failed at matched",
 ]
-"""The reasons that route a document where it stands, before `matched`."""
+"""The reasons that route a document where it stands, before `matched`.
+Pipeline failed names the status the loop kept failing to move the document
+past, one reason per pending status."""
+
+RoutingReason = Literal["gate failed", "match held"] | Shortcut
+"""Why the loop sends a document to review: the glossary's four reasons."""
+
+LowConfidence = Literal["confidence below the edge"]
+"""P5's reason, a rung of the ladder and never one the loop gives."""
+
+CONFIDENCE: LowConfidence = "confidence below the edge"
+
+Reason = RoutingReason | LowConfidence
+"""Why a policy sends a document to review."""
 
 
 @dataclass(frozen=True)
@@ -106,18 +102,18 @@ LADDER: tuple[Policy, ...] = (P0, P1, P2, P3, P4)
 """Every rung but P5, which only a backend reporting confidence has."""
 
 
-def below(edge: float) -> Policy:
+def p5(edge: float) -> Policy:
     """P5 at one edge: P4 plus a gated value's confidence below it."""
     return replace(P4, name="P5", adds=f"confidence below {edge:.1f}", edge=edge)
 
 
-P5: tuple[Policy, ...] = tuple(below(edge) for edge in EDGES)
+P5_AT_EACH_EDGE: tuple[Policy, ...] = tuple(p5(edge) for edge in EDGES)
 
 
-def route(known: Standing, policy: Policy) -> tuple[RoutingReason, ...]:
+def route(known: Standing, policy: Policy) -> tuple[Reason, ...]:
     """Every reason the policy finds in what is known, in the order a reviewer
     reads them; none means the system approves the document."""
-    reasons: list[RoutingReason] = []
+    reasons: list[Reason] = []
     if policy.shortcuts and known.shortcut == "extraction failed":
         reasons.append("extraction failed")
     if policy.gate and known.gate == "failed":

@@ -954,8 +954,8 @@ vendor calls without what came back, and any confidence the backend returned,
 with what the routing ladder reads worked out against the labels as it saves:
 the gate's verdict, the hold types matching found, the confidence of each
 value the gate checked, and which of the gate's fieldtypes were read unlike
-their labels; ids, numbers and times only. The server's output goes to `serve.log` beside
-it. The schema is kept for review.
+their labels; ids, numbers and times only. The server's output goes to
+`serve.log` beside it. The schema is kept for review.
 
 `pipeline` reads only that file, with no Postgres and no model call, and
 prints per run the documents counted and why the rest seed no case, p50 and

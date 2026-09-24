@@ -7,7 +7,9 @@ the policy the loop ran, so its recomputation must give back, case by case,
 the status and reasons the loop wrote; a run where it does not is refused
 rather than reported. P5 is there only when the backend reported confidence.
 
-Review rate is over every case in the run. An escaped document is one a rung
+Review rate is over every case in the run. A rung that routes nothing a
+document carries approves it, so on P0 a failed extraction or a pipeline
+failure is approved and can escape. An escaped document is one a rung
 approves that should have gone to review, for one of two causes: an injected
 discrepancy of a type that holds, or a gate fieldtype read with a value its
 label does not have. A missing line is a note, so a case whose only injected
@@ -22,7 +24,7 @@ from dataclasses import dataclass
 from docmatch import gate
 from docmatch.matching.matcher import SEVERITY
 from docmatch.metrics.fields import FieldValues, score_fields
-from docmatch.pipeline.routing import LADDER, P4, P5, Policy, route
+from docmatch.pipeline.routing import LADDER, P4, P5_AT_EACH_EDGE, Policy, route
 from docmatch.pipeline.saved import LoopRun, LoopRunError, SavedCase
 
 
@@ -71,7 +73,7 @@ def reports_confidence(run: LoopRun) -> bool:
 def ladder(run: LoopRun) -> tuple[Rung, ...]:
     """Every rung from P0 to P4, then P5 at each edge on a run with confidence."""
     _check_p4(run)
-    policies = LADDER + (P5 if reports_confidence(run) else ())
+    policies = LADDER + (P5_AT_EACH_EDGE if reports_confidence(run) else ())
     return tuple(_rung(run.cases, each) for each in policies)
 
 

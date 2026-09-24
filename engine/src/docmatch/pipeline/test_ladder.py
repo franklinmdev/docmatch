@@ -7,7 +7,7 @@ from docmatch.gate import Verdict
 from docmatch.matching.generator import Injected
 from docmatch.matching.matcher import DiscrepancyType, Place
 from docmatch.pipeline.ladder import Rung, ladder, misread
-from docmatch.pipeline.routing import P0, P1, P2, P3, P4, P5, RoutingReason
+from docmatch.pipeline.routing import P0, P1, P2, P3, P4, P5_AT_EACH_EDGE, RoutingReason
 from docmatch.pipeline.saved import LoopRun, LoopRunError, SavedCase
 
 LINE = Place(kind="po line", line=0)
@@ -165,7 +165,7 @@ def test_p5_is_there_only_when_the_backend_reports_confidence() -> None:
     with_edges = ladder(run(confident, unsure))
 
     assert "P5" not in [each.policy.name for each in without]
-    assert [each.policy for each in with_edges[5:]] == list(P5)
+    assert [each.policy for each in with_edges[5:]] == list(P5_AT_EACH_EDGE)
     assert [
         (each.policy.edge, each.reviewed, each.escaped) for each in with_edges[5:]
     ] == [
