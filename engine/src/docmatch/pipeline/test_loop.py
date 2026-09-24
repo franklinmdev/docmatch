@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from docmatch.extraction.conftest import write_pdf
+from docmatch.pipeline import loop
 from docmatch.pipeline.conftest import SAVED, case_text, ordered, pdf
 from docmatch.pipeline.loop import (
     LAPSES,
@@ -455,3 +456,30 @@ def test_a_document_stuck_at_received_carries_pipeline_failed_alone(
     assert view["routing_reasons"] == ["pipeline failed at received"]
     assert view["reading"] is None
     assert client.get(f"/documents/{document}/trace").json()["vendor_calls"] == []
+
+
+def test_a_worker_that_raises_lets_its_lease_go_at_once(
+    client: TestClient,
+    connection: Connection,
+    replayed: Replay,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A document that fails the same way every time routes within the run,
+    not after three full leases."""
+    document = uploaded(
+        client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
+    )
+    claim_and_advance(connection, replayed, wait=_no_wait)
+
+    def broken(_: object) -> None:
+        raise RuntimeError("the gate broke")
+
+    monkeypatch.setattr(loop, "gate", broken)
+    for _ in range(LAPSES):
+        with pytest.raises(RuntimeError, match="the gate broke"):
+            claim_and_advance(connection, replayed, wait=_no_wait)
+
+    assert claim_and_advance(connection, replayed, wait=_no_wait) == "needs_review"
+    view = client.get(f"/documents/{document}").json()
+    assert view["routing_reasons"] == ["pipeline failed at extracted"]

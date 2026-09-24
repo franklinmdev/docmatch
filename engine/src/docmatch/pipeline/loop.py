@@ -25,10 +25,10 @@ transition until the claim is queue wait and the time after it is work (#157).
 The upload itself is the first transition, from no status to `received`, so
 end-to-end latency starts where the upload was accepted.
 
-A lease that lapses without a commit means the worker holding it stopped;
-the next claim retakes the document from its last saved status and counts
-the lapse against that status. The claim that finds the third lapse is the
-one that routes the document.
+A lease that lapses without a commit means the worker holding it stopped,
+or raised and let the lease go at once; the next claim retakes the document
+from its last saved status and counts the lapse against that status. The
+claim that finds the third lapse is the one that routes the document.
 
 Routing
 -------
@@ -295,11 +295,32 @@ def claim_and_advance(
     wait: Callable[[float], None] = time.sleep,
 ) -> Status | None:
     """What the worker does each turn: claim a pending document and move it
-    one status; None when nothing is pending."""
+    one status; None when nothing is pending. When moving it raises, the
+    lease is let go at once, so the next claim counts the lapse and a
+    document that fails the same way every time routes within the run
+    instead of after three full leases."""
     taken = claim(connection, lease)
     if taken is None:
         return None
-    return advance(connection, taken, extractor, wait=wait)
+    try:
+        return advance(connection, taken, extractor, wait=wait)
+    except Refused:
+        raise
+    except Exception:
+        _let_go(connection, taken)
+        raise
+
+
+def _let_go(connection: Connection, taken: Claim) -> None:
+    """End this claim's lease now, leaving it set so the next claim counts
+    it as lapsed; a lease another claim has taken since is left alone."""
+    connection.execute(
+        """
+        UPDATE documents SET lease_until = clock_timestamp()
+        WHERE id = %s AND taken_at = %s AND status = %s
+        """,
+        (taken.document, taken.taken_at, taken.status),
+    )
 
 
 def route(
