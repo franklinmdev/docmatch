@@ -99,8 +99,8 @@ class Replay:
 
     directory: Path
     record: SavedRecord
-    by_digest: dict[str, str]
-    """The PDF's digest to the saved document id."""
+    by_digest: dict[str, SavedDocument]
+    """The PDF's digest to the saved document's line in the record."""
     predictions: dict[str, Prediction]
     currency_symbols: dict[str, dict[str, tuple[str, ...]]]
     confidence: dict[str, Confidence]
@@ -109,22 +109,13 @@ class Replay:
     def model(self) -> str:
         return self.record.requested_model
 
-    @property
-    def source(self) -> str:
-        """The run replayed, as a loop run records it beside backend `replay`."""
-        return (
-            f"{self.record.backend} {self.record.requested_model} at {self.directory}"
-        )
-
     def extract(self, document: Document) -> Extraction:
-        found = self.by_digest.get(digest(document.path.read_bytes()))
-        if found is None:
+        saved = self.by_digest.get(digest(document.path.read_bytes()))
+        if saved is None:
             raise ExtractionError(
                 f"{self.directory} pins no PDF with this digest", retryable=False
             )
-        saved = next(
-            each for each in self.record.documents if each.document_id == found
-        )
+        found = saved.document_id
         prediction = self.predictions.get(found)
         if prediction is None:
             raise ExtractionError(
@@ -157,8 +148,8 @@ def load(directory: Path) -> Replay:
             "recognized as one of its documents"
         )
     record = _read_record(directory / RECORD_FILE)
-    listed = {each.document_id for each in record.documents}
-    unlisted = sorted(set(pinned.document_ids) - listed)
+    listed = {each.document_id: each for each in record.documents}
+    unlisted = sorted(set(pinned.document_ids) - set(listed))
     if unlisted:
         raise PredictionError(
             f"{directory / RECORD_FILE} lists no line for {unlisted[0]}, so what "
@@ -167,7 +158,7 @@ def load(directory: Path) -> Replay:
     return Replay(
         directory=directory,
         record=record,
-        by_digest={pinned.digests[each]: each for each in pinned.document_ids},
+        by_digest={pinned.digests[each]: listed[each] for each in pinned.document_ids},
         predictions=read_predictions(directory / PREDICTIONS_FILE),
         currency_symbols=read_currency_symbols(directory / CURRENCY_SYMBOLS_FILE),
         confidence=read_confidence(directory / CONFIDENCE_FILE),

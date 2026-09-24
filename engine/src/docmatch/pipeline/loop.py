@@ -8,12 +8,12 @@ reaches it is saved: the reading at `extracted`, the gate's result at
 result at `matched`. So a document picked up again starts from its last
 saved output and never reads the document twice.
 
-A step and its compare-and-set
-------------------------------
+A transition and its compare-and-set
+------------------------------------
 
-A step reads the output saved at the document's current status, computes the
-next, and writes both the new status with its output and the transition in
-one transaction under `WHERE status = <expected>` (ADR 0002). A second writer
+Moving a document on reads the output saved at its current status, computes
+the next, and writes both the new status with its output and the transition
+in one transaction under `WHERE status = <expected>` (ADR 0002). A second writer
 from the same expected status finds the row moved and is refused, so a
 document taken up twice never applies one transition twice.
 
@@ -78,15 +78,7 @@ Status = Literal[
     "rejected",
 ]
 
-FINAL: tuple[Status, ...] = ("approved", "rejected")
-"""No transition leaves these."""
-
-SETTLED: tuple[Status, ...] = ("approved", "needs_review")
-"""Where the loop leaves a document: approved, or waiting for a reviewer."""
-
 RoutingReason = Literal["extraction failed", "gate failed", "match held"]
-
-Actor = Literal["system", "reviewer"]
 
 LEASE = timedelta(minutes=5)
 """How long a claim holds a document before another worker may retake it.
@@ -130,6 +122,7 @@ def upload(connection: Connection, invoice: bytes, case: Case) -> Upload:
     The PDF's pages are counted first, so a file pdfium cannot open raises
     `PageError` before anything is stored."""
     pages = count(invoice)
+    content = digest(invoice, case)
     with connection.transaction():
         row = connection.execute(
             """
@@ -138,11 +131,11 @@ def upload(connection: Connection, invoice: bytes, case: Case) -> Upload:
             ON CONFLICT (digest) DO NOTHING
             RETURNING id
             """,
-            (digest(invoice, case), invoice, pages, Jsonb(case_json(case))),
+            (content, invoice, pages, Jsonb(case_json(case))),
         ).fetchone()
         if row is None:
             existing = connection.execute(
-                "SELECT id FROM documents WHERE digest = %s", (digest(invoice, case),)
+                "SELECT id FROM documents WHERE digest = %s", (content,)
             ).fetchone()
             assert existing is not None
             return Upload(_id(existing[0]), created=False)
@@ -198,7 +191,7 @@ def advance(
     *,
     wait: Callable[[float], None] = time.sleep,
 ) -> Status:
-    """One step from the claimed status, written under compare-and-set; the
+    """One transition from the claimed status, written under compare-and-set; the
     status the document now stands at. Raises `Refused` when another writer
     moved it first."""
     if taken.status == "received":
@@ -316,7 +309,7 @@ def _vendor_call(
     """One attempt, committed on its own the moment it returned."""
     outcome = attempt.outcome
     usage = outcome.usage
-    read = isinstance(outcome, Extraction)
+    read = outcome if isinstance(outcome, Extraction) else None
     connection.execute(
         """
         INSERT INTO vendor_calls (document, status, attempt, units, cost,
@@ -337,24 +330,22 @@ def _vendor_call(
                 }
             ),
             outcome.cost,
-            outcome.served_model if isinstance(outcome, Extraction) else None,
+            None if read is None else read.served_model,
             attempt.started,
             attempt.ended,
-            reading_json(outcome.prediction)
-            if isinstance(outcome, Extraction)
-            else None,
-            None if read else str(outcome),
+            None if read is None else _reading_json(read.prediction),
+            str(outcome) if read is None else None,
         ),
     )
 
 
-def reading_json(prediction: Prediction) -> str:
+def _reading_json(prediction: Prediction) -> str:
     """A reading as a vendor call keeps it for its response."""
     return json.dumps(prediction.model_dump(exclude_defaults=True), ensure_ascii=False)
 
 
 Output = tuple[Literal["reading", "gate", "match"], object]
-"""The checkpoint column a step saves, and what it saves there."""
+"""The checkpoint column a transition saves, and what it saves there."""
 
 
 def _commit(

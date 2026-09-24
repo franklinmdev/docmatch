@@ -39,7 +39,7 @@ def uploaded(client: TestClient, invoice: Path, case: str, expected: int = 201) 
 
 
 def settle(connection: Connection, replayed: Replay) -> list[Status]:
-    """Every step the worker takes until nothing is pending."""
+    """Every status the worker moves a document to until nothing is pending."""
     moved = []
     while (
         status := claim_and_advance(connection, replayed, wait=_no_wait)

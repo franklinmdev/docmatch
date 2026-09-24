@@ -6,8 +6,8 @@ claims and advances pending documents on its own connection, one status per
 claim. When nothing is pending the worker waits a moment and asks again. When
 uvicorn stops, on Ctrl-C or a signal, the worker is told to stop and joined.
 
-A step that fails is reported and left: the document keeps its lease until
-the lease lapses and a later claim retakes it from its last checkpoint.
+A transition that fails is reported and left: the document keeps its lease
+until the lease lapses and a later claim retakes it from its last checkpoint.
 """
 
 import sys
