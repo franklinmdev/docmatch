@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from docmatch import cli
-from docmatch.cli import main, render_extract, render_resolve
+from docmatch.cli import main, render_extract, render_pipeline, render_resolve
 from docmatch.conftest import TEST_SCHEMA
 from docmatch.docile.dataset import DocileDataset
 from docmatch.evals import public
@@ -26,11 +26,14 @@ from docmatch.evals.public import FetchError
 from docmatch.evals.run import read_predictions
 from docmatch.extraction import gemini
 from docmatch.extraction.conftest import write_pdf
-from docmatch.extraction.extractor import Usage
+from docmatch.extraction.extractor import Confidence, Usage
 from docmatch.extraction.run import DocumentRun, Run
 from docmatch.extraction.test_run import READING, FakeExtractor, a_subset
 from docmatch.metrics.fields import Prediction
 from docmatch.metrics.line_items import labeled_line_items
+from docmatch.pipeline.report import LABELS, report
+from docmatch.pipeline.test_report import approved, failed_extraction
+from docmatch.pipeline.test_report import run as loop_run
 from docmatch.resolution import run as resolution
 from docmatch.resolution.catalog import CatalogCounts
 from docmatch.resolution.conftest import FAKE_VERSIONS, fake_loader
@@ -2382,3 +2385,59 @@ def assert_no_label_text(synthetic_subset: Path, out: str) -> None:
         for word in description.replace(",", " ").split():
             if len(word) > 3:
                 assert word.casefold() not in lowered, word
+
+
+def test_pipeline_prints_the_ladder_from_p0_to_p4() -> None:
+    out = render_pipeline(
+        [(Path("runs/a"), report(loop_run(approved("a", 0), failed_extraction("b"))))]
+    )
+
+    assert re.search(
+        r"\n  rung, routes to review +review rate +approved +escape rate "
+        r"+injected hold +misread gate value\n",
+        out,
+    )
+    assert re.search(r"\n  P0 +nothing +0\.000 +2 +0\.000 +0\.000 +0\.000\n", out)
+    assert re.search(
+        r"\n  P1 +\+ extraction or pipeline failed +0\.500 +1 +0\.000", out
+    )
+    assert "\n  P4 + match held on any hold type, the loop's policy " in out
+    assert "P5" not in out, "the run's backend reported no confidence"
+    assert "once in the escape rate and once under each cause" in out
+
+
+def test_pipeline_prints_p5_at_every_edge_on_a_run_with_confidence() -> None:
+    confident = approved("a", 0).model_copy(
+        update={"confidence": Confidence(), "gated_confidence": (0.55,)}
+    )
+
+    out = render_pipeline([(Path("runs/a"), report(loop_run(confident)))])
+
+    rows = [line.split() for line in out.splitlines() if line.startswith("  P5 ")]
+    assert [row[4] for row in rows] == [f"0.{each}" for each in range(1, 10)]
+    assert [line for line in out.splitlines() if "confidence below 0.6" in line][
+        0
+    ].split()[5] == "1.000"
+
+
+def test_pipeline_says_when_no_labels_control_was_given() -> None:
+    out = render_pipeline([(Path("runs/a"), report(loop_run(approved("a", 0))))])
+
+    assert out.endswith(
+        "Labels control\n"
+        "  no labels run given; `docmatch loop --backend labels` makes it\n"
+    )
+
+
+def test_pipeline_prints_a_labels_run_as_the_labels_control() -> None:
+    labels = loop_run(approved("a", 0)).model_copy(update={"backend": LABELS})
+
+    out = render_pipeline(
+        [
+            (Path("runs/a"), report(loop_run(approved("a", 0)))),
+            (Path("runs/labels"), report(labels)),
+        ]
+    )
+
+    assert "Loop run, labels" in out
+    assert "no labels run given" not in out

@@ -1,0 +1,29 @@
+{
+  "eval0003": {
+    "fields": {
+      "vendor_name": [0.93],
+      "document_id": [0.9],
+      "amount_total_gross": [0.72],
+      "amount_due": [null]
+    }
+  },
+  "eval0005": {
+    "fields": {
+      "vendor_name": [0.98, 0.41],
+      "document_id": [0.95],
+      "tax_detail_rate": [0.91, 0.62],
+      "amount_total_gross": [0.99],
+      "date_issue": [0.97],
+      "date_due": [0.35],
+      "amount_due": [0.99]
+    }
+  },
+  "eval0006": {
+    "fields": {
+      "vendor_name": [0.96],
+      "document_id": [0.88],
+      "date_issue": [0.9],
+      "amount_total_gross": [0.83]
+    }
+  }
+}
