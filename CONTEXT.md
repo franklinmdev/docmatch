@@ -219,3 +219,7 @@ _Avoid_: gate strictness, threshold sweep
 **Escaped document**:
 A document the system approves, with no reviewer, that should have gone to review: an injected discrepancy of a type that holds, or a value the gate uses that differs from its label. A missing line is a note, so a document whose only injected discrepancy is a missing line is no escape. Counted over the documents the system approves, by cause.
 _Avoid_: false negative, miss (on its own), leak
+
+**Correction**:
+What a reviewer changed in the invoice's reading, net of every edit made along the way: one header value, one line cell, or a whole line added or removed. It is settled when the reviewer approves or rejects, as the value read against the last value left, so a value put back is no correction and a rejection keeps its corrections. It asserts only what the reviewer changed, never the rest of the reading. The purchase order and receiving record are never corrected, since a discrepancy against them is decided, not corrected; approving or rejecting a document in review is a transition, not a correction. Corrections are scored in their own section, never in the fixed subset's number.
+_Avoid_: fix, override, correction case
