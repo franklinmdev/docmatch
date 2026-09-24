@@ -17,10 +17,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from docmatch.extraction.extractor import Confidence
 from docmatch.matching.generator import Injected
-from docmatch.metrics.fields import PredictionError, first_problem
+from docmatch.metrics.fields import first_problem
 from docmatch.pipeline.loop import Status
 
 LOOP_FILE = "loop.json"
+
+
+class LoopRunError(Exception):
+    """A loop run cannot be read or reported."""
 
 
 class SavedTransition(BaseModel):
@@ -104,12 +108,12 @@ def read_loop_run(directory: Path) -> LoopRun:
     try:
         body = path.read_bytes()
     except OSError as error:
-        raise PredictionError(
+        raise LoopRunError(
             f"cannot read the loop run {path}: {error}; `docmatch loop --out` writes it"
         ) from error
     try:
         return LoopRun.model_validate_json(body)
     except ValidationError as error:
-        raise PredictionError(
+        raise LoopRunError(
             f"{path} is not a loop run `docmatch loop` wrote. {first_problem(error)}"
         ) from error

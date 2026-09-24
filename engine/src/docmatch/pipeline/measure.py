@@ -47,8 +47,7 @@ from docmatch.matching.generator import one_per_document
 from docmatch.matching.pool import pool_from
 from docmatch.pipeline import replay
 from docmatch.pipeline.case import Case, case_json
-from docmatch.pipeline.loop import LAPSES, LEASE
-from docmatch.pipeline.report import SETTLED
+from docmatch.pipeline.loop import LAPSES, LEASE, SETTLED
 from docmatch.pipeline.saved import LoopRun, SavedCase, write_loop_run
 from docmatch.pipeline.serve import HOST
 from docmatch.resolution.store import DATABASE_URL_VARIABLE, connect
@@ -76,6 +75,11 @@ class LoopError(Exception):
     """The loop could not be run to the end."""
 
 
+RUNS = Path("data/runs")
+"""Where a loop run is saved without `--out`: ignored by git, beside the
+extraction runs, in a directory named for its schema."""
+
+
 def measure(
     *,
     backend: str,
@@ -86,9 +90,11 @@ def measure(
     manifest_path: Path,
     copies: Path,
     database_url: str,
-    out: Path,
-) -> LoopRun:
-    """Run every case through a fresh server and save the loop run in `out`.
+    out: Path | None = None,
+) -> tuple[LoopRun, Path]:
+    """Run every case through a fresh server and save the loop run in `out`,
+    or under `RUNS` in a directory named for its schema; the run and where
+    it went.
 
     The public copies are verified before anything starts, so a missing or
     changed PDF ends the run before a schema is made."""
@@ -102,8 +108,9 @@ def measure(
     )
     with_lines = {each.document_id for each in pool.seeds}
     cases = one_per_document(pool.seeds)
-    out.mkdir(parents=True, exist_ok=True)
     schema = _new_schema(database_url, backend)
+    out = RUNS / schema if out is None else out
+    out.mkdir(parents=True, exist_ok=True)
     with _served(backend, source, schema, database_url, out / LOG_FILE) as server:
         saved = [server.run(each, copies) for each in cases]
     run = LoopRun(
@@ -120,7 +127,7 @@ def measure(
         cases=tuple(saved),
     )
     write_loop_run(run, out)
-    return run
+    return run, out
 
 
 def _new_schema(database_url: str, backend: str) -> str:

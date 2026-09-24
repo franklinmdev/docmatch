@@ -18,21 +18,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
-from docmatch.metrics.fields import PredictionError
 from docmatch.metrics.score import percentile_of
-from docmatch.pipeline.loop import Status
-from docmatch.pipeline.saved import LoopRun, SavedCase
-
-PENDING: tuple[Status, ...] = (
-    "received",
-    "extracted",
-    "validated",
-    "resolved",
-    "matched",
-)
-"""The statuses the loop moves a document on from, in path order."""
-
-SETTLED: tuple[Status, ...] = ("approved", "needs_review")
+from docmatch.pipeline.loop import PENDING, SETTLED, Status
+from docmatch.pipeline.saved import LoopRun, LoopRunError, SavedCase
 
 
 @dataclass(frozen=True)
@@ -65,14 +53,14 @@ class StatusRow:
 @dataclass(frozen=True)
 class Report:
     run: LoopRun
-    end_to_end: tuple[float, ...]
+    end_to_end_seconds: tuple[float, ...]
     """Seconds per case, in the run's order."""
     cost_per_document: Decimal
     statuses: tuple[StatusRow, ...]
 
     @property
     def end_to_end_spread(self) -> Spread:
-        found = spread(self.end_to_end)
+        found = spread(self.end_to_end_seconds)
         assert found is not None, "a loop run has at least one case"
         return found
 
@@ -83,7 +71,7 @@ class Report:
 def report(run: LoopRun) -> Report:
     """The latency and cost of one loop run."""
     if not run.cases:
-        raise PredictionError("the loop run has no case, so there is nothing to report")
+        raise LoopRunError("the loop run has no case, so there is nothing to report")
     counted = len(run.cases)
     waits: dict[Status, list[float]] = {each: [] for each in PENDING}
     works: dict[Status, list[float]] = {each: [] for each in PENDING}
@@ -93,7 +81,7 @@ def report(run: LoopRun) -> Report:
         for transition in case.transitions:
             left = transition.from_status
             if (
-                left in waits
+                left in PENDING
                 and transition.taken_at is not None
                 and previous is not None
             ):
@@ -106,7 +94,7 @@ def report(run: LoopRun) -> Report:
             costs[each.status] += each.cost
     return Report(
         run=run,
-        end_to_end=tuple(_end_to_end(case) for case in run.cases),
+        end_to_end_seconds=tuple(_end_to_end(case) for case in run.cases),
         cost_per_document=sum(costs.values(), Decimal(0)) / counted,
         statuses=tuple(
             StatusRow(
@@ -118,7 +106,8 @@ def report(run: LoopRun) -> Report:
 
 
 def _end_to_end(case: SavedCase) -> float:
-    """Seconds from the upload to the system settling the case."""
+    """Seconds from the upload to the system settling the case, the span
+    `loop.latency` reads from Postgres."""
     uploaded = next(
         each for each in case.transitions if each.from_status is None
     ).committed_at
@@ -131,7 +120,7 @@ def _end_to_end(case: SavedCase) -> float:
         None,
     )
     if settled is None:
-        raise PredictionError(
+        raise LoopRunError(
             f"{case.document_id} never settled at approved or needs_review, so the "
             "loop run is not a finished one"
         )

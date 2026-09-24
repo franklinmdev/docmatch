@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from docmatch.metrics.fields import PredictionError
-from docmatch.pipeline.loop import Status
-from docmatch.pipeline.report import PENDING, report
+from docmatch.pipeline.loop import PENDING, Status
+from docmatch.pipeline.report import report
 from docmatch.pipeline.saved import (
     LoopRun,
+    LoopRunError,
     SavedCall,
     SavedCase,
     SavedTransition,
@@ -110,7 +110,7 @@ def run(*cases: SavedCase, source: str | None = None) -> LoopRun:
 def test_end_to_end_runs_from_the_upload_to_the_systems_settling() -> None:
     reported = report(run(approved("a", 0), failed_extraction("b")))
 
-    assert sorted(reported.end_to_end) == [11.0, 20.0]
+    assert sorted(reported.end_to_end_seconds) == [11.0, 20.0]
     assert reported.end_to_end_spread.p50 == 11.0
     assert reported.end_to_end_spread.p95 == 20.0
 
@@ -169,7 +169,7 @@ def test_a_case_the_loop_never_settled_is_refused() -> None:
         vendor_calls=(),
     )
 
-    with pytest.raises(PredictionError, match="c never settled"):
+    with pytest.raises(LoopRunError, match="c never settled"):
         report(run(unsettled))
 
 
@@ -184,5 +184,5 @@ def test_a_loop_run_reads_back_as_written(tmp_path: Path) -> None:
 def test_a_directory_with_no_loop_run_says_which_command_writes_one(
     tmp_path: Path,
 ) -> None:
-    with pytest.raises(PredictionError, match="docmatch loop --out"):
+    with pytest.raises(LoopRunError, match="docmatch loop --out"):
         read_loop_run(tmp_path)

@@ -126,9 +126,9 @@ from docmatch.metrics.line_items import (
 )
 from docmatch.metrics.score import Score, ratio, share_of
 from docmatch.pipeline import replay, serve
-from docmatch.pipeline.measure import LoopError, measure
+from docmatch.pipeline.measure import RUNS, LoopError, measure
 from docmatch.pipeline.report import Report, Spread, report
-from docmatch.pipeline.saved import LOOP_FILE, LoopRun, read_loop_run
+from docmatch.pipeline.saved import LOOP_FILE, LoopRun, LoopRunError, read_loop_run
 from docmatch.resolution import run as resolution
 from docmatch.resolution import sweep as resolution_sweep
 from docmatch.resolution.catalog import (
@@ -504,8 +504,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     looping.add_argument(
         "--out",
         type=Path,
-        required=True,
-        help=f"a directory to write the loop run's {LOOP_FILE} into",
+        default=None,
+        help=(
+            f"a directory to write the loop run's {LOOP_FILE} into "
+            f"(default: {RUNS}/ and the run's schema name)"
+        ),
     )
     looping.add_argument(
         "--manifest",
@@ -682,11 +685,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     arguments = parser.parse_args(argv)
-    for command, parser_ in (("serve", serving), ("loop", looping)):
+    for command, command_parser in (("serve", serving), ("loop", looping)):
         if arguments.command == command and (
             (arguments.backend == replay.BACKEND) != (arguments.run is not None)
         ):
-            parser_.error(
+            command_parser.error(
                 "--run is the saved run replay answers from, and only replay's"
             )
     if arguments.command == "subset" and not arguments.write:
@@ -710,6 +713,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         GeneratorError,
         ResolutionError,
         LoopError,
+        LoopRunError,
     ) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
@@ -799,7 +803,7 @@ def _loop(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, i
     cannot read ends the run before a schema is made or a server started.
     """
     extractor = _extractor(arguments)
-    run = measure(
+    run, out = measure(
         backend=arguments.backend,
         requested_model=extractor.model,
         source=arguments.run,
@@ -810,7 +814,7 @@ def _loop(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, i
         database_url=resolve_database_url(arguments.database_url),
         out=arguments.out,
     )
-    return render_loop(arguments.out, run), 0
+    return render_loop(out, run), 0
 
 
 def render_loop(where: Path, run: LoopRun) -> str:

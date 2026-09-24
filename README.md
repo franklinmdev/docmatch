@@ -948,15 +948,16 @@ labeled lines under the generator's pinned seed, half clean and half with one
 injected discrepancy of a type that document can carry, makes a new schema
 named for the backend and the time, starts `serve` on it, and uploads the
 cases one at a time, waiting for each to reach approved or review. It writes
-`loop.json` to `--out`: per case its status, routing reasons, injected truth,
-transitions with both times, vendor calls without what came back, and any
-confidence the backend returned; ids, numbers and times only. The server's
-output goes to `serve.log` beside it. The schema is kept for review.
+`loop.json` to `--out`, by default `data/runs/` and the schema's name: per
+case its status, routing reasons, injected truth, transitions with both times,
+vendor calls without what came back, and any confidence the backend returned;
+ids, numbers and times only. The server's output goes to `serve.log` beside
+it. The schema is kept for review.
 
 `pipeline` reads only that file, with no Postgres and no model call, and
 prints per run the documents counted and why the rest seed no case, p50 and
 p95 end to end, and per status the wait before the loop took the document up
-and the work after, beside cost per document. A replay run is labelled with
+and the work after, beside cost per document. A replay run is labeled with
 the run it answered from and never mixed with a live one. `--run` can be given
 more than once.
 

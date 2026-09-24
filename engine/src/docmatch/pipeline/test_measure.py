@@ -15,7 +15,7 @@ import pytest
 
 from docmatch.cli import main
 from docmatch.pipeline.conftest import SYNTHETIC
-from docmatch.pipeline.report import PENDING
+from docmatch.pipeline.loop import PENDING
 from docmatch.pipeline.saved import read_loop_run
 from docmatch.pipeline.store import drop_schema
 from docmatch.resolution.catalog import ResolutionError
