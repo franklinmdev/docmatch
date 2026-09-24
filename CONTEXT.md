@@ -51,11 +51,11 @@ _Avoid_: actual model, resolved model
 ### Measurement
 
 **Regression**:
-A change that lowers field F1 or line-item F1 on the fixed subset below the benchmark row of a backend it touches. When the change only re-scores that backend's saved readings, any drop is a regression; when it re-extracts them, only a drop larger than the backend's extraction noise. A backend's first row has nothing to regress from.
+A change that lowers field F1 or line-item F1 on the fixed subset, for a backend it touches, below what that backend scored before the change. When the change only re-scores that backend's saved readings, any drop is a regression; when it re-extracts them, only a drop larger than the backend's extraction noise. A backend's first row has nothing to regress from.
 _Avoid_: degradation
 
 **Extraction noise**:
-How far a backend's field F1 or line-item F1 moves between runs that re-extract the same documents with nothing changed, measured on train documents and never on the fixed subset. Each backend has its own for each of the two metrics.
+The largest difference in a backend's field F1 or line-item F1 between any two runs that re-extract the same documents with nothing changed, measured on train documents and never on the fixed subset. Each backend has its own for each of the two metrics.
 _Avoid_: noise margin, variance
 
 **Cost per document**:
