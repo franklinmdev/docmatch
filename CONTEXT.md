@@ -59,7 +59,7 @@ The largest difference in a backend's field F1 or line-item F1 between any two r
 _Avoid_: noise margin, variance
 
 **Cost per document**:
-What reading one document costs at the vendor's list price for the units the vendor reported processing, tokens or pages, including attempts that failed. When a vendor that charges per page accepts an attempt but reports no pages, the pages sent are counted. Free tiers and what was actually billed play no part, so every backend's cost means the same thing.
+What reading one document costs at the vendor's list price for the units the vendor reported processing, tokens or pages, including attempts that failed and readings paid for but never saved: the sum of its vendor calls. When a vendor that charges per page accepts an attempt but reports no pages, the pages sent are counted. Free tiers and what was actually billed play no part, so every backend's cost means the same thing.
 _Avoid_: billed cost, spend, price per document
 
 ### Matching
@@ -213,8 +213,16 @@ Why a document goes to review instead of being approved: its extraction failed, 
 _Avoid_: exception, flag, review trigger
 
 **Transition**:
-One change of a document's status, kept for good: from and to, when, who made it (the system or a reviewer), and the routing reasons when it goes to review. A document's transitions are its history; nothing rewrites them.
+One change of a document's status, kept for good: from and to, when the change was made, who made it (the system or a reviewer), and the routing reasons when it goes to review. A change the system makes also records when the loop took the document up: the time since the previous transition until then is queue wait and the time after is work, so a document that waited reads as waiting, not as slow. A document's transitions are its history; nothing rewrites them.
 _Avoid_: event, status change log, audit entry
+
+**Vendor call**:
+One request to a backend's vendor for one document at one status: the attempt, the units the vendor reported, its cost at list price, the served model, when it started and ended, and what came back, the response or the error. It is kept the moment it returns, whether or not its reading is ever saved, so a reading paid for and then lost still counts in the document's cost per document.
+_Avoid_: generation, request log, API call (on its own)
+
+**Trace**:
+A document's transitions and vendor calls read together: where its time and its money went, status by status, from received to where it stands. A loop run saves its documents' traces without what came back, and the Phase 4 number reads its latency and cost from them.
+_Avoid_: span, observation, log
 
 **Routing ladder**:
 The routing policies the Phase 4 number is drawn over, each sending to review everything the one before does and more: nothing, then a failed extraction, then a failed gate, then a held match on price variance or tax mismatch, then any held match, and on a backend that reports confidence, confidence below each fixed edge. Every policy is read from the same saved run, so the ladder shows what each one buys in review against what it stops from escaping. Every held match is the policy the loop runs; confidence only ever sends a document to review.
