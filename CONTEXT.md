@@ -221,5 +221,5 @@ A document the system approves, with no reviewer, that should have gone to revie
 _Avoid_: false negative, miss (on its own), leak
 
 **Correction**:
-A reviewer's change to one value of the invoice's reading: a header value, a line cell, or a line added or removed. It is fixed when the reviewer approves or rejects, as the value read against the last value left, so a value put back is no correction and a rejection keeps its corrections. It asserts only what the reviewer changed, never the rest of the reading. The purchase order and receiving record are never corrected, and approving a held document is a decision, not a correction. Corrections are scored in their own section, never in the fixed subset's number.
-_Avoid_: fix, edit, override, correction case
+What a reviewer changed in the invoice's reading, net of every edit made along the way: one header value, one line cell, or a whole line added or removed. It is settled when the reviewer approves or rejects, as the value read against the last value left, so a value put back is no correction and a rejection keeps its corrections. It asserts only what the reviewer changed, never the rest of the reading. The purchase order and receiving record are never corrected, since a discrepancy against them is decided, not corrected; approving or rejecting a document in review is a transition, not a correction. Corrections are scored in their own section, never in the fixed subset's number.
+_Avoid_: fix, override, correction case
