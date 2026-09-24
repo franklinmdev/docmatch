@@ -99,6 +99,18 @@ RoutingReason = Literal[
 """Why a document goes to review. Pipeline failed names the status the loop
 kept failing to move the document past, one reason per pending status."""
 
+PENDING: tuple[Status, ...] = (
+    "received",
+    "extracted",
+    "validated",
+    "resolved",
+    "matched",
+)
+"""The statuses the loop moves a document on from, in path order."""
+
+SETTLED: tuple[Status, ...] = ("approved", "needs_review")
+"""Where the loop leaves a document for good or for a reviewer."""
+
 PIPELINE_FAILED: dict[Status, RoutingReason] = {
     "received": "pipeline failed at received",
     "extracted": "pipeline failed at extracted",
@@ -575,7 +587,8 @@ def cost(connection: Connection, document: int) -> Decimal:
 
 def latency(connection: Connection, document: int) -> float | None:
     """Seconds from the upload accepted to the loop settling the document at
-    `approved` or `needs_review`, queue wait included; None until it has."""
+    `approved` or `needs_review`, queue wait included; None until it has. The
+    pipeline report reads the same span off a saved loop run's transitions."""
     row = connection.execute(
         """
         SELECT extract(epoch FROM settled.committed_at - uploaded.committed_at)

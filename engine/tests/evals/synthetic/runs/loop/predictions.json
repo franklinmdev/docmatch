@@ -1,0 +1,80 @@
+{
+  "eval0002": {
+    "fields": {
+      "vendor_name": "Cedar Freight Ltd",
+      "document_id": "INV-1002",
+      "date_issue": "2026-03-05",
+      "date_due": "EOM",
+      "amount_total_gross": "250.00"
+    }
+  },
+  "eval0003": {
+    "fields": {
+      "vendor_name": "Lakeside Tools",
+      "document_id": "INV-1003",
+      "amount_total_gross": "412.50",
+      "amount_due": "400.00"
+    },
+    "line_items": [
+      {
+        "line_item_quantity": "3",
+        "line_item_description": "Hex key set",
+        "line_item_amount_gross": "45.00"
+      },
+      {
+        "line_item_quantity": "1",
+        "line_item_description": "Torque wrench",
+        "line_item_amount_gross": "317.50"
+      },
+      {
+        "line_item_quantity": "5",
+        "line_item_description": "Work gloves",
+        "line_item_amount_gross": "50.00"
+      }
+    ]
+  },
+  "eval0005": {
+    "fields": {
+      "vendor_name": [
+        "Beacon Electrics",
+        "Beacon Electrics"
+      ],
+      "document_id": "INV-1005",
+      "tax_detail_rate": [
+        "8.25%",
+        "5%"
+      ],
+      "amount_total_gross": "1.320,00",
+      "date_issue": "05/11/26",
+      "date_due": "06/10/26",
+      "amount_due": "1.320,00"
+    },
+    "line_items": [
+      {
+        "line_item_quantity": "10",
+        "line_item_description": "Cable reel, 25 m",
+        "line_item_amount_gross": "900,00"
+      },
+      {
+        "line_item_quantity": "4",
+        "line_item_description": "Junction box",
+        "line_item_amount_gross": "420,00"
+      }
+    ]
+  },
+  "eval0006": {
+    "fields": {
+      "vendor_name": "Pinefield Catering",
+      "document_id": "INV-1006",
+      "date_issue": "SEP12/26",
+      "amount_total_gross": "76.40"
+    },
+    "line_items": [
+      {
+        "line_item_quantity": "2",
+        "line_item_description": "Lunch platter",
+        "line_item_amount_gross": "76.40"
+      }
+    ]
+  }
+}

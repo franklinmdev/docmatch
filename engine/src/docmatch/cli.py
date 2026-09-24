@@ -34,7 +34,11 @@ disk; the catalog is left in the database for inspection.
 
 `docmatch serve` runs the loop's HTTP API and its worker over one Postgres
 schema with one backend, `replay` answering from a saved run, which is how an
-uploaded case goes from received to approved or review.
+uploaded case goes from received to approved or review. `docmatch loop`
+starts that server on a new schema, uploads one case per fixed-subset document
+one at a time, and saves the loop run; `docmatch pipeline --run <dir>` prints
+its latency and cost per status from that file alone, with no Postgres and no
+model call.
 
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
@@ -122,6 +126,9 @@ from docmatch.metrics.line_items import (
 )
 from docmatch.metrics.score import Score, ratio, share_of
 from docmatch.pipeline import replay, serve
+from docmatch.pipeline.measure import RUNS, LoopError, measure
+from docmatch.pipeline.report import Report, Spread, report
+from docmatch.pipeline.saved import LOOP_FILE, LoopRun, LoopRunError, read_loop_run
 from docmatch.resolution import run as resolution
 from docmatch.resolution import sweep as resolution_sweep
 from docmatch.resolution.catalog import (
@@ -477,6 +484,71 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=serve.PORT,
         help=f"the port on {serve.HOST} (default: {serve.PORT})",
     )
+    looping = subcommands.add_parser(
+        "loop",
+        parents=[dataset],
+        help="run one case per fixed-subset document through a new server, and save it",
+    )
+    looping.add_argument(
+        "--backend",
+        choices=(*backends.BACKENDS, replay.BACKEND),
+        required=True,
+        help="the backend the server reads every uploaded document with",
+    )
+    looping.add_argument(
+        "--run",
+        type=Path,
+        default=None,
+        help="the saved run `replay` answers from, a directory `extract --out` wrote",
+    )
+    looping.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=(
+            f"a directory to write the loop run's {LOOP_FILE} into "
+            f"(default: {RUNS}/ and the run's schema name)"
+        ),
+    )
+    looping.add_argument(
+        "--manifest",
+        type=Path,
+        default=manifest.MANIFEST,
+        help=f"the subset the cases are drawn from (default: {manifest.MANIFEST.name})",
+    )
+    looping.add_argument(
+        "--copies",
+        type=Path,
+        default=DEFAULT_COPIES_DIR,
+        help=(
+            "where the pinned public copies are kept, each verified before the "
+            f"run starts (default: {DEFAULT_COPIES_DIR})"
+        ),
+    )
+    looping.add_argument(
+        "--database-url",
+        default=None,
+        help=(
+            "the Postgres the run's schema is made in "
+            f"(default: ${DATABASE_URL_VARIABLE}, else {DEFAULT_DATABASE_URL})"
+        ),
+    )
+    reporting = subcommands.add_parser(
+        "pipeline",
+        help="print a saved loop run's latency and cost per status",
+    )
+    reporting.add_argument(
+        "--run",
+        type=Path,
+        action="append",
+        required=True,
+        dest="runs",
+        metavar="DIR",
+        help=(
+            "a directory `loop --out` wrote; each is reported on its own, and it "
+            "can be given more than once"
+        ),
+    )
     counts = subcommands.add_parser(
         "corpus",
         parents=[dataset],
@@ -613,10 +685,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     arguments = parser.parse_args(argv)
-    if arguments.command == "serve" and (
-        (arguments.backend == replay.BACKEND) != (arguments.run is not None)
-    ):
-        serving.error("--run is the saved run replay answers from, and only replay's")
+    for command, command_parser in (("serve", serving), ("loop", looping)):
+        if arguments.command == command and (
+            (arguments.backend == replay.BACKEND) != (arguments.run is not None)
+        ):
+            command_parser.error(
+                "--run is the saved run replay answers from, and only replay's"
+            )
     if arguments.command == "subset" and not arguments.write:
         drawing = [
             flag
@@ -637,6 +712,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         PublicCopyError,
         GeneratorError,
         ResolutionError,
+        LoopError,
+        LoopRunError,
     ) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
@@ -652,6 +729,13 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
     """
     if arguments.command == "serve":
         return _serve(arguments)
+    if arguments.command == "pipeline":
+        return (
+            render_pipeline(
+                [(each, report(read_loop_run(each))) for each in arguments.runs]
+            ),
+            0,
+        )
     dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
     if arguments.command == "subset":
         return _subset(arguments, dataset)
@@ -667,6 +751,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
         return _match(arguments, dataset)
     if arguments.command == "resolve":
         return _resolve(arguments, dataset)
+    if arguments.command == "loop":
+        return _loop(arguments, dataset)
     if arguments.command == "eval":
         run = score_subset(
             dataset,
@@ -694,18 +780,129 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
 
 def _serve(arguments: argparse.Namespace) -> tuple[str, int]:
     """Serve until stopped; nothing to print after."""
-    extractor: Extractor = (
-        replay.load(arguments.run)
-        if arguments.backend == replay.BACKEND
-        else backends.extractor(arguments.backend, None, long_edge=pages.LONG_EDGE)
-    )
     serve.serve(
         resolve_database_url(arguments.database_url),
         arguments.schema,
-        extractor,
+        _extractor(arguments),
         port=arguments.port,
     )
     return "", 0
+
+
+def _extractor(arguments: argparse.Namespace) -> Extractor:
+    """The backend `serve` and `loop` read with, `--run` for replay."""
+    if arguments.backend == replay.BACKEND:
+        return replay.load(arguments.run)
+    return backends.extractor(arguments.backend, None, long_edge=pages.LONG_EDGE)
+
+
+def _loop(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
+    """One measurement, saved; the report comes from `pipeline --run`.
+
+    The backend is built here first, so a missing key or a saved run replay
+    cannot read ends the run before a schema is made or a server started.
+    """
+    extractor = _extractor(arguments)
+    run, out = measure(
+        backend=arguments.backend,
+        requested_model=extractor.model,
+        source=arguments.run,
+        dataset=dataset,
+        pinned=manifest.load(arguments.manifest),
+        manifest_path=arguments.manifest,
+        copies=arguments.copies,
+        database_url=resolve_database_url(arguments.database_url),
+        out=arguments.out,
+    )
+    return render_loop(out, run), 0
+
+
+def render_loop(where: Path, run: LoopRun) -> str:
+    """Where the loop run went and how its cases settled: counts only."""
+    settled = Counter(each.status for each in run.cases)
+    return "\n".join(
+        [
+            "Loop run",
+            *_rows(
+                ("backend", _backend(run)),
+                ("requested", run.requested_model),
+                ("schema", run.database_schema),
+                ("cases", _counted_cases(run)),
+                *((status, str(settled[status])) for status in sorted(settled)),
+                ("written to", str(where / LOOP_FILE)),
+            ),
+            f"  `docmatch pipeline --run {where}` reports its latency and cost",
+            "",
+        ]
+    )
+
+
+def render_pipeline(reports: Sequence[tuple[Path, Report]]) -> str:
+    """Each loop run on its own, never mixed: latency end to end and per
+    status with wait and work apart, and cost per document per status."""
+    lines: list[str] = []
+    for where, reported in reports:
+        run, end_to_end = reported.run, reported.end_to_end_spread
+        if lines:
+            lines.append("")
+        lines += [
+            f"Loop run, {_backend(run)}",
+            *_rows(
+                ("run", str(where)),
+                ("requested", run.requested_model),
+                ("documents", _counted_cases(run)),
+                ("end to end, p50", _seconds(end_to_end.p50)),
+                ("end to end, p95", _seconds(end_to_end.p95)),
+                ("cost per document", f"${reported.cost_per_document:.6f}"),
+            ),
+            "",
+            *_table(
+                (
+                    "status",
+                    "wait p50",
+                    "wait p95",
+                    "work p50",
+                    "work p95",
+                    "cost per document",
+                ),
+                [
+                    (
+                        each.status,
+                        *_spread(each.wait),
+                        *_spread(each.work),
+                        f"${each.cost_per_document:.6f}",
+                    )
+                    for each in reported.statuses
+                ],
+            ),
+            "  wait runs from the previous transition to the claim, work from the "
+            "claim to the commit",
+        ]
+    return "\n".join([*lines, ""])
+
+
+def _backend(run: LoopRun) -> str:
+    """The backend, and for replay the run it answered from, so a replay is
+    never read as a live row."""
+    return run.backend if run.source is None else f"{run.backend} of {run.source}"
+
+
+def _counted_cases(run: LoopRun) -> str:
+    """How many documents carry a case, of how many, and why the rest do not."""
+    counted = f"{len(run.cases)} of {run.documents}"
+    if not run.without_lines:
+        return counted
+    return f"{counted}, {len(run.without_lines)} with no labeled lines seed no case"
+
+
+def _spread(found: Spread | None) -> tuple[str, str]:
+    if found is None:
+        return ("none", "none")
+    return (_seconds(found.p50), _seconds(found.p95))
+
+
+def _seconds(value: float) -> str:
+    return f"{value:.3f} s"
 
 
 def _subset(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
