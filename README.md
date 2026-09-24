@@ -938,6 +938,9 @@ entry with its score. It only annotates; it never sends a document to review.
 curl -F invoice=@invoice.pdf -F 'case=<case.json' localhost:8000/documents
 curl localhost:8000/documents/1
 curl localhost:8000/documents/1/trace
+curl 'localhost:8000/documents?status=needs_review'
+curl localhost:8000/documents/1/pages/1 -o page-1.png
+curl -H 'content-type: application/json' -d '{"decision": "approved"}' localhost:8000/documents/1/decision
 ```
 
 An upload is the invoice PDF and its case, the purchase order and receiving
@@ -945,7 +948,12 @@ record as JSON text. A real AP desk would find the purchase order in its ERP;
 here the upload carries it. The same content uploaded again returns the same
 document. Each document moves from received to approved or to review, one
 status at a time, and its trace lists every status change with when it was
-taken up and committed, and every vendor call with its units and cost.
+taken up and committed, and every vendor call with its units and cost. The
+review queue lists the documents at one status with their routing reasons,
+each page of the uploaded PDF comes back as a PNG, and a decision moves a
+document in review to approved or rejected for good, with the reviewer as
+actor; a second decision, or one on a document not in review, is refused
+with 409.
 
 ```bash
 uv run docmatch loop --backend replay --run data/runs/gemini --out data/runs/loop-replay-gemini
@@ -983,6 +991,26 @@ confidence, a checked value's confidence below each edge from 0.1 to 0.9. A
 replay run is labeled with the run it answered from and never mixed with a
 live one. `--run` can be given more than once, and when none is a labels run
 the report ends saying so.
+
+### The review page
+
+```bash
+uv run docmatch serve --backend replay --run data/runs/gemini --schema loop_replay_20260924_120000
+cd apps/review && npm install && npm run dev
+```
+
+`apps/review` is the one review page, Next.js 16.3.6, talking only to the
+API. Serve the schema a loop run kept, open `localhost:3000`, and the strip at
+the top lists the documents in review; the open one's id is in the URL. For
+each it shows the routing reasons, backend, cost and latency by the title,
+the header as read, one ledger row per purchase-order line (ordered, received
+and billed, the finding with its explanation, the catalog entry), extra lines
+under the order's lines, a missing line as not billed, what the matcher did
+not compare, and the scanned page beside it. Approve and reject are final;
+approving with a hold, a failed gate or a failed extraction still open asks
+first and lists it. `DOCMATCH_API_URL` points it elsewhere than
+`http://127.0.0.1:8000`. `npm run lint` and `npm run typecheck` check it. The
+design decisions are in `DESIGN.md`.
 
 ### The baseline run
 
@@ -1151,7 +1179,7 @@ docmatch/
       resolution/      the catalog, the query set, the embedder, the Postgres working space, the arms, the run
       pipeline/        the loop's statuses, API, server, replay and labels backends, loop runs and their report
     tests/evals/       the synthetic corpus CI runs the eval, the match, the resolve and the loop on
-  apps/review/         Next.js review inbox, from phase 4
+  apps/review/         Next.js review page, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
   docs/                decision records
   scripts/             the markdown-location check CI runs
