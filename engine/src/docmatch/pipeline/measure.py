@@ -72,6 +72,10 @@ it. Past that the worker is not moving it at all."""
 POLL = 0.05
 """Seconds between two reads of a document's status."""
 
+COMMAND = "docmatch"
+"""The module the server is run from, `python -m` it; the loop's CLI test
+points it at one that fakes the embedder."""
+
 STOP = 30.0
 """Seconds the server has to stop after Ctrl-C before it is killed."""
 
@@ -291,7 +295,7 @@ def _served(
     command: Sequence[str] = [
         sys.executable,
         "-m",
-        "docmatch",
+        COMMAND,
         "serve",
         "--backend",
         backend,

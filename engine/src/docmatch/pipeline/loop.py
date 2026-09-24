@@ -522,8 +522,8 @@ def _id(value: object) -> int:
 def view(connection: Connection, document: int) -> dict[str, object] | None:
     """One document as the API shows it: status, case, reading, gate,
     resolution per line, match result with each finding explained, routing
-    reasons, cost and latency;
-    None when there is no such document. An output not yet saved is null."""
+    reasons, cost and latency; None when there is no such document. An
+    output not yet saved is null."""
     row = connection.execute(
         """
         SELECT status, "case", reading, gate, resolution, match

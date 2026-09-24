@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from docmatch.extraction.conftest import write_pdf
-from docmatch.pipeline import loop
+from docmatch.pipeline import api, loop
 from docmatch.pipeline.conftest import CATALOG, SAVED, case_text, ordered, pdf
 from docmatch.pipeline.loop import (
     LAPSES,
@@ -28,10 +28,11 @@ from docmatch.pipeline.loop import (
     claim_and_advance,
 )
 from docmatch.pipeline.replay import Replay
-from docmatch.pipeline.store import Connection
+from docmatch.pipeline.store import Connection, drop_schema, open_schema, prepare
 from docmatch.resolution.arms import RRF_K
 from docmatch.resolution.catalog import mint
 from docmatch.resolution.operating import Resolved
+from docmatch.resolution.store import connect
 
 
 def uploaded(client: TestClient, invoice: Path, case: str, expected: int = 201) -> int:
@@ -99,8 +100,10 @@ def test_every_line_is_resolved_and_one_in_the_catalog_carries_its_sku(
     resolver: Resolve,
 ) -> None:
     """eval0005 reads three lines, the first two catalog entries word for
-    word, so both are first in both halves; `Delivery` is out of catalog
-    and still carries its score."""
+    word, so both are first in both halves. `Delivery` is out of catalog:
+    no entry is first in one half and second in the other, so its best is
+    first in one and third in the other, below the operating threshold, and
+    it has no entry but keeps its score."""
     document = uploaded(
         client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
     )
@@ -110,8 +113,7 @@ def test_every_line_is_resolved_and_one_in_the_catalog_carries_its_sku(
     first, second, delivery = client.get(f"/documents/{document}").json()["resolution"]
     assert first == {"sku": mint(CATALOG[0]), "score": 2 / (RRF_K + 1)}
     assert second == {"sku": mint(CATALOG[1]), "score": 2 / (RRF_K + 1)}
-    assert delivery["sku"] in {None, *(mint(each) for each in CATALOG)}
-    assert isinstance(delivery["score"], float)
+    assert delivery == {"sku": None, "score": 1 / (RRF_K + 1) + 1 / (RRF_K + 3)}
 
 
 def test_resolution_never_routes_a_line_with_no_entry(
@@ -129,12 +131,47 @@ def test_resolution_never_routes_a_line_with_no_entry(
     def nowhere(_: str) -> Resolved:
         return Resolved(sku=None, score=0.0)
 
-    while claim_and_advance(connection, replayed, nowhere, wait=_no_wait):
-        pass
+    settle(connection, replayed, nowhere)
 
     view = client.get(f"/documents/{document}").json()
     assert (view["status"], view["routing_reasons"]) == ("approved", [])
     assert view["resolution"] == [{"sku": None, "score": 0.0}] * 3
+
+
+def test_the_match_result_is_the_same_with_and_without_resolution(
+    database_url: str,
+    schema: str,
+    replayed: Replay,
+    tmp_path: Path,
+    resolver: Resolve,
+) -> None:
+    """The same held case settled once through the catalog and once through
+    a resolver that finds nothing, each on a fresh schema: the matcher never
+    reads a SKU, so the match, the status and the reasons are the same."""
+    invoice = pdf(tmp_path, "eval0005")
+    case = case_text(ordered("eval0005", billed_above=True))
+
+    def nowhere(_: str) -> Resolved:
+        return Resolved(sku=None, score=None)
+
+    views = []
+    for resolve in (resolver, nowhere):
+        with connect(database_url) as fresh:
+            fresh.autocommit = True
+            drop_schema(fresh, schema)
+        prepare(database_url, schema)
+        with (
+            open_schema(database_url, schema) as opened,
+            TestClient(api.create(database_url, schema)) as client,
+        ):
+            document = uploaded(client, invoice, case)
+            settle(opened, replayed, resolve)
+            view = client.get(f"/documents/{document}").json()
+        views.append((view["status"], view["routing_reasons"], view["match"]))
+
+    with_catalog, without = views
+    assert with_catalog == without
+    assert with_catalog[:2] == ("needs_review", ["match held"])
 
 
 def test_an_injected_hold_goes_to_review_with_match_held(

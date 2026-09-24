@@ -38,10 +38,20 @@ SYNTHETIC = Path(__file__).parents[3] / "tests" / "evals" / "synthetic"
 TEST_SCHEMA = "pipeline_test"
 
 CATALOG = tuple(
-    normalize_text(each) for each in ("Cable reel, 25 m", "Junction box", "Work gloves")
+    normalize_text(each)
+    for each in (
+        "Cable reel, 25 m",
+        "Junction box",
+        "Work gloves",
+        "Deliveries",
+        "Delivering",
+    )
 )
-"""The test catalog: two of eval0005's three descriptions and one of
-eval0003's, so eval0005's `Delivery` line is out of catalog."""
+"""The test catalog: two of eval0005's three descriptions, one of eval0003's,
+and two words near `delivery` in their letters and in no word, so eval0005's
+`Delivery` line is out of catalog and the two halves disagree on it: trigram
+puts the near words first, while to the fake every entry is equally far and
+the SKU orders them, `Work gloves` first."""
 
 SAVED = {
     "eval0003": {"cost": "0.00211", "input_tokens": 1800, "output_tokens": 240},

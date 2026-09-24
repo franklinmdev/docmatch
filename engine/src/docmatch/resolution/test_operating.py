@@ -9,31 +9,36 @@ from docmatch.resolution.operating import (
     KEEP,
     OPERATING_THRESHOLD,
     Resolved,
-    at_threshold,
+    at_operating_threshold,
     description_of,
     resolve_line,
 )
 from docmatch.resolution.store import Store
 
 
-def top(score: float) -> Fetched:
+def first_at(score: float) -> Fetched:
+    """A fetch whose top-1 scores `score`."""
     return Fetched((Answer("SKU-a", score), Answer("SKU-b", score / 2)), "short")
 
 
-def test_a_line_at_the_threshold_carries_its_top_1_sku_and_score() -> None:
-    assert at_threshold(top(OPERATING_THRESHOLD)) == Resolved(
+def test_a_line_at_the_operating_threshold_carries_its_top_1_sku_and_score() -> None:
+    assert at_operating_threshold(first_at(OPERATING_THRESHOLD)) == Resolved(
         sku="SKU-a", score=OPERATING_THRESHOLD
     )
 
 
-def test_a_line_below_the_threshold_has_no_entry_and_keeps_its_score() -> None:
+def test_a_line_below_the_operating_threshold_has_no_entry_and_keeps_its_score() -> (
+    None
+):
     below = OPERATING_THRESHOLD * 0.99
 
-    assert at_threshold(top(below)) == Resolved(sku=None, score=below)
+    assert at_operating_threshold(first_at(below)) == Resolved(sku=None, score=below)
 
 
 def test_a_line_the_hybrid_answered_with_nothing_has_no_entry_and_no_score() -> None:
-    assert at_threshold(Fetched((), "short")) == Resolved(sku=None, score=None)
+    assert at_operating_threshold(Fetched((), "short")) == Resolved(
+        sku=None, score=None
+    )
 
 
 def test_a_line_is_queried_by_its_description_normalized() -> None:
@@ -54,11 +59,11 @@ def test_a_line_with_no_description_has_nothing_to_resolve() -> None:
     assert description_of({"line_item_description": (" ",)}) is None
 
 
-def test_the_threshold_keeps_the_share_151_named() -> None:
+def test_the_operating_threshold_keeps_the_share_151_named() -> None:
     assert KEEP == 0.95
 
 
-def test_the_threshold_is_a_score_the_hybrid_can_give() -> None:
+def test_the_operating_threshold_is_a_score_the_hybrid_can_give() -> None:
     """A fused score is a sum of reciprocal ranks, one term per half the SKU
     is in; the constant is one of them, not a rounded reading of one."""
     reachable = {1 / (RRF_K + rank) for rank in range(1, 101)} | {
@@ -74,7 +79,8 @@ def test_resolve_line_names_the_entry_a_description_equals(
     store: Store, embedder: BucketEmbedder
 ) -> None:
     """An exact description is first in both halves, the highest fused score
-    there is, so it carries its SKU at any threshold the procedure can give."""
+    there is, so it carries its SKU at any operating threshold the procedure
+    can give."""
     descriptions = ("widget a", "widget b", "gadget c")
     store.rebuild([Entry(mint(each), each) for each in descriptions], embedder)
 

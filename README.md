@@ -902,8 +902,8 @@ what was paid once outside the latency (model load, catalog embedding, HNSW
 build), the sweep's development top-5 at each d with the constant, the
 procedure's value and the rule, the operating threshold the loop runs at
 beside the procedure's value (the hybrid's top-1 score keeping 0.95 of the
-development slice's answerable queries), the same scored queries regrouped by kind with
-top-1 and top-5 per arm, a diagnostic that never reaches this README, and a
+development slice's answerable queries), the same scored queries regrouped
+by kind with top-1 and top-5 per arm, a diagnostic that never reaches this README, and a
 provenance block read at run time: the Postgres, pgvector and pg_trgm versions
 and the `hnsw.ef_search` in effect from the server, the embedder and its
 revision, the `sentence-transformers` and torch versions and the torch thread
