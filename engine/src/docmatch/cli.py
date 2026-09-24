@@ -34,14 +34,14 @@ beside the procedure's value on the development slice. It prints and writes
 nothing to disk; the catalog is left in the database for inspection.
 
 `docmatch serve` runs the loop's HTTP API and its worker over one Postgres
-schema with one backend, `replay` answering from a saved run and `labels`
-with the labels, which is how an uploaded case goes from received to approved
-or review. It loads the embedder and rebuilds the train catalog first, so
-every line is resolved on the way.
-`docmatch loop` starts that server on a new schema, uploads one case per
-fixed-subset document one at a time, and saves the loop run;
-`docmatch pipeline --run <dir>` prints its latency and cost per status and
-its routing ladder from that file alone, with no Postgres and no model call.
+schema with one backend, `replay` answering from a saved run and `labels` with
+the labels, which is how an uploaded case goes from received to approved or
+review. It loads the embedder and rebuilds the train catalog first, so every
+line is resolved on the way. `docmatch loop` starts that server on a new
+schema, uploads one case per fixed-subset document one at a time, and saves the
+loop run; `docmatch pipeline --run <dir>` prints its latency and cost per
+status and its routing ladder from that file alone, with no Postgres and no
+model call.
 
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.

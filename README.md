@@ -923,17 +923,16 @@ uv run docmatch serve --backend replay --run data/runs/gemini --schema loop_gemi
 Runs the loop's HTTP API on `127.0.0.1:8000` (`--port` to move it) and its
 worker in one process, over one Postgres schema created when missing and kept
 afterwards, at the same `--database-url` precedence as `resolve`. The backend
-is fixed at start: `gemini`, `azure` or `openai` read live, `replay`
-answers from a saved run's readings, recognizing each uploaded PDF by the
-digest its manifest pins, at no cost beyond what the saved run already paid,
-and `labels` answers with the document's DocILE labels, recognizing it by the
-digest `--manifest` pins, with no vendor call and no cost. A PDF the manifest
-does not pin fails extraction.
-Before serving, it loads the embedder and rebuilds the train catalog from
-`--data-dir` in a schema of its own beside the loop's, named with `_catalog`
-after it, and every line read is resolved against it: its top-1 SKU and score
-at or above the operating threshold, otherwise no entry with its score. It
-only annotates; it never sends a document to review.
+is fixed at start: `gemini`, `azure` or `openai` read live, `replay` answers
+from a saved run's readings, recognizing each uploaded PDF by the digest its
+manifest pins, at no cost beyond what the saved run already paid, and `labels`
+answers with the document's DocILE labels, recognizing it by the digest
+`--manifest` pins, with no vendor call and no cost. A PDF the manifest does
+not pin fails extraction. Before serving, it loads the embedder and rebuilds
+the train catalog from `--data-dir` in a schema of its own beside the loop's,
+named with `_catalog` after it, and every line read is resolved against it:
+its top-1 SKU and score at or above the operating threshold, otherwise no
+entry with its score. It only annotates; it never sends a document to review.
 
 ```bash
 curl -F invoice=@invoice.pdf -F 'case=<case.json' localhost:8000/documents
