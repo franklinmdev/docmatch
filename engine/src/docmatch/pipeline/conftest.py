@@ -2,11 +2,10 @@
 catalog to resolve against.
 
 No vendor is called and no model is loaded: the catalog is embedded by the
-resolution tests' fake. The saved run is the committed
-synthetic fixture's readings, each pinned to a PDF these helpers write, with
-a `run.json` saying what each document cost, so replay answers exactly as a
-backend once did. The database is the resolution tests' own, skipped when
-none answers.
+resolution tests' fake. The saved run is the committed synthetic fixture's
+readings, each pinned to a PDF these helpers write, with a `run.json` saying
+what each document cost, so replay answers exactly as a backend once did.
+The database is the resolution tests' own, skipped when none answers.
 """
 
 import json

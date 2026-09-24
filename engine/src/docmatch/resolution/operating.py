@@ -9,9 +9,9 @@ reads the SKU, since the upload's purchase order and receipt come from the
 same labels as the invoice and a SKU comparison would add nothing the
 description pairing does not already do (#151).
 
-The operating threshold is set by the procedure in `run`, on the development slice:
-the hybrid's top-1 score keeping `KEEP` of the answerable queries, weighted
-by `w` the way the headline is. The constant is what the loop runs at, and
+The operating threshold is set by the procedure in `run`, on the development
+slice: the hybrid's top-1 score keeping `KEEP` of the answerable queries,
+weighted by `w` the way the headline is. The constant is what the loop runs at, and
 `docmatch resolve` prints the procedure's value beside it every run, the
 pairing-floor pattern, so a disagreement shows rather than moving the loop.
 """
@@ -40,8 +40,8 @@ other; any other top-1 has no entry."""
 
 class Resolved(BaseModel):
     """One line's resolution: its top-1 SKU at or above the operating
-    threshold, and
-    the score either way; both None when the hybrid answered nothing."""
+    threshold, and the score either way; both None when the hybrid answered
+    nothing."""
 
     model_config = ConfigDict(frozen=True)
 
