@@ -213,8 +213,16 @@ Why a document goes to review instead of being approved: its extraction failed, 
 _Avoid_: exception, flag, review trigger
 
 **Transition**:
-One change of a document's status, kept for good: from and to, when, who made it (the system or a reviewer), and the routing reasons when it goes to review. A document's transitions are its history; nothing rewrites them.
+One change of a document's status, kept for good: from and to, when the loop took the document up and when the change was made, who made it (the system or a reviewer), and the routing reasons when it goes to review. The time before the document was taken up is queue wait and the time after is work, so a document that waited reads as waiting, not as slow. A document's transitions are its history; nothing rewrites them.
 _Avoid_: event, status change log, audit entry
+
+**Vendor call**:
+One request to a backend's vendor for one document: the attempt, the units the vendor reported, its cost at list price, the served model, when it started and ended, and what came back, the response or the error. It is kept the moment it returns, whether or not its reading is ever saved, so a reading paid for and then lost still counts in the document's cost per document.
+_Avoid_: generation, request log, API call (on its own)
+
+**Trace**:
+A document's transitions and vendor calls read together: where its time and its money went, status by status, from the upload accepted to where it stands. The Phase 4 number is read from traces a loop run saved.
+_Avoid_: span, observation, log
 
 **Routing ladder**:
 The routing policies the Phase 4 number is drawn over, each sending to review everything the one before does and more: nothing, then a failed extraction, then a failed gate, then a held match on price variance or tax mismatch, then any held match, and on a backend that reports confidence, confidence below each fixed edge. Every policy is read from the same saved run, so the ladder shows what each one buys in review against what it stops from escaping. Every held match is the policy the loop runs; confidence only ever sends a document to review.
