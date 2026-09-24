@@ -22,7 +22,7 @@ from docmatch.matching.generator import Seed, one_per_document
 from docmatch.matching.records import Record
 from docmatch.metrics.fields import labeled_fields
 from docmatch.metrics.line_items import labeled_line_items
-from docmatch.pipeline import faked, measure
+from docmatch.pipeline import faked, labels, measure
 from docmatch.pipeline.conftest import SYNTHETIC
 from docmatch.pipeline.loop import PENDING, Reading
 from docmatch.pipeline.measure import LoopError, _Server
@@ -73,7 +73,7 @@ def looped_on_labels(
 ) -> Iterator[Path]:
     """The labels control's loop run over the same fixture, run once."""
     yield from _looped(
-        tmp_path_factory.mktemp("labels"), database_url, "--backend", "labels"
+        tmp_path_factory.mktemp("labels"), database_url, "--backend", labels.BACKEND
     )
 
 
@@ -139,9 +139,9 @@ def test_the_labels_run_settles_every_case_with_its_labels_as_the_reading(
     dataset = DocileDataset(SYNTHETIC)
 
     assert (run.backend, run.source, run.requested_model) == (
-        "labels",
+        labels.BACKEND,
         None,
-        "DocILE labels",
+        labels.MODEL,
     )
     assert {each.document_id for each in run.cases} == {
         "eval0003",
