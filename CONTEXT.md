@@ -205,11 +205,11 @@ _Avoid_: ablation (on its own), go/no-go, success criterion
 ### Pipeline
 
 **Status**:
-Where one uploaded document stands in the loop: received, extracted, validated, resolved, matched, needs review, approved or rejected. Each status between received and matched means the output that reaches it is saved, so work picks up from the last one and never reads the document twice; validated means the gate's result is saved, not that the reading passed. A document whose extraction fails goes from received straight to needs review, since there is no reading to go further with. Approved and rejected are final. The system approves a document with no routing reason; only a reviewer rejects, or approves a document in review.
+Where one uploaded document stands in the loop: received, extracted, validated, resolved, matched, needs review, approved or rejected. Each status between received and matched means the output that reaches it is saved, so work picks up from the last one and never reads the document twice; validated means the gate's result is saved, not that the reading passed. A document whose extraction fails goes from received straight to needs review, since there is no reading to go further with, and so does a document the loop keeps failing to move past one status. Approved and rejected are final. The system approves a document with no routing reason; only a reviewer rejects, or approves a document in review.
 _Avoid_: state (on its own), stage, step
 
 **Routing reason**:
-Why a document goes to review instead of being approved: its extraction failed, its gate failed, or its match result is held. Every reason a document has is attached when it is routed, once: after matching, or on receipt when extraction fails, so a reviewer sees them all together. A gate that checked nothing is not a reason. A reviewer's correction reruns what follows from it and shows the new result, and the document stays in review until the reviewer decides.
+Why a document goes to review instead of being approved: its extraction failed, its gate failed, its match result is held, or the pipeline failed on it, meaning the loop kept failing to move it past one status, which the reason names. Every reason a document has is attached when it is routed, once: after matching, or where it stands when extraction or the pipeline fails, so a reviewer sees them all together. A gate that checked nothing is not a reason. A reviewer's correction reruns what follows from it and shows the new result, and the document stays in review until the reviewer decides.
 _Avoid_: exception, flag, review trigger
 
 **Transition**:
