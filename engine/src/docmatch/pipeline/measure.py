@@ -60,9 +60,9 @@ from docmatch.resolution.store import DATABASE_URL_VARIABLE, connect
 LOG_FILE = "serve.log"
 
 STARTUP = 120.0
-"""Seconds the server has to answer its first request: room for a model
-loaded at startup, which a server that has stopped never needs, since its
-exit is noticed at once."""
+"""Seconds the server has to answer its first request: room for the embedder
+loaded and the catalog embedded at startup, which a server that has stopped
+never needs, since its exit is noticed at once."""
 
 SETTLE = (LAPSES + 1) * LEASE.total_seconds()
 """Seconds one case may take to settle: every lease a document can lapse
@@ -71,6 +71,10 @@ it. Past that the worker is not moving it at all."""
 
 POLL = 0.05
 """Seconds between two reads of a document's status."""
+
+COMMAND = "docmatch"
+"""The module the server is run from, `python -m` it; the loop's CLI test
+points it at one that fakes the embedder."""
 
 STOP = 30.0
 """Seconds the server has to stop after Ctrl-C before it is killed."""
@@ -116,7 +120,9 @@ def measure(
     schema = _new_schema(database_url, backend)
     out = RUNS / schema if out is None else out
     out.mkdir(parents=True, exist_ok=True)
-    with _served(backend, source, schema, database_url, out / LOG_FILE) as server:
+    with _served(
+        backend, source, dataset.root, schema, database_url, out / LOG_FILE
+    ) as server:
         saved = [
             server.run(
                 each, copies, labeled_fields(dataset.annotation(each.document_id))
@@ -277,18 +283,25 @@ def _for_the_ladder(view: dict[str, object], labeled: FieldValues) -> dict[str, 
 
 @contextmanager
 def _served(
-    backend: str, source: Path | None, schema: str, database_url: str, log: Path
+    backend: str,
+    source: Path | None,
+    data_dir: Path,
+    schema: str,
+    database_url: str,
+    log: Path,
 ) -> Iterator[_Server]:
     """`docmatch serve` on the schema until the block ends, then stopped."""
     port = _free_port()
     command: Sequence[str] = [
         sys.executable,
         "-m",
-        "docmatch",
+        COMMAND,
         "serve",
         "--backend",
         backend,
         *(("--run", str(source)) if backend == replay.BACKEND and source else ()),
+        "--data-dir",
+        str(data_dir),
         "--schema",
         schema,
         "--port",

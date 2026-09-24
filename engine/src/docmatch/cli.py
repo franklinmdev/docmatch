@@ -29,16 +29,18 @@ writes nothing.
 
 `docmatch resolve` builds the catalog from the train labels, rebuilds it in
 Postgres, sends every query through every arm and scores the answers, which
-is where the resolution table comes from. It prints and writes nothing to
-disk; the catalog is left in the database for inspection.
+is where the resolution table comes from, and prints the operating threshold
+beside the procedure's value on the development slice. It prints and writes
+nothing to disk; the catalog is left in the database for inspection.
 
 `docmatch serve` runs the loop's HTTP API and its worker over one Postgres
 schema with one backend, `replay` answering from a saved run, which is how an
-uploaded case goes from received to approved or review. `docmatch loop`
-starts that server on a new schema, uploads one case per fixed-subset document
-one at a time, and saves the loop run; `docmatch pipeline --run <dir>` prints
-its latency and cost per status and its routing ladder from that file alone,
-with no Postgres and no model call.
+uploaded case goes from received to approved or review. It loads the embedder
+and rebuilds the train catalog first, so every line is resolved on the way.
+`docmatch loop` starts that server on a new schema, uploads one case per
+fixed-subset document one at a time, and saves the loop run;
+`docmatch pipeline --run <dir>` prints its latency and cost per status and
+its routing ladder from that file alone, with no Postgres and no model call.
 
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
@@ -138,6 +140,7 @@ from docmatch.resolution.catalog import (
 )
 from docmatch.resolution.catalog import ResolutionError, load_catalog
 from docmatch.resolution.models import load_models
+from docmatch.resolution.operating import KEEP
 from docmatch.resolution.queries import (
     DEVELOPMENT_ONE_IN,
     GUARD,
@@ -453,6 +456,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     serving = subcommands.add_parser(
         "serve",
+        parents=[dataset],
         help="run the loop's API and worker over one schema with one backend",
     )
     serving.add_argument(
@@ -729,8 +733,6 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
     A command reports a number even when the answer is bad news, so the exit
     code travels beside the report rather than in an exception.
     """
-    if arguments.command == "serve":
-        return _serve(arguments)
     if arguments.command == "pipeline":
         return (
             render_pipeline(
@@ -739,6 +741,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
             0,
         )
     dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
+    if arguments.command == "serve":
+        return _serve(arguments, dataset)
     if arguments.command == "subset":
         return _subset(arguments, dataset)
     if arguments.command == "download":
@@ -780,12 +784,17 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
     )
 
 
-def _serve(arguments: argparse.Namespace) -> tuple[str, int]:
-    """Serve until stopped; nothing to print after."""
+def _serve(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
+    """Serve until stopped; nothing to print after. The backend and the
+    catalog are built first, so a missing key or train split ends it before
+    the database is touched."""
+    extractor = _extractor(arguments)
     serve.serve(
         resolve_database_url(arguments.database_url),
         arguments.schema,
-        _extractor(arguments),
+        extractor,
+        load_catalog(dataset),
+        load_models,
         port=arguments.port,
     )
     return "", 0
@@ -1495,6 +1504,8 @@ def render_resolve(result: resolution.ResolveResult) -> str:
         "",
         *_sweep(measured.depth_sweep, "per hybrid half"),
         "",
+        *_operating(measured.operating),
+        "",
         "By kind, the same scored queries regrouped, report only",
         *_by_kind(measured.arms),
         "",
@@ -1555,6 +1566,23 @@ def _sweep(sweep: resolution_sweep.Sweep, what: str) -> list[str]:
         ),
         f"  rule: the smallest {name} whose development top-5 is within "
         f"{resolution_sweep.POINT:.3f} of the grid's best, the smaller on a tie",
+    ]
+
+
+def _operating(operating: resolution.Operating) -> list[str]:
+    """The operating threshold the loop runs at beside the procedure's value
+    on the development slice, the pairing-floor pattern (#151)."""
+    procedure = operating.procedure
+    return [
+        f"Operating threshold, the hybrid's top-1 score keeping {KEEP:.2f} of "
+        "the development slice's answerable queries, weighted by w",
+        *_rows(
+            ("constant, the loop's", f"{operating.constant:.6f}"),
+            ("procedure's value", "none" if procedure is None else f"{procedure:.6f}"),
+            ("n", str(operating.n)),
+        ),
+        "  a line at or above it carries its top-1 SKU, one below has no entry; "
+        "it annotates and never routes",
     ]
 
 

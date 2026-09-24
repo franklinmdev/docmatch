@@ -16,7 +16,9 @@ hybrid arm at every d of the grid, scored by its development headline top-5,
 and the rule in `sweep` applied to the result. The scored slice is then
 measured at the constant d in code, never at the swept value, so a
 disagreement between the two is printed rather than silently moving the table
-(#130). The sweep is scored and not timed. Latency is everything a query pays
+(#130). The operating threshold is set there too, from the hybrid's top-1
+scores at the constant d, and printed beside the constant the loop runs at
+(#151). The sweep is scored and not timed. Latency is everything a query pays
 on arrival, measured one query at a time on one connection, after a discarded
 warmup pass over the same queries, as p50 and p95 over the scored pass,
 answerable and out of catalog alike, since a line pays the same whether it is
@@ -47,10 +49,11 @@ same thing on every arm, and a query an arm answered with nothing counts as
 farthest either way. The three arms' scores are not commensurable, so each cut
 anchors to the arm's own answerable distribution: the smallest score that
 keeps `KEPT` of answerable at or under it, and the share of out-of-catalog
-queries beyond it. The cut is a reporting device; no threshold is chosen,
-which is Phase 4 routing's call. Beside it AUROC, answerable positive, the
-chance an out-of-catalog query sits farther than an answerable one with ties
-at half, which is rank based and so scale free.
+queries beyond it. The cut is a reporting device; the one threshold the
+loop uses is the operating threshold, set on the development slice. Beside
+it AUROC, answerable positive, the chance an out-of-catalog query sits
+farther than an answerable one with ties at half, which is rank based and so
+scale free.
 
 Both populations are weighted the way the headline is: the exact queries
 carry `w` of their population and the noisy ones the rest. scipy 1.18's
@@ -73,6 +76,7 @@ from docmatch.metrics.score import percentile_of, share_of
 from docmatch.resolution.arms import Fetched, hybrid, trigram, vector
 from docmatch.resolution.catalog import Catalog, CatalogCounts
 from docmatch.resolution.models import ModelLoader, ModelVersions
+from docmatch.resolution.operating import KEEP, OPERATING_THRESHOLD
 from docmatch.resolution.queries import (
     QUERY_KINDS,
     Query,
@@ -228,6 +232,15 @@ def separability(answerable: TopScores, out_of_catalog: TopScores) -> Separabili
     return Separability(tuple(rejected), auroc)
 
 
+def operating_threshold(answerable: TopScores) -> float | None:
+    """The hybrid's top-1 score keeping `KEEP` of the answerable queries,
+    weighted by `w`, from their scores entered as distances, negated, the
+    way separability takes them; None with no query to set it on."""
+    if not answerable:
+        return None
+    return -_cut(sorted(_weighted(_strata(answerable))), KEEP)
+
+
 def _cut(ascending: Sequence[tuple[float, float]], keep: float) -> float:
     """The smallest score at or under which `keep` of the weight lies; a
     hair of slack so a sum of weights that should reach it does."""
@@ -258,6 +271,17 @@ def _weighted(strata: Sequence[tuple[list[float], float]]) -> list[tuple[float, 
 
 
 @dataclass(frozen=True)
+class Operating:
+    """The operating threshold the loop runs at, beside the procedure's value
+    on the development slice."""
+
+    constant: float
+    procedure: float | None
+    """None when the development slice carried no query."""
+    n: int
+
+
+@dataclass(frozen=True)
 class Measured:
     """What the arms answered, with what, and where."""
 
@@ -265,6 +289,7 @@ class Measured:
     depth_sweep: Sweep
     """The depth sweep on the development slice, beside the constant the
     hybrid arm was measured at."""
+    operating: Operating
     versions: ServerVersions
     models: ModelVersions
     load_s: float
@@ -313,8 +338,18 @@ def resolve(
             def hybrid_at(depth: int) -> Arm:
                 return lambda text: hybrid(store, embedder, text, depth)
 
-            depth_sweep = sweep(
-                "d", DEPTH, DEPTHS, hybrid_at, query_set.development.queries
+            development = query_set.development.queries
+            depth_sweep = sweep("d", DEPTH, DEPTHS, hybrid_at, development)
+            at_depth = hybrid_at(DEPTH)
+            operating = Operating(
+                OPERATING_THRESHOLD,
+                operating_threshold(
+                    _top1(
+                        [(query, at_depth(query.text)) for query in development],
+                        higher_first=True,
+                    )
+                ),
+                len(development),
             )
             arms = (
                 measure(
@@ -340,6 +375,7 @@ def resolve(
                 Measured(
                     arms,
                     depth_sweep,
+                    operating,
                     store.versions(),
                     loaded.versions,
                     loaded.load_s,

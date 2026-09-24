@@ -2065,6 +2065,14 @@ EXPECTED_RESOLVE_OUTPUT = "\n".join(
         "  rule: the smallest d whose development top-5 is within 0.010 of the "
         "grid's best, the smaller on a tie",
         "",
+        "Operating threshold, the hybrid's top-1 score keeping 0.95 of the "
+        "development slice's answerable queries, weighted by w",
+        "  constant, the loop's  0.031545",
+        "  procedure's value     0.032522",
+        "  n                     1152",
+        "  a line at or above it carries its top-1 SKU, one below has no entry; "
+        "it annotates and never routes",
+        "",
         "By kind, the same scored queries regrouped, report only",
         "  kind                    n  trigram top-1  trigram top-5  "
         "vector top-1  vector top-5  hybrid top-1  hybrid top-5",
@@ -2176,6 +2184,7 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
                     Point(100, 0.99401, 1152),
                 ),
             ),
+            resolution.Operating(1 / 61 + 1 / 66, 1 / 61 + 1 / 62, 1152),
             ServerVersions(
                 "16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)", "0.6.0", "1.6", "100"
             ),
@@ -2360,6 +2369,9 @@ def test_resolve_prints_the_fixture_report_with_no_label_text(
     assert "\n  hybrid   1.000  1.000  15\n" in out
     assert "\n  25   1.000  3\n" in out, "the sweep runs over the one development entry"
     assert "\n  procedure's d                   25\n" in out
+    assert "\n  procedure's value     0.032787\n" in out, (
+        "every development query is first in both halves, 2/61"
+    )
     assert "\n  exact                5          1.000          1.000" in out
     assert "\n  model load         0.50 s\n" in out
     assert "Provenance, read at run time" in out
