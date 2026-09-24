@@ -35,7 +35,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, cast
+from typing import IO, Any, cast
 
 import httpx
 
@@ -175,7 +175,8 @@ class _Server:
         """One case uploaded, waited on until it settles, and its trace read."""
         invoice = public.path(copies, case.document_id).read_bytes()
         body = json.dumps(case_json(Case(case.purchase_order, case.receipt)))
-        uploaded = self.client.post(
+        uploaded = self._request(
+            "POST",
             "/documents",
             files={"invoice": (f"{case.document_id}.pdf", invoice, "application/pdf")},
             data={"case": body},
@@ -217,10 +218,21 @@ class _Server:
             time.sleep(POLL)
 
     def _get(self, path: str) -> dict[str, object]:
-        answered = self.client.get(path)
+        answered = self._request("GET", path)
         if answered.status_code != httpx.codes.OK:
             raise LoopError(f"GET {path} answered {answered.status_code}")
         return cast(dict[str, object], answered.json())
+
+    def _request(self, method: str, path: str, **sent: Any) -> httpx.Response:
+        """The server's answer, or a message pointing at its log when it gave
+        none: stopped mid-request, or past the client's timeout."""
+        try:
+            return self.client.request(method, path, **sent)
+        except httpx.TransportError as error:
+            raise LoopError(
+                f"{method} {path} got no answer from `docmatch serve` ({error!r}); "
+                f"its output is in {self.log}"
+            ) from error
 
 
 @contextmanager
