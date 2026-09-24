@@ -32,7 +32,7 @@ document twice.
 3. No primary source guarantees what happens when two callers resume one
    thread at the same time (unverified on #149).
 
-The library would add `langgraph`, its Postgres checkpointer, and six packages
+The library would add `langgraph`, its Postgres checkpointer, and seven packages
 the engine does not already have, `langchain-core` among them (#149), without
 removing any code. Declaring the order with `StateGraph` and keeping the state
 in our tables was also rejected, because the path is a line with two shortcuts to review
