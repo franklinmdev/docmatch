@@ -580,23 +580,24 @@ def page(connection: Connection, document: int, number: int) -> bytes | None:
 
 
 def view(connection: Connection, document: int) -> dict[str, object] | None:
-    """One document as the API shows it: status, case, reading, gate,
+    """One document as the API shows it: status, pages, case, reading, gate,
     resolution per line, match result with each finding explained, routing
     reasons, cost and latency; None when there is no such document. An
     output not yet saved is null."""
     row = connection.execute(
         """
-        SELECT status, "case", reading, gate, resolution, match
+        SELECT status, pages, "case", reading, gate, resolution, match
         FROM documents WHERE id = %s
         """,
         (document,),
     ).fetchone()
     if row is None:
         return None
-    status, case, reading, checked, resolution, matched = row
+    status, pages, case, reading, checked, resolution, matched = row
     return {
         "id": document,
         "status": status,
+        "pages": pages,
         "case": case,
         "reading": reading,
         "gate": None if checked is None else _gate_view(GATE.validate_python(checked)),

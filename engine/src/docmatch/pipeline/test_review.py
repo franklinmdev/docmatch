@@ -89,6 +89,7 @@ def test_each_page_is_a_png(client: TestClient, tmp_path: Path) -> None:
 
     page = client.get(f"/documents/{document}/pages/1")
 
+    assert client.get(f"/documents/{document}").json()["pages"] == 1
     assert page.status_code == 200
     assert page.headers["content-type"] == "image/png"
     assert page.content.startswith(PNG)
