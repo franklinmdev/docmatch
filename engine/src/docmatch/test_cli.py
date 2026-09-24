@@ -31,7 +31,8 @@ from docmatch.extraction.run import DocumentRun, Run
 from docmatch.extraction.test_run import READING, FakeExtractor, a_subset
 from docmatch.metrics.fields import Prediction
 from docmatch.metrics.line_items import labeled_line_items
-from docmatch.pipeline.report import LABELS, report
+from docmatch.pipeline import labels
+from docmatch.pipeline.report import report
 from docmatch.pipeline.test_report import approved, failed_extraction
 from docmatch.pipeline.test_report import run as loop_run
 from docmatch.resolution import run as resolution
@@ -2442,12 +2443,12 @@ def test_pipeline_says_when_no_labels_control_was_given() -> None:
 
 
 def test_pipeline_prints_a_labels_run_as_the_labels_control() -> None:
-    labels = loop_run(approved("a", 0)).model_copy(update={"backend": LABELS})
+    control = loop_run(approved("a", 0)).model_copy(update={"backend": labels.BACKEND})
 
     out = render_pipeline(
         [
             (Path("runs/a"), report(loop_run(approved("a", 0)))),
-            (Path("runs/labels"), report(labels)),
+            (Path("runs/labels"), report(control)),
         ]
     )
 

@@ -24,10 +24,6 @@ from docmatch.pipeline.ladder import Rung, ladder
 from docmatch.pipeline.loop import PENDING, SETTLED, Status
 from docmatch.pipeline.saved import LoopRun, LoopRunError, SavedCase
 
-LABELS = "labels"
-"""The backend the labels control runs the loop with, the labels as its
-reading (#172)."""
-
 
 @dataclass(frozen=True)
 class Spread:

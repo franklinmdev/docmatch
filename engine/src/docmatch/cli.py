@@ -34,8 +34,9 @@ beside the procedure's value on the development slice. It prints and writes
 nothing to disk; the catalog is left in the database for inspection.
 
 `docmatch serve` runs the loop's HTTP API and its worker over one Postgres
-schema with one backend, `replay` answering from a saved run, which is how an
-uploaded case goes from received to approved or review. It loads the embedder
+schema with one backend, `replay` answering from a saved run and `labels`
+with the labels, which is how an uploaded case goes from received to approved
+or review. It loads the embedder
 and rebuilds the train catalog first, so every line is resolved on the way.
 `docmatch loop` starts that server on a new schema, uploads one case per
 fixed-subset document one at a time, and saves the loop run;
@@ -127,10 +128,10 @@ from docmatch.metrics.line_items import (
     score_line_items,
 )
 from docmatch.metrics.score import Score, ratio, share_of
-from docmatch.pipeline import replay, serve
+from docmatch.pipeline import labels, replay, serve
 from docmatch.pipeline.ladder import Rung
 from docmatch.pipeline.measure import RUNS, LoopError, measure
-from docmatch.pipeline.report import LABELS, Report, Spread, report
+from docmatch.pipeline.report import Report, Spread, report
 from docmatch.pipeline.routing import P0
 from docmatch.pipeline.saved import LOOP_FILE, LoopRun, LoopRunError, read_loop_run
 from docmatch.resolution import run as resolution
@@ -461,7 +462,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     serving.add_argument(
         "--backend",
-        choices=(*backends.BACKENDS, replay.BACKEND),
+        choices=(*backends.BACKENDS, labels.BACKEND, replay.BACKEND),
         required=True,
         help="the backend every uploaded document is read with",
     )
@@ -470,6 +471,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         default=None,
         help="the saved run `replay` answers from, a directory `extract --out` wrote",
+    )
+    serving.add_argument(
+        "--manifest",
+        type=Path,
+        default=manifest.MANIFEST,
+        help=(
+            "the subset `labels` recognizes each upload in by its digest "
+            f"(default: {manifest.MANIFEST.name})"
+        ),
     )
     serving.add_argument(
         "--schema",
@@ -497,7 +507,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     looping.add_argument(
         "--backend",
-        choices=(*backends.BACKENDS, replay.BACKEND),
+        choices=(*backends.BACKENDS, labels.BACKEND, replay.BACKEND),
         required=True,
         help="the backend the server reads every uploaded document with",
     )
@@ -788,7 +798,7 @@ def _serve(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
     """Serve until stopped; nothing to print after. The backend and the
     catalog are built first, so a missing key or train split ends it before
     the database is touched."""
-    extractor = _extractor(arguments)
+    extractor = _extractor(arguments, dataset)
     serve.serve(
         resolve_database_url(arguments.database_url),
         arguments.schema,
@@ -800,10 +810,13 @@ def _serve(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
     return "", 0
 
 
-def _extractor(arguments: argparse.Namespace) -> Extractor:
-    """The backend `serve` and `loop` read with, `--run` for replay."""
+def _extractor(arguments: argparse.Namespace, dataset: DocileDataset) -> Extractor:
+    """The backend `serve` and `loop` read with, `--run` for replay, the
+    manifest's documents' labels for labels."""
     if arguments.backend == replay.BACKEND:
         return replay.load(arguments.run)
+    if arguments.backend == labels.BACKEND:
+        return labels.load(manifest.load(arguments.manifest), dataset)
     return backends.extractor(arguments.backend, None, long_edge=pages.LONG_EDGE)
 
 
@@ -813,7 +826,7 @@ def _loop(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, i
     The backend is built here first, so a missing key or a saved run replay
     cannot read ends the run before a schema is made or a server started.
     """
-    extractor = _extractor(arguments)
+    extractor = _extractor(arguments, dataset)
     run, out = measure(
         backend=arguments.backend,
         requested_model=extractor.model,
@@ -893,11 +906,12 @@ def render_pipeline(reports: Sequence[tuple[Path, Report]]) -> str:
             "",
             *_ladder(reported.ladder),
         ]
-    if not any(reported.run.backend == LABELS for _, reported in reports):
+    if not any(reported.run.backend == labels.BACKEND for _, reported in reports):
         lines += [
             "",
             "Labels control",
-            f"  no labels run given; `docmatch loop --backend {LABELS}` makes it",
+            "  no labels run given; "
+            f"`docmatch loop --backend {labels.BACKEND}` makes it",
         ]
     return "\n".join([*lines, ""])
 

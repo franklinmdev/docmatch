@@ -145,7 +145,13 @@ jobs:
             --manifest engine/tests/evals/synthetic/runs/loop/manifest.json \
             --copies engine/tests/evals/synthetic/copies \
             --out "$RUNNER_TEMP/loop"
-          uv run docmatch pipeline --run "$RUNNER_TEMP/loop"
+          uv run docmatch loop --backend labels \
+            --data-dir engine/tests/evals/synthetic \
+            --manifest engine/tests/evals/synthetic/runs/loop/manifest.json \
+            --copies engine/tests/evals/synthetic/copies \
+            --out "$RUNNER_TEMP/labels"
+          uv run docmatch pipeline --run "$RUNNER_TEMP/loop" \
+            --run "$RUNNER_TEMP/labels"
 
   docs-location:
     name: docs location

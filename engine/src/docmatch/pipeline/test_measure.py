@@ -17,16 +17,19 @@ import httpx
 import pytest
 
 from docmatch.cli import main
+from docmatch.docile.dataset import DocileDataset
 from docmatch.matching.generator import Seed, one_per_document
 from docmatch.matching.records import Record
+from docmatch.metrics.fields import labeled_fields
+from docmatch.metrics.line_items import labeled_line_items
 from docmatch.pipeline import faked, measure
 from docmatch.pipeline.conftest import SYNTHETIC
-from docmatch.pipeline.loop import PENDING
+from docmatch.pipeline.loop import PENDING, Reading
 from docmatch.pipeline.measure import LoopError, _Server
 from docmatch.pipeline.report import report
 from docmatch.pipeline.saved import read_loop_run
 from docmatch.pipeline.serve import catalog_schema
-from docmatch.pipeline.store import drop_schema
+from docmatch.pipeline.store import drop_schema, open_schema
 from docmatch.resolution.catalog import ResolutionError
 from docmatch.resolution.store import connect, resolve_database_url
 
@@ -53,10 +56,31 @@ def looped(
     """The fixture's loop run on replay, run once, its schemas dropped after.
     The server is run from `faked`, so it embeds the catalog with the fake
     and no weights are loaded; CI's Pipeline step runs the real one."""
-    out = tmp_path_factory.mktemp("loop")
+    yield from _looped(
+        tmp_path_factory.mktemp("loop"),
+        database_url,
+        "--backend",
+        "replay",
+        "--run",
+        str(LOOP_RUN),
+    )
+
+
+@pytest.fixture(scope="module")
+def looped_on_labels(
+    database_url: str,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[Path]:
+    """The labels control's loop run over the same fixture, run once."""
+    yield from _looped(
+        tmp_path_factory.mktemp("labels"), database_url, "--backend", "labels"
+    )
+
+
+def _looped(out: Path, database_url: str, *backend: str) -> Iterator[Path]:
     with pytest.MonkeyPatch.context() as patched:
         patched.setattr(measure, "COMMAND", faked.__name__)
-        code = looping(out, database_url)
+        code = looping(out, database_url, *backend)
     assert code == 0
     try:
         yield out
@@ -68,14 +92,11 @@ def looped(
             drop_schema(connection, catalog_schema(schema))
 
 
-def looping(out: Path, database_url: str) -> int:
+def looping(out: Path, database_url: str, *backend: str) -> int:
     return main(
         [
             "loop",
-            "--backend",
-            "replay",
-            "--run",
-            str(LOOP_RUN),
+            *backend,
             "--data-dir",
             str(SYNTHETIC),
             "--manifest",
@@ -109,6 +130,39 @@ def test_the_fixture_settles_each_case_as_pinned(looped: Path) -> None:
     }
     assert run.without_lines == ("eval0002",)
     assert (run.backend, run.source) == ("replay", str(LOOP_RUN))
+
+
+def test_the_labels_run_settles_every_case_with_its_labels_as_the_reading(
+    looped_on_labels: Path, database_url: str
+) -> None:
+    run = read_loop_run(looped_on_labels)
+    dataset = DocileDataset(SYNTHETIC)
+
+    assert (run.backend, run.source, run.requested_model) == (
+        "labels",
+        None,
+        "DocILE labels",
+    )
+    assert {each.document_id for each in run.cases} == {
+        "eval0003",
+        "eval0004",
+        "eval0005",
+        "eval0006",
+    }
+    with open_schema(database_url, run.database_schema) as connection:
+        for each in run.cases:
+            assert each.status in ("approved", "needs_review")
+            assert "extraction failed" not in each.routing_reasons
+            assert (each.vendor_calls, each.misread) == ((), ())
+            found = connection.execute(
+                "SELECT reading FROM documents WHERE id = %s", (each.id,)
+            ).fetchone()
+            assert found is not None
+            reading = Reading.model_validate(found[0]).prediction
+            annotation = dataset.annotation(each.document_id)
+            assert reading.header == labeled_fields(annotation)
+            assert reading.rows == labeled_line_items(annotation)
+    assert report(run).cost_per_document == Decimal(0)
 
 
 def test_the_loop_run_keeps_each_cases_truth(looped: Path) -> None:

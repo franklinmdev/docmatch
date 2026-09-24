@@ -15,8 +15,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from docmatch.extraction.conftest import write_pdf
+from docmatch.extraction.extractor import Extractor
 from docmatch.pipeline import api, loop
 from docmatch.pipeline.conftest import CATALOG, SAVED, case_text, ordered, pdf
+from docmatch.pipeline.labels import Labels
 from docmatch.pipeline.loop import (
     LAPSES,
     Claim,
@@ -47,11 +49,13 @@ def uploaded(client: TestClient, invoice: Path, case: str, expected: int = 201) 
     return document
 
 
-def settle(connection: Connection, replayed: Replay, resolver: Resolve) -> list[Status]:
+def settle(
+    connection: Connection, extractor: Extractor, resolver: Resolve
+) -> list[Status]:
     """Every status the worker moves a document to until nothing is pending."""
     moved = []
     while (
-        status := claim_and_advance(connection, replayed, resolver, wait=_no_wait)
+        status := claim_and_advance(connection, extractor, resolver, wait=_no_wait)
     ) is not None:
         moved.append(status)
     return moved
@@ -252,6 +256,45 @@ def test_a_pdf_the_saved_run_does_not_pin_fails_extraction(
     view = client.get(f"/documents/{document}").json()
     assert view["routing_reasons"] == ["extraction failed"]
     assert view["cost"] == "0"
+
+
+def test_the_labels_backend_reads_the_labels_and_writes_no_vendor_call(
+    client: TestClient,
+    connection: Connection,
+    labeled: Labels,
+    tmp_path: Path,
+    resolver: Resolve,
+) -> None:
+    document = uploaded(
+        client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
+    )
+
+    settle(connection, labeled, resolver)
+
+    view = client.get(f"/documents/{document}").json()
+    assert view["status"] in ("approved", "needs_review")
+    assert view["reading"] is not None
+    assert "extraction failed" not in view["routing_reasons"]
+    assert view["cost"] == "0"
+    assert client.get(f"/documents/{document}/trace").json()["vendor_calls"] == []
+
+
+def test_a_pdf_the_labels_manifest_does_not_pin_fails_extraction(
+    client: TestClient,
+    connection: Connection,
+    labeled: Labels,
+    tmp_path: Path,
+    resolver: Resolve,
+) -> None:
+    unknown = write_pdf(tmp_path / "unknown.pdf", width=500)
+    document = uploaded(client, unknown, case_text(ordered("eval0005")))
+
+    assert settle(connection, labeled, resolver) == ["needs_review"]
+
+    view = client.get(f"/documents/{document}").json()
+    assert view["routing_reasons"] == ["extraction failed"]
+    assert view["cost"] == "0"
+    assert client.get(f"/documents/{document}/trace").json()["vendor_calls"] == []
 
 
 def test_a_second_transition_from_the_same_status_is_refused(
