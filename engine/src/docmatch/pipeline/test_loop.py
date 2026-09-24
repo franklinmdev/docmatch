@@ -5,7 +5,8 @@ from a saved run: no vendor is called and no model is loaded.
 """
 
 import json
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -14,8 +15,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from docmatch.extraction.conftest import write_pdf
+from docmatch.pipeline import loop
 from docmatch.pipeline.conftest import SAVED, case_text, ordered, pdf
 from docmatch.pipeline.loop import (
+    LAPSES,
+    Claim,
     Refused,
     Status,
     advance,
@@ -300,3 +304,182 @@ def test_transitions_record_when_work_was_taken_up_and_committed(
 def test_an_unknown_document_is_not_found(client: TestClient) -> None:
     assert client.get("/documents/999").status_code == 404
     assert client.get("/documents/999/trace").status_code == 404
+
+
+MILLISECOND = timedelta(milliseconds=1)
+
+
+def lapse(connection: Connection) -> Claim:
+    """A test worker that takes a millisecond lease and never commits: the
+    claim it took, once the lease has lapsed."""
+    taken = claim(connection, MILLISECOND)
+    assert taken is not None
+    time.sleep(0.01)
+    return taken
+
+
+def moves(client: TestClient, document: int) -> list[tuple[str | None, str]]:
+    """A document's transitions, from and to."""
+    transitions = client.get(f"/documents/{document}/trace").json()["transitions"]
+    return [(each["from"], each["to"]) for each in transitions]
+
+
+def test_the_third_lapse_at_one_status_routes_as_pipeline_failed(
+    client: TestClient, connection: Connection, replayed: Replay, tmp_path: Path
+) -> None:
+    document = uploaded(
+        client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
+    )
+    claim_and_advance(connection, replayed, wait=_no_wait)
+    for _ in range(LAPSES):
+        lapse(connection)
+
+    assert claim_and_advance(connection, replayed, wait=_no_wait) == "needs_review"
+    view = client.get(f"/documents/{document}").json()
+    assert view["routing_reasons"] == ["pipeline failed at extracted"]
+    assert moves(client, document)[-1] == ("extracted", "needs_review")
+    assert claim(connection) is None
+
+
+def test_two_lapses_leave_the_document_to_move_on(
+    client: TestClient, connection: Connection, replayed: Replay, tmp_path: Path
+) -> None:
+    document = uploaded(
+        client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
+    )
+    for _ in range(LAPSES - 1):
+        lapse(connection)
+
+    settle(connection, replayed)
+
+    assert client.get(f"/documents/{document}").json()["status"] == "approved"
+
+
+def test_lapses_are_counted_per_status(
+    client: TestClient, connection: Connection, replayed: Replay, tmp_path: Path
+) -> None:
+    document = uploaded(
+        client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
+    )
+    for status in ("received", "extracted", "validated"):
+        for _ in range(LAPSES - 1):
+            assert lapse(connection).status == status
+        assert claim_and_advance(connection, replayed, wait=_no_wait) != (
+            "needs_review"
+        )
+
+    settle(connection, replayed)
+
+    assert client.get(f"/documents/{document}").json()["status"] == "approved"
+
+
+def test_a_pipeline_failure_carries_the_reasons_known_where_it_stands(
+    client: TestClient, connection: Connection, replayed: Replay, tmp_path: Path
+) -> None:
+    document = uploaded(
+        client, pdf(tmp_path, "eval0003"), case_text(ordered("eval0003"))
+    )
+    for _ in range(3):
+        claim_and_advance(connection, replayed, wait=_no_wait)
+    for _ in range(LAPSES):
+        assert lapse(connection).status == "resolved"
+
+    claim_and_advance(connection, replayed, wait=_no_wait)
+
+    view = client.get(f"/documents/{document}").json()
+    assert view["status"] == "needs_review"
+    assert view["routing_reasons"] == ["gate failed", "pipeline failed at resolved"]
+    assert view["match"] is None
+
+
+def test_a_lapsed_lease_is_retaken_from_the_last_checkpoint_and_written_once(
+    client: TestClient, connection: Connection, replayed: Replay, tmp_path: Path
+) -> None:
+    document = uploaded(
+        client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
+    )
+    claim_and_advance(connection, replayed, wait=_no_wait)
+    stale = lapse(connection)
+
+    retaken = claim(connection)
+    assert retaken is not None
+    assert (retaken.document, retaken.status) == (document, "extracted")
+    assert advance(connection, retaken, replayed) == "validated"
+    with pytest.raises(Refused):
+        advance(connection, stale, replayed)
+
+    settle(connection, replayed)
+    assert moves(client, document) == [
+        (None, "received"),
+        ("received", "extracted"),
+        ("extracted", "validated"),
+        ("validated", "resolved"),
+        ("resolved", "matched"),
+        ("matched", "approved"),
+    ]
+    assert len(client.get(f"/documents/{document}/trace").json()["vendor_calls"]) == 1
+
+
+def test_a_vendor_call_under_a_lapsed_lease_still_counts(
+    client: TestClient, connection: Connection, replayed: Replay, tmp_path: Path
+) -> None:
+    document = uploaded(
+        client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
+    )
+    stale = lapse(connection)
+    assert claim_and_advance(connection, replayed, wait=_no_wait) == "extracted"
+
+    with pytest.raises(Refused):
+        advance(connection, stale, replayed, wait=_no_wait)
+
+    calls = client.get(f"/documents/{document}/trace").json()["vendor_calls"]
+    assert len(calls) == 2
+    cost = Decimal(client.get(f"/documents/{document}").json()["cost"])
+    assert cost == 2 * Decimal(str(SAVED["eval0005"]["cost"]))
+    assert moves(client, document)[:2] == [
+        (None, "received"),
+        ("received", "extracted"),
+    ]
+
+
+def test_a_document_stuck_at_received_carries_pipeline_failed_alone(
+    client: TestClient, connection: Connection, replayed: Replay, tmp_path: Path
+) -> None:
+    document = uploaded(
+        client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
+    )
+    for _ in range(LAPSES):
+        lapse(connection)
+
+    assert claim_and_advance(connection, replayed, wait=_no_wait) == "needs_review"
+    view = client.get(f"/documents/{document}").json()
+    assert view["routing_reasons"] == ["pipeline failed at received"]
+    assert view["reading"] is None
+    assert client.get(f"/documents/{document}/trace").json()["vendor_calls"] == []
+
+
+def test_a_worker_that_raises_lets_its_lease_go_at_once(
+    client: TestClient,
+    connection: Connection,
+    replayed: Replay,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A document that fails the same way every time routes within the run,
+    not after three full leases."""
+    document = uploaded(
+        client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
+    )
+    claim_and_advance(connection, replayed, wait=_no_wait)
+
+    def broken(_: object) -> None:
+        raise RuntimeError("the gate broke")
+
+    monkeypatch.setattr(loop, "gate", broken)
+    for _ in range(LAPSES):
+        with pytest.raises(RuntimeError, match="the gate broke"):
+            claim_and_advance(connection, replayed, wait=_no_wait)
+
+    assert claim_and_advance(connection, replayed, wait=_no_wait) == "needs_review"
+    view = client.get(f"/documents/{document}").json()
+    assert view["routing_reasons"] == ["pipeline failed at extracted"]

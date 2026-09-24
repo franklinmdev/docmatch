@@ -25,13 +25,21 @@ transition until the claim is queue wait and the time after it is work (#157).
 The upload itself is the first transition, from no status to `received`, so
 end-to-end latency starts where the upload was accepted.
 
+A lease that lapses without a commit means the worker holding it stopped,
+or raised and let the lease go at once; the next claim retakes the document
+from its last saved status and counts the lapse against that status. The
+claim that finds the third lapse is the one that routes the document.
+
 Routing
 -------
 
 Decided once, at `matched`, with every reason attached: gate failed, match
 held (any hold finding). A gate that checked nothing and a match whose only
 findings are notes never route. No reason means `approved` with the system as
-actor. A failed extraction routes where it stands, with extraction failed.
+actor. Two shortcuts route where the document stands: a failed extraction,
+with extraction failed, and a document whose lease lapsed a third time at one
+status, with pipeline failed naming that status and every reason already
+known there (ADR 0002, #155).
 
 Resolution is a pass-through checkpoint for now: `resolved` saves no output
 and the match never reads one (#170 fills it in).
@@ -78,14 +86,40 @@ Status = Literal[
     "rejected",
 ]
 
-RoutingReason = Literal["extraction failed", "gate failed", "match held"]
+RoutingReason = Literal[
+    "extraction failed",
+    "gate failed",
+    "match held",
+    "pipeline failed at received",
+    "pipeline failed at extracted",
+    "pipeline failed at validated",
+    "pipeline failed at resolved",
+    "pipeline failed at matched",
+]
+"""Why a document goes to review. Pipeline failed names the status the loop
+kept failing to move the document past, one reason per pending status."""
 
-LEASE = timedelta(minutes=5)
+PIPELINE_FAILED: dict[Status, RoutingReason] = {
+    "received": "pipeline failed at received",
+    "extracted": "pipeline failed at extracted",
+    "validated": "pipeline failed at validated",
+    "resolved": "pipeline failed at resolved",
+    "matched": "pipeline failed at matched",
+}
+"""The pipeline-failed reason for each status a worker can claim at."""
+
+LEASE = timedelta(minutes=10)
 """How long a claim holds a document before another worker may retake it.
 
-Above the slowest bounded extraction: three attempts of Phase 1's slowest row
-(OpenAI, p95 38.6 s) plus the 2 s and 4 s backoffs come to about two minutes,
-so five leaves room for a slow tail without a lapse retaking live work."""
+Above the slowest bounded extraction: #35's three attempts, each ended by
+its backend's 120 s timeout, plus the 2 s and 4 s backoffs come to 366 s.
+Azure's timeout bounds the polling, not the analyze request before it, so
+ten minutes leaves room for that, rendering and saving beside it: a lapse
+means the worker stopped, never that a live reading was slow."""
+
+LAPSES = 3
+"""Lapsed leases at one status that route a document as pipeline failed:
+the same three #35 gives a reading's attempts (ADR 0002)."""
 
 GATE = TypeAdapter(GateResult)
 MATCH = TypeAdapter(MatchResult)
@@ -158,15 +192,22 @@ class Claim:
     document: int
     status: Status
     taken_at: datetime
+    lapses: int = 0
+    """Leases that lapsed at this status before this claim."""
 
 
 def claim(connection: Connection, lease: timedelta = LEASE) -> Claim | None:
     """The oldest pending document whose lease is free, leased to this worker,
-    or None when nothing is pending."""
+    or None when nothing is pending. A lease still set is one that lapsed,
+    since a commit lets its lease go, so it is counted against the status."""
     row = connection.execute(
         """
         UPDATE documents
-        SET lease_until = clock_timestamp() + %s, taken_at = clock_timestamp()
+        SET lease_until = clock_timestamp() + %s, taken_at = clock_timestamp(),
+            lapses = CASE WHEN lease_until IS NULL THEN lapses
+                ELSE lapses || jsonb_build_object(
+                    status, coalesce((lapses ->> status)::int, 0) + 1)
+                END
         WHERE id = (
             SELECT id FROM documents
             WHERE status NOT IN ('approved', 'rejected', 'needs_review')
@@ -175,13 +216,18 @@ def claim(connection: Connection, lease: timedelta = LEASE) -> Claim | None:
             LIMIT 1
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, status, taken_at
+        RETURNING id, status, taken_at, (lapses ->> status)::int
         """,
         (lease,),
     ).fetchone()
     if row is None:
         return None
-    return Claim(_id(row[0]), cast(Status, row[1]), cast(datetime, row[2]))
+    return Claim(
+        _id(row[0]),
+        cast(Status, row[1]),
+        cast(datetime, row[2]),
+        cast(int, row[3] or 0),
+    )
 
 
 def advance(
@@ -194,6 +240,16 @@ def advance(
     """One transition from the claimed status, written under compare-and-set; the
     status the document now stands at. Raises `Refused` when another writer
     moved it first."""
+    if taken.lapses >= LAPSES:
+        return _commit(
+            connection,
+            taken,
+            "needs_review",
+            reasons=(
+                *_known(connection, taken.document),
+                PIPELINE_FAILED[taken.status],
+            ),
+        )
     if taken.status == "received":
         return _extract(connection, taken, extractor, wait)
     if taken.status == "extracted":
@@ -222,11 +278,7 @@ def advance(
             ("match", MATCH.dump_python(result, mode="json")),
         )
     if taken.status == "matched":
-        checked, result = (
-            _gate(connection, taken.document),
-            _match(connection, taken.document),
-        )
-        reasons = route(checked, result)
+        reasons = _known(connection, taken.document)
         if reasons:
             return _commit(connection, taken, "needs_review", reasons=reasons)
         return _commit(connection, taken, "approved")
@@ -243,22 +295,59 @@ def claim_and_advance(
     wait: Callable[[float], None] = time.sleep,
 ) -> Status | None:
     """What the worker does each turn: claim a pending document and move it
-    one status; None when nothing is pending."""
+    one status; None when nothing is pending. When moving it raises, the
+    lease is let go at once, so the next claim counts the lapse and a
+    document that fails the same way every time routes within the run
+    instead of after three full leases."""
     taken = claim(connection, lease)
     if taken is None:
         return None
-    return advance(connection, taken, extractor, wait=wait)
+    try:
+        return advance(connection, taken, extractor, wait=wait)
+    except Refused:
+        raise
+    except Exception:
+        _let_go(connection, taken)
+        raise
 
 
-def route(checked: GateResult, result: MatchResult) -> tuple[RoutingReason, ...]:
-    """Every reason a matched document goes to review, in the order a
-    reviewer reads them; none means the system approves it."""
+def _let_go(connection: Connection, taken: Claim) -> None:
+    """End this claim's lease now, leaving it set so the next claim counts
+    it as lapsed; a lease another claim has taken since is left alone."""
+    connection.execute(
+        """
+        UPDATE documents SET lease_until = clock_timestamp()
+        WHERE id = %s AND taken_at = %s AND status = %s
+        """,
+        (taken.document, taken.taken_at, taken.status),
+    )
+
+
+def route(
+    checked: GateResult | None, result: MatchResult | None
+) -> tuple[RoutingReason, ...]:
+    """Every reason the saved gate and match results give, in the order a
+    reviewer reads them; an output not yet saved gives none. At `matched`,
+    none means the system approves the document."""
     reasons: list[RoutingReason] = []
-    if checked.verdict == "failed":
+    if checked is not None and checked.verdict == "failed":
         reasons.append("gate failed")
-    if result.verdict == "held":
+    if result is not None and result.verdict == "held":
         reasons.append("match held")
     return tuple(reasons)
+
+
+def _known(connection: Connection, document: int) -> tuple[RoutingReason, ...]:
+    """The reasons the outputs saved so far already give."""
+    row = connection.execute(
+        "SELECT gate, match FROM documents WHERE id = %s", (document,)
+    ).fetchone()
+    assert row is not None
+    checked, matched = row
+    return route(
+        None if checked is None else GATE.validate_python(checked),
+        None if matched is None else MATCH.validate_python(matched),
+    )
 
 
 def _extract(
@@ -406,14 +495,6 @@ def _reading(connection: Connection, document: int) -> Reading:
 
 def _case(connection: Connection, document: int) -> Case:
     return CASE.validate_python(_column(connection, document, "case"))
-
-
-def _gate(connection: Connection, document: int) -> GateResult:
-    return GATE.validate_python(_column(connection, document, "gate"))
-
-
-def _match(connection: Connection, document: int) -> MatchResult:
-    return MATCH.validate_python(_column(connection, document, "match"))
 
 
 def _id(value: object) -> int:

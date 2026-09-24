@@ -3,8 +3,9 @@
 Three tables, and the documents table is the only queue (ADR 0002):
 
 - `documents`: the upload's bytes and case under the unique digest of its
-  content, the status, the output saved at each checkpoint, and the lease a
-  worker holds while it moves the document on.
+  content, the status, the output saved at each checkpoint, the lease a
+  worker holds while it moves the document on, and how many leases lapsed
+  at each status.
 - `transitions`: every status change, append-only. A trigger refuses an
   update or a delete, so nothing rewrites a document's history (#150).
 - `vendor_calls`: one row per request sent to a backend's vendor, written
@@ -39,7 +40,8 @@ CREATE TABLE IF NOT EXISTS documents (
     resolution jsonb,
     match jsonb,
     lease_until timestamptz,
-    taken_at timestamptz
+    taken_at timestamptz,
+    lapses jsonb NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS transitions (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
