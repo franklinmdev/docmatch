@@ -193,3 +193,17 @@ _Avoid_: hyperparameter search, tuning, grid search
 **Keep-or-drop rule**:
 ADR 0001's rule on the reranker, fixed before any arm was measured: kept when its headline top-1 at the swept N clears the hybrid's by at least a pinned margin and its p95 latency per query on the named machine stays at or under a pinned ceiling, dropped otherwise. Top-1 alone decides. Kept would have made hybrid plus rerank the arm Phase 4 resolves with; dropped means the arm and its N sweep are deleted after the row lands. It was applied once: the verdict was dropped at `27bc70d`, the README records it, and the arm, its N sweep and the rule's two thresholds are gone from the command, so Phase 4 resolves with the hybrid.
 _Avoid_: ablation (on its own), go/no-go, success criterion
+
+### Pipeline
+
+**Status**:
+Where one uploaded document stands in the loop: received, extracted, validated, resolved, matched, needs review, approved or rejected. Each status between received and matched means that stage's output is saved, so work picks up from the last one and never reads the document twice; validated means the gate's result is saved, not that the reading passed. Approved and rejected are final. The system approves a document with no routing reason; only a reviewer rejects, or approves a document in review.
+_Avoid_: state (on its own), stage, step
+
+**Routing reason**:
+Why a document goes to review instead of being approved: its extraction failed, its gate failed, or its match result is held. Every reason a document has is attached when it is routed, once, after matching, so a reviewer sees them all together. A gate that checked nothing is not a reason. A reviewer's correction reruns what follows from it and shows the new result, and the document stays in review until the reviewer decides.
+_Avoid_: exception, flag, review trigger
+
+**Transition**:
+One change of a document's status, kept for good: from and to, when, who made it (the system or a reviewer), and the routing reasons when it goes to review. A document's transitions are its history; nothing rewrites them.
+_Avoid_: event, status change log, audit entry
