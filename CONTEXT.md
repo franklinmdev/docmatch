@@ -183,8 +183,12 @@ The queries of the other four fifths of the entries and of the out-of-catalog dr
 _Avoid_: test set, holdout, evaluation set
 
 **Separability diagnostic**:
-Per arm, how well its top-1 score tells an answerable query from an out-of-catalog one: the share of out-of-catalog queries rejected at each of three cuts that keep a fixed high share of the answerable, plus the AUROC, the area under the receiver operating characteristic curve, with answerable positive. Each cut anchors to the arm's own answerable quantile, which is what makes the arms' incommensurable scores comparable. It chooses no operating threshold, that point is Phase 4's, and it was printed beside the keep-or-drop verdict and never weighed in it.
+Per arm, how well its top-1 score tells an answerable query from an out-of-catalog one: the share of out-of-catalog queries rejected at each of three cuts that keep a fixed high share of the answerable, plus the AUROC, the area under the receiver operating characteristic curve, with answerable positive. Each cut anchors to the arm's own answerable quantile, which is what makes the arms' incommensurable scores comparable. It chooses no operating threshold, which reads it on the development slice, and it was printed beside the keep-or-drop verdict and never weighed in it.
 _Avoid_: threshold, cutoff, rejection rate
+
+**Operating threshold**:
+The hybrid arm's top-1 score below which a line resolves to no entry and carries no SKU. It is set on the development slice at the cut that keeps 0.95 of the answerable top-1 scores, lives in code, and every run prints the procedure's value beside it, the pairing-floor pattern. It only annotates: a line at or above it carries its top-1 SKU and score, a line below it has no entry and is shown to the reviewer with its score, and neither is ever a routing reason.
+_Avoid_: threshold (on its own), cutoff, confidence
 
 **Depth sweep**:
 The procedure that sets the depth constant on the development slice: d, the rows each hybrid half keeps before fusion, over its grid on the hybrid arm. The rule picks the smallest value whose development top-5 is within one point of the grid's best, ties to the cheaper. The constant lives in code, and every run repeats the sweep and prints the procedure's value beside the constant, the pairing-floor pattern. A second sweep, N, the pairs sent to the reranker, ran by the same rule until the reranker was dropped.
