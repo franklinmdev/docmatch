@@ -16,14 +16,17 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from docmatch.docile.dataset import DocileDataset
+from docmatch.evals.manifest import Manifest
 from docmatch.evals.public import digest
 from docmatch.evals.run import read_predictions
 from docmatch.extraction.conftest import write_pdf
 from docmatch.matching.records import ReceiptLine, ReceivingRecord, Record
 from docmatch.metrics.fields import FieldValues
 from docmatch.metrics.normalization import normalize_text
-from docmatch.pipeline import api, replay
+from docmatch.pipeline import api, labels, replay
 from docmatch.pipeline.case import Case, case_json
+from docmatch.pipeline.labels import Labels
 from docmatch.pipeline.loop import Resolve
 from docmatch.pipeline.replay import Replay
 from docmatch.pipeline.serve import catalog_schema, resolving
@@ -113,6 +116,25 @@ def pdf(directory: Path, document_id: str) -> Path:
 @pytest.fixture
 def replayed(saved_run: Path) -> Replay:
     return replay.load(saved_run)
+
+
+@pytest.fixture
+def labeled(tmp_path: Path) -> Labels:
+    """The labels backend over the fixture's labels, each document pinned to
+    the PDF `pdf` writes for it."""
+    digests = {
+        document_id: digest(pdf(tmp_path, document_id).read_bytes())
+        for document_id in SAVED
+    }
+    pinned = Manifest(
+        split="val",
+        seed=1,
+        source="synthetic",
+        size=len(digests),
+        document_ids=tuple(digests),
+        digests=digests,
+    )
+    return labels.load(pinned, DocileDataset(SYNTHETIC))
 
 
 def ordered(document_id: str, *, billed_above: bool = False) -> Case:

@@ -1,5 +1,6 @@
-"""The CLI on the synthetic fixture: `docmatch loop --backend replay` against a
-real Postgres, then `docmatch pipeline --run` on what it saved.
+"""The CLI on the synthetic fixture: `docmatch loop` on replay and on the
+labels against a real Postgres, then `docmatch pipeline --run` on what it
+saved.
 
 Skipped without a database. It pins what is deterministic by exact equality,
 each case's final status, routing reasons and cost per document, and of
@@ -17,16 +18,19 @@ import httpx
 import pytest
 
 from docmatch.cli import main
+from docmatch.docile.dataset import DocileDataset
 from docmatch.matching.generator import Seed, one_per_document
 from docmatch.matching.records import Record
-from docmatch.pipeline import faked, measure
+from docmatch.metrics.fields import labeled_fields
+from docmatch.metrics.line_items import labeled_line_items
+from docmatch.pipeline import faked, labels, measure
 from docmatch.pipeline.conftest import SYNTHETIC
-from docmatch.pipeline.loop import PENDING
+from docmatch.pipeline.loop import PENDING, Reading
 from docmatch.pipeline.measure import LoopError, _Server
 from docmatch.pipeline.report import report
 from docmatch.pipeline.saved import read_loop_run
 from docmatch.pipeline.serve import catalog_schema
-from docmatch.pipeline.store import drop_schema
+from docmatch.pipeline.store import drop_schema, open_schema
 from docmatch.resolution.catalog import ResolutionError
 from docmatch.resolution.store import connect, resolve_database_url
 
@@ -53,10 +57,31 @@ def looped(
     """The fixture's loop run on replay, run once, its schemas dropped after.
     The server is run from `faked`, so it embeds the catalog with the fake
     and no weights are loaded; CI's Pipeline step runs the real one."""
-    out = tmp_path_factory.mktemp("loop")
+    yield from _looped(
+        tmp_path_factory.mktemp("loop"),
+        database_url,
+        "--backend",
+        "replay",
+        "--run",
+        str(LOOP_RUN),
+    )
+
+
+@pytest.fixture(scope="module")
+def looped_on_labels(
+    database_url: str,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[Path]:
+    """The labels control's loop run over the same fixture, run once."""
+    yield from _looped(
+        tmp_path_factory.mktemp("labels"), database_url, "--backend", labels.BACKEND
+    )
+
+
+def _looped(out: Path, database_url: str, *backend: str) -> Iterator[Path]:
     with pytest.MonkeyPatch.context() as patched:
         patched.setattr(measure, "COMMAND", faked.__name__)
-        code = looping(out, database_url)
+        code = looping(out, database_url, *backend)
     assert code == 0
     try:
         yield out
@@ -68,14 +93,11 @@ def looped(
             drop_schema(connection, catalog_schema(schema))
 
 
-def looping(out: Path, database_url: str) -> int:
+def looping(out: Path, database_url: str, *backend: str) -> int:
     return main(
         [
             "loop",
-            "--backend",
-            "replay",
-            "--run",
-            str(LOOP_RUN),
+            *backend,
             "--data-dir",
             str(SYNTHETIC),
             "--manifest",
@@ -109,6 +131,66 @@ def test_the_fixture_settles_each_case_as_pinned(looped: Path) -> None:
     }
     assert run.without_lines == ("eval0002",)
     assert (run.backend, run.source) == ("replay", str(LOOP_RUN))
+
+
+def test_the_labels_run_settles_every_case_with_its_labels_as_the_reading(
+    looped_on_labels: Path, database_url: str
+) -> None:
+    run = read_loop_run(looped_on_labels)
+    dataset = DocileDataset(SYNTHETIC)
+
+    assert (run.backend, run.source, run.requested_model) == (
+        labels.BACKEND,
+        None,
+        labels.MODEL,
+    )
+    assert {each.document_id for each in run.cases} == {
+        "eval0003",
+        "eval0004",
+        "eval0005",
+        "eval0006",
+    }
+    with open_schema(database_url, run.database_schema) as connection:
+        for each in run.cases:
+            assert (each.vendor_calls, each.misread) == ((), ())
+            found = connection.execute(
+                "SELECT reading FROM documents WHERE id = %s", (each.id,)
+            ).fetchone()
+            assert found is not None
+            reading = Reading.model_validate(found[0]).prediction
+            annotation = dataset.annotation(each.document_id)
+            assert reading.header == labeled_fields(annotation)
+            assert reading.rows == labeled_line_items(annotation)
+    assert report(run).cost_per_document == Decimal(0)
+
+
+def test_the_labels_run_settles_each_case_and_its_ladder_as_pinned(
+    looped_on_labels: Path,
+) -> None:
+    """eval0003's labeled totals disagree (412.50 against 400.00 due), so the
+    gate fails on the labels too; eval0004's missing line is a note, so it
+    approves and never escapes; eval0006's short-ship holds from P4 up. No
+    P5, as labels carry no confidence."""
+    run = read_loop_run(looped_on_labels)
+
+    assert {
+        each.document_id: (each.status, each.routing_reasons) for each in run.cases
+    } == {
+        "eval0004": ("approved", ()),
+        "eval0006": ("needs_review", ("match held",)),
+        "eval0003": ("needs_review", ("gate failed",)),
+        "eval0005": ("approved", ()),
+    }
+    assert [
+        (each.policy.name, each.reviewed, each.approved, each.escaped)
+        for each in report(run).ladder
+    ] == [
+        ("P0", 0, 4, 1),
+        ("P1", 0, 4, 1),
+        ("P2", 1, 3, 1),
+        ("P3", 1, 3, 1),
+        ("P4", 2, 2, 0),
+    ]
 
 
 def test_the_loop_run_keeps_each_cases_truth(looped: Path) -> None:

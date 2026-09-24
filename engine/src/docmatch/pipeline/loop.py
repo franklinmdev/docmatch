@@ -79,6 +79,7 @@ from docmatch.matching.matcher import MatchResult, explain, match
 from docmatch.matching.records import read_record
 from docmatch.metrics.fields import Prediction
 from docmatch.pipeline.case import CASE, Case, case_json, digest
+from docmatch.pipeline.labels import Labels
 from docmatch.pipeline.routing import P4, RoutingReason, route, standing
 from docmatch.pipeline.store import Connection
 from docmatch.resolution.operating import Resolved, description_of
@@ -374,7 +375,8 @@ def _extract(
     wait: Callable[[float], None],
 ) -> Status:
     """Read the PDF through the backend, each attempt kept as a vendor call as
-    it returns, then save the reading or route the failure."""
+    it returns, then save the reading or route the failure. The labels backend
+    sends no request, so it has no vendor call to keep."""
     row = connection.execute(
         "SELECT invoice, pages FROM documents WHERE id = %s", (taken.document,)
     ).fetchone()
@@ -391,7 +393,7 @@ def _extract(
             extractor,
             Document(str(taken.document), path, pages),
             wait=wait,
-            attempted=kept,
+            attempted=(lambda _: None) if isinstance(extractor, Labels) else kept,
         )
     if read.prediction is None:
         return _commit(

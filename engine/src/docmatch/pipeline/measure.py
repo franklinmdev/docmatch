@@ -48,7 +48,7 @@ from docmatch.matching import generator
 from docmatch.matching.generator import one_per_document
 from docmatch.matching.pool import pool_from
 from docmatch.metrics.fields import FieldValues, labeled_fields
-from docmatch.pipeline import replay
+from docmatch.pipeline import labels, replay
 from docmatch.pipeline.case import Case, case_json
 from docmatch.pipeline.ladder import misread
 from docmatch.pipeline.loop import GATE, LAPSES, LEASE, MATCH, SETTLED, Reading
@@ -121,7 +121,13 @@ def measure(
     out = RUNS / schema if out is None else out
     out.mkdir(parents=True, exist_ok=True)
     with _served(
-        backend, source, dataset.root, schema, database_url, out / LOG_FILE
+        backend,
+        source,
+        dataset.root,
+        manifest_path,
+        schema,
+        database_url,
+        out / LOG_FILE,
     ) as server:
         saved = [
             server.run(
@@ -286,6 +292,7 @@ def _served(
     backend: str,
     source: Path | None,
     data_dir: Path,
+    manifest_path: Path,
     schema: str,
     database_url: str,
     log: Path,
@@ -300,6 +307,7 @@ def _served(
         "--backend",
         backend,
         *(("--run", str(source)) if backend == replay.BACKEND and source else ()),
+        *(("--manifest", str(manifest_path)) if backend == labels.BACKEND else ()),
         "--data-dir",
         str(data_dir),
         "--schema",
