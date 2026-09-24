@@ -1,9 +1,11 @@
-"""Tests for routing at `matched`, pure: no database, no backend."""
+"""Tests for routing at `matched` and the lease, pure: no database, no backend."""
 
+from docmatch.extraction import azure, gemini, openai
+from docmatch.extraction.run import ATTEMPTS, BACKOFF
 from docmatch.gate import gate
 from docmatch.matching.matcher import match
 from docmatch.matching.records import ReceivingRecord, Record
-from docmatch.pipeline.loop import route
+from docmatch.pipeline.loop import LEASE, route
 
 GLOVES = {
     "line_item_description": ("Work gloves",),
@@ -46,3 +48,12 @@ def test_every_reason_is_attached_at_once() -> None:
     held = match(Record(header={}, lines=(DEARER,)), ORDER, NOTHING_RECEIVED)
 
     assert route(FAILED, held) == ("gate failed", "match held")
+
+
+def test_a_lease_outlasts_the_slowest_bounded_extraction() -> None:
+    """Every attempt of every backend ends by its timeout, so three of them
+    with the backoffs between are the longest a live extraction holds a lease."""
+    slowest = max(gemini.TIMEOUT / 1000, openai.TIMEOUT, azure.TIMEOUT)
+    backoffs = sum(BACKOFF * 2**each for each in range(ATTEMPTS - 1))
+
+    assert LEASE.total_seconds() > ATTEMPTS * slowest + backoffs
