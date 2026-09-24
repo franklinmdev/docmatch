@@ -938,6 +938,28 @@ document. Each document moves from received to approved or to review, one
 status at a time, and its trace lists every status change with when it was
 taken up and committed, and every vendor call with its units and cost.
 
+```bash
+uv run docmatch loop --backend replay --run data/runs/gemini --out data/runs/loop-replay-gemini
+uv run docmatch pipeline --run data/runs/loop-replay-gemini
+```
+
+`loop` is one measurement. It draws one case per fixed-subset document with
+labeled lines under the generator's pinned seed, half clean and half with one
+injected discrepancy of a type that document can carry, makes a new schema
+named for the backend and the time, starts `serve` on it, and uploads the
+cases one at a time, waiting for each to reach approved or review. It writes
+`loop.json` to `--out`: per case its status, routing reasons, injected truth,
+transitions with both times, vendor calls without what came back, and any
+confidence the backend returned; ids, numbers and times only. The server's
+output goes to `serve.log` beside it. The schema is kept for review.
+
+`pipeline` reads only that file, with no Postgres and no model call, and
+prints per run the documents counted and why the rest seed no case, p50 and
+p95 end to end, and per status the wait before the loop took the document up
+and the work after, beside cost per document. A replay run is labelled with
+the run it answered from and never mixed with a live one. `--run` can be given
+more than once.
+
 ### The baseline run
 
 `docmatch eval` scores a predictions file. `docmatch extract` is what produces
@@ -1103,7 +1125,8 @@ docmatch/
       evals/           the pinned subset, the run that scores it, the corpus survey
       matching/        records, pairing, the rules, the case generator, the scorer
       resolution/      the catalog, the query set, the embedder, the Postgres working space, the arms, the run
-    tests/evals/       the synthetic corpus CI runs the eval, the match and the resolve on
+      pipeline/        the loop's statuses, API, server, replay backend, loop runs and their report
+    tests/evals/       the synthetic corpus CI runs the eval, the match, the resolve and the loop on
   apps/review/         Next.js review inbox, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
   docs/                decision records

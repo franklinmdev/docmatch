@@ -7,6 +7,7 @@ dependencies = [
     "azure-ai-documentintelligence>=1.0.2,<2",
     "fastapi>=0.141.1,<0.142",
     "google-genai>=2.23,<3",
+    "httpx>=0.28.1,<0.29",
     "openai>=3.14.1,<4",
     "pillow>=12.3,<13",
     "psycopg[binary]>=3.3.6,<4",

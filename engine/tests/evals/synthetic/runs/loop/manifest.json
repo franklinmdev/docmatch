@@ -1,0 +1,21 @@
+{
+  "split": "val",
+  "seed": 1,
+  "source": "synthetic",
+  "size": 5,
+  "document_ids": [
+    "eval0004",
+    "eval0002",
+    "eval0006",
+    "eval0003",
+    "eval0005"
+  ],
+  "rejected": {},
+  "digests": {
+    "eval0004": "369c95b3ab94d2a8ba3d317ee1c0a364bde4e6eed645e88b471c45264a8f589b",
+    "eval0002": "fc97ca6fb32610622d98cbb78556a6a15de2ac7990962aa13799e051eeec47d0",
+    "eval0006": "b4f0ced1740135ab8fc944c483952df0d7bd416e3cf00e3948e22ac5703059e2",
+    "eval0003": "56c4e0af7594e6eb0bd3ecc4812d98eae670216d56dadf5f2e6fc4f7e9fd807d",
+    "eval0005": "065a10f46ad2686a98cc6833ec461cfbecacdb5b5dd901cb9658a024435846a5"
+  }
+}

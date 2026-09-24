@@ -20,8 +20,10 @@ from docmatch.matching.generator import (
     HardNegativeKind,
     Injected,
     Seed,
+    carries,
     documents_carrying,
     generate,
+    one_per_document,
 )
 from docmatch.matching.matcher import DiscrepancyType, Place, match
 from docmatch.matching.records import (
@@ -980,3 +982,64 @@ def test_no_edit_changes_the_only_cell_a_nameless_line_pairs_on() -> None:
     assert documents_carrying((nameless,), "price variance") == 1
     assert documents_carrying((nameless,), "over-ship") == 1
     assert documents_carrying((nameless,), "unit variant") == 0
+
+
+MANY = tuple(
+    seed(
+        f"doc{number:02d}",
+        line(
+            description=f"Part {number}",
+            quantity=str(2 + number),
+            units_of_measure="SET",
+            unit_price_gross=f"{10 + number}.00",
+        ),
+        line(description=f"Fitting {number}", quantity="5", amount_gross="80.00"),
+        amount_total_tax="4.00",
+    )
+    for number in range(10)
+)
+
+
+def test_one_case_per_document_in_the_seeds_order() -> None:
+    cases = one_per_document((*MANY, NO_LINES), seed=1)
+
+    assert [case.document_id for case in cases] == [each.document_id for each in MANY]
+
+
+def test_half_the_documents_are_clean_and_half_carry_one_discrepancy() -> None:
+    cases = one_per_document(MANY, seed=1)
+
+    assert sum(case.is_clean for case in cases) == 5
+    assert all(len(case.truth) <= 1 for case in cases)
+
+
+def test_a_documents_discrepancy_is_one_it_can_carry() -> None:
+    pool = (NO_MONEY, AMOUNTS, PRICED, *MANY)
+
+    cases = one_per_document(pool, seed=3)
+
+    seeds = {each.document_id: each for each in pool}
+    assert all(
+        carries(seeds[case.document_id], case.truth[0].type, pool)
+        for case in cases
+        if case.truth
+    )
+
+
+def test_the_types_are_drawn_across_every_type_documents_carry() -> None:
+    many = tuple(
+        replace(each, document_id=f"{each.document_id}-{copy}")
+        for copy in range(8)
+        for each in MANY
+    )
+
+    drawn = Counter(
+        case.truth[0].type for case in one_per_document(many, seed=1) if case.truth
+    )
+
+    assert set(drawn) == set(INJECTED_TYPES)
+
+
+def test_the_same_seed_draws_the_same_cases_per_document() -> None:
+    assert one_per_document(MANY, seed=1) == one_per_document(MANY, seed=1)
+    assert one_per_document(MANY, seed=1) != one_per_document(MANY, seed=2)

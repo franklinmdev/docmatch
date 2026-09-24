@@ -305,6 +305,45 @@ def generate(
     return tuple(cases)
 
 
+def one_per_document(seeds: Sequence[Seed], *, seed: int = SEED) -> tuple[Case, ...]:
+    """One case per seed with lines, in the seeds' order: half of them clean,
+    the other half carrying one discrepancy, all from one draw seeded with
+    `seed` (#152).
+
+    Which documents are clean is a shuffle, the first half of it clean, so an
+    odd count leaves one more clean. An injected document draws its type
+    uniformly over the types it can carry, then near or far evenly; when
+    neither band can be drawn on it, the type is set aside and another drawn,
+    and a document that can carry none stays clean. Every line the discrepancy
+    is not on draws a hard negative or stays as labeled, as in `generate`.
+    """
+    rng = random.Random(seed)
+    pool = [each for each in seeds if each.invoice.lines]
+    order = list(pool)
+    rng.shuffle(order)
+    clean = {id(each) for each in order[: (len(order) + 1) // 2]}
+    cases: list[Case] = []
+    for each in pool:
+        draft = _Draft(each, rng, pool)
+        if id(each) not in clean:
+            _one_of_its_types(draft)
+        cases.append(_tempted(draft))
+    return tuple(cases)
+
+
+def _one_of_its_types(draft: "_Draft") -> None:
+    """One discrepancy of a type drawn uniformly over those the draft's seed
+    carries, in either band, or none when no type can be drawn on it."""
+    types = [each for each in INJECTED_TYPES if carries(draft.seed, each, draft.pool)]
+    while types:
+        type_ = draft.rng.choice(types)
+        bands: list[Band] = ["near", "far"]
+        draft.rng.shuffle(bands)
+        if any(INJECTORS[type_].inject(draft, wanted) for wanted in bands):
+            return
+        types.remove(type_)
+
+
 def eligible(
     seed: Seed, type_: DiscrepancyType, pool: Sequence[Seed]
 ) -> tuple[int, ...]:

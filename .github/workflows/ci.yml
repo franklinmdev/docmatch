@@ -130,6 +130,23 @@ jobs:
           uv run docmatch resolve
           --data-dir engine/tests/evals/synthetic
 
+      # The loop on the same fixture: one case per document with labeled
+      # lines, uploaded through a real server on a new schema in the service
+      # container, read by replay from the fixture's own loop run, so the
+      # whole path from upload to report runs on every push with no new
+      # service and no vendor call. Then the report on the saved file alone.
+      # Both only print; pytest pins what is deterministic, and latency here
+      # means nothing.
+      - name: Pipeline
+        run: |
+          uv run docmatch loop --backend replay \
+            --run engine/tests/evals/synthetic/runs/loop \
+            --data-dir engine/tests/evals/synthetic \
+            --manifest engine/tests/evals/synthetic/runs/loop/manifest.json \
+            --copies engine/tests/evals/synthetic/copies \
+            --out "$RUNNER_TEMP/loop"
+          uv run docmatch pipeline --run "$RUNNER_TEMP/loop"
+
   docs-location:
     name: docs location
     runs-on: ubuntu-latest
