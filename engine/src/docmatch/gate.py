@@ -63,6 +63,11 @@ Verdict = Literal["passed", "failed", "not checked"]
 
 TOLERANCE = Decimal("0.01")
 
+DATES = ("date_issue", "date_due")
+TOTALS = ("amount_total_gross", "amount_due")
+FIELDTYPES: tuple[str, ...] = DATES + TOTALS
+"""Every fieldtype whose values a rule compares."""
+
 UsedValue = tuple[str, str]
 """A value a rule read: its fieldtype and its text as the reading has it."""
 
@@ -105,7 +110,7 @@ def _dates_sane(header: FieldValues) -> RuleCheck:
     return _check(
         "dates sane",
         header,
-        ("date_issue", "date_due"),
+        DATES,
         read_date,
         lambda issued, due: max(issued) <= min(due),
     )
@@ -117,7 +122,7 @@ def _totals_agree(header: FieldValues) -> RuleCheck:
     return _check(
         "totals agree",
         header,
-        ("amount_total_gross", "amount_due"),
+        TOTALS,
         read_number,
         lambda gross, due: all(
             abs(one - other) <= TOLERANCE for one, other in product(gross, due)

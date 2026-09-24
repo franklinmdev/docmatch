@@ -7,6 +7,13 @@ generator injected (type, place and band), every transition with both its
 times, every vendor call without what came back, and the confidence numbers
 the backend returned, keyed by fieldtype, where it returns any. The report
 reads this file and nothing else, never Postgres, and calls no model (#152).
+
+For the routing ladder, each case also keeps what routing and escape counting
+read, with no value a document says: the gate's verdict, the types of the hold
+findings matching gave, the confidence of each value the gate's checked rules
+used, and which of the gate's fieldtypes the reading holds a value of that its
+label does not. `loop` works these out as it saves the run, where the reading
+and the labels are at hand.
 """
 
 from datetime import datetime
@@ -16,9 +23,12 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from docmatch.extraction.extractor import Confidence
+from docmatch.gate import Verdict
 from docmatch.matching.generator import Injected
+from docmatch.matching.matcher import DiscrepancyType
 from docmatch.metrics.fields import first_problem
 from docmatch.pipeline.loop import Status
+from docmatch.pipeline.routing import Standing, shortcut_of
 
 LOOP_FILE = "loop.json"
 
@@ -72,6 +82,27 @@ class SavedCase(BaseModel):
     transitions: tuple[SavedTransition, ...]
     vendor_calls: tuple[SavedCall, ...]
     confidence: Confidence | None = None
+    gate: Verdict | None
+    """The gate's verdict; None when the reading never reached the gate."""
+    holds: tuple[DiscrepancyType, ...]
+    """The types of the hold findings matching gave, in report order; none
+    when the document was never matched."""
+    gated_confidence: tuple[float | None, ...]
+    """The confidence of each value the gate's checked rules used, None where
+    a value has none; empty on a backend reporting no confidence."""
+    misread: tuple[str, ...]
+    """The gate's fieldtypes the reading holds a value of that its label does
+    not: the second cause of an escaped document."""
+
+    @property
+    def standing(self) -> Standing:
+        """What routing reads of the case, under any policy."""
+        return Standing(
+            shortcut=shortcut_of(self.routing_reasons),
+            gate=self.gate,
+            holds=self.holds,
+            gated_confidence=self.gated_confidence,
+        )
 
 
 class LoopRun(BaseModel):

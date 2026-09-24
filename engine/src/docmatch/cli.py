@@ -37,8 +37,8 @@ schema with one backend, `replay` answering from a saved run, which is how an
 uploaded case goes from received to approved or review. `docmatch loop`
 starts that server on a new schema, uploads one case per fixed-subset document
 one at a time, and saves the loop run; `docmatch pipeline --run <dir>` prints
-its latency and cost per status from that file alone, with no Postgres and no
-model call.
+its latency and cost per status and its routing ladder from that file alone,
+with no Postgres and no model call.
 
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
@@ -126,8 +126,9 @@ from docmatch.metrics.line_items import (
 )
 from docmatch.metrics.score import Score, ratio, share_of
 from docmatch.pipeline import replay, serve
+from docmatch.pipeline.ladder import Rung
 from docmatch.pipeline.measure import RUNS, LoopError, measure
-from docmatch.pipeline.report import Report, Spread, report
+from docmatch.pipeline.report import LABELS, Report, Spread, report
 from docmatch.pipeline.saved import LOOP_FILE, LoopRun, LoopRunError, read_loop_run
 from docmatch.resolution import run as resolution
 from docmatch.resolution import sweep as resolution_sweep
@@ -535,7 +536,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     reporting = subcommands.add_parser(
         "pipeline",
-        help="print a saved loop run's latency and cost per status",
+        help="print a saved loop run's latency, cost and routing ladder",
     )
     reporting.add_argument(
         "--run",
@@ -839,7 +840,9 @@ def render_loop(where: Path, run: LoopRun) -> str:
 
 def render_pipeline(reports: Sequence[tuple[Path, Report]]) -> str:
     """Each loop run on its own, never mixed: latency end to end and per
-    status with wait and work apart, and cost per document per status."""
+    status with wait and work apart, cost per document per status, and the
+    routing ladder. The labels control closes the report, and when no labels
+    run was given a line says so and how to make one."""
     lines: list[str] = []
     for where, reported in reports:
         run, end_to_end = reported.run, reported.end_to_end_spread
@@ -877,8 +880,53 @@ def render_pipeline(reports: Sequence[tuple[Path, Report]]) -> str:
             ),
             "  wait runs from the previous transition to the claim, work from the "
             "claim to the commit",
+            "",
+            *_ladder(reported.ladder),
+        ]
+    if not any(reported.run.backend == LABELS for _, reported in reports):
+        lines += [
+            "",
+            "Labels control",
+            f"  no labels run given; `docmatch loop --backend {LABELS}` makes it",
         ]
     return "\n".join([*lines, ""])
+
+
+def _ladder(rungs: Sequence[Rung]) -> list[str]:
+    """One row per rung, each routing what the row above does and more."""
+    return [
+        *_table(
+            (
+                "rung, routes to review",
+                "review rate",
+                "approved",
+                "escape rate",
+                "injected hold",
+                "misread gate value",
+            ),
+            [
+                (
+                    f"{each.policy.name} {'' if each.policy.name == 'P0' else '+ '}"
+                    f"{each.policy.adds}",
+                    f"{each.review_rate:.3f}",
+                    str(each.approved),
+                    *(
+                        "none" if rate is None else f"{rate:.3f}"
+                        for rate in (
+                            each.escape_rate,
+                            each.injected_hold_rate,
+                            each.misread_rate,
+                        )
+                    ),
+                )
+                for each in rungs
+            ],
+        ),
+        "  review rate is over every document; escape rate and each cause over the",
+        "  documents the rung approves. A document escaping on both causes counts",
+        "  once in the escape rate and once under each cause, so they can sum",
+        "  above it",
+    ]
 
 
 def _backend(run: LoopRun) -> str:

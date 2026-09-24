@@ -950,16 +950,27 @@ named for the backend and the time, starts `serve` on it, and uploads the
 cases one at a time, waiting for each to reach approved or review. It writes
 `loop.json` to `--out`, by default `data/runs/` and the schema's name: per
 case its status, routing reasons, injected truth, transitions with both times,
-vendor calls without what came back, and any confidence the backend returned;
-ids, numbers and times only. The server's output goes to `serve.log` beside
+vendor calls without what came back, and any confidence the backend returned,
+with what the routing ladder reads worked out against the labels as it saves:
+the gate's verdict, the hold types matching found, the confidence of each
+value the gate checked, and which of the gate's fieldtypes were read unlike
+their labels; ids, numbers and times only. The server's output goes to `serve.log` beside
 it. The schema is kept for review.
 
 `pipeline` reads only that file, with no Postgres and no model call, and
 prints per run the documents counted and why the rest seed no case, p50 and
 p95 end to end, and per status the wait before the loop took the document up
-and the work after, beside cost per document. A replay run is labeled with
-the run it answered from and never mixed with a live one. `--run` can be given
-more than once.
+and the work after, beside cost per document. Then the routing ladder, each
+rung recomputed from the file: review rate over every document, and escape
+rate over the documents the rung approves, split by cause (an injected
+discrepancy that holds, a gate value read unlike its label). P0 routes
+nothing; P1 adds extraction and pipeline failed; P2 gate failed; P3 a hold on
+price variance or tax mismatch; P4 any hold, the loop's own policy, which must
+give back the statuses the loop reached; P5, on a backend that reports
+confidence, a checked value's confidence below each edge from 0.1 to 0.9. A
+replay run is labeled with the run it answered from and never mixed with a
+live one. `--run` can be given more than once, and when none is a labels run
+the report ends saying so.
 
 ### The baseline run
 

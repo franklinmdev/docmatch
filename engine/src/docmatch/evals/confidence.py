@@ -228,7 +228,7 @@ def sweep(readings: Sequence[Checked]) -> Sweep:
     for edge in EDGES:
         counts = dict.fromkeys(COUNTS, 0)
         for reading in readings:
-            flagged = _flagged(reading.confidence, edge)
+            flagged = below_edge(reading.confidence, edge)
             if not reading.wrong:
                 counts["gate_false_alarms"] += reading.failed
                 counts["confidence_false_alarms"] += flagged
@@ -243,7 +243,7 @@ def sweep(readings: Sequence[Checked]) -> Sweep:
     )
 
 
-def _flagged(confidence: Sequence[float | None], edge: float) -> bool:
+def below_edge(confidence: Sequence[float | None], edge: float) -> bool:
     """Whether the lowest confidence that exists is below the edge."""
     known = [each for each in confidence if each is not None]
     return bool(known) and min(known) < edge

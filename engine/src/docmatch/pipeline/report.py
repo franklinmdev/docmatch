@@ -1,4 +1,5 @@
-"""What `docmatch pipeline --run` reads off one saved loop run: latency and cost.
+"""What `docmatch pipeline --run` reads off one saved loop run: latency, cost
+and the routing ladder, which `ladder` works out.
 
 End to end is the upload accepted to the loop settling the document at
 `approved` or `needs_review`, queue wait included (#152). Per status, each
@@ -19,8 +20,13 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from docmatch.metrics.score import percentile_of
+from docmatch.pipeline.ladder import Rung, ladder
 from docmatch.pipeline.loop import PENDING, SETTLED, Status
 from docmatch.pipeline.saved import LoopRun, LoopRunError, SavedCase
+
+LABELS = "labels"
+"""The backend the labels control runs the loop with, the labels as its
+reading (#172)."""
 
 
 @dataclass(frozen=True)
@@ -57,6 +63,7 @@ class Report:
     """Seconds per case, in the run's order."""
     cost_per_document: Decimal
     statuses: tuple[StatusRow, ...]
+    ladder: tuple[Rung, ...]
 
     @property
     def end_to_end_spread(self) -> Spread:
@@ -69,7 +76,7 @@ class Report:
 
 
 def report(run: LoopRun) -> Report:
-    """The latency and cost of one loop run."""
+    """The latency, cost and routing ladder of one loop run."""
     if not run.cases:
         raise LoopRunError("the loop run has no case, so there is nothing to report")
     counted = len(run.cases)
@@ -102,6 +109,7 @@ def report(run: LoopRun) -> Report:
             )
             for each in PENDING
         ),
+        ladder=ladder(run),
     )
 
 

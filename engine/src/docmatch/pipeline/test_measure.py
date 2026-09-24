@@ -22,6 +22,7 @@ from docmatch.matching.records import Record
 from docmatch.pipeline.conftest import SYNTHETIC
 from docmatch.pipeline.loop import PENDING
 from docmatch.pipeline.measure import LoopError, _Server
+from docmatch.pipeline.report import report
 from docmatch.pipeline.saved import read_loop_run
 from docmatch.pipeline.store import drop_schema
 from docmatch.resolution.catalog import ResolutionError
@@ -111,6 +112,52 @@ def test_the_loop_run_keeps_each_cases_truth(looped: Path) -> None:
     }
 
 
+def test_the_loop_run_keeps_what_the_ladder_reads(looped: Path) -> None:
+    """eval0005's issue date is read unlike its label, with the gate still
+    passing, and its due date at 0.35 confidence (#173)."""
+    kept = {
+        each.document_id: (each.gate, each.holds, each.gated_confidence, each.misread)
+        for each in read_loop_run(looped).cases
+    }
+
+    assert kept == {
+        "eval0004": (None, (), (), ()),
+        "eval0006": ("not checked", ("short-ship",), (), ()),
+        "eval0003": ("failed", (), (None, 0.72), ()),
+        "eval0005": ("passed", (), (0.35, 0.99, 0.97, 0.99), ("date_issue",)),
+    }
+
+
+def test_the_ladder_on_the_fixture_is_pinned(looped: Path) -> None:
+    """Review count, approved, and escapes in all and by cause, per rung; P5
+    because the fixture's replay source saved a confidence."""
+    run = read_loop_run(looped)
+    rungs = report(run).ladder
+
+    assert [
+        (
+            each.policy.name,
+            each.policy.edge,
+            each.reviewed,
+            each.approved,
+            each.escaped,
+            each.injected_hold,
+            each.misread,
+        )
+        for each in rungs
+    ] == [
+        ("P0", None, 0, 4, 2, 1, 1),
+        ("P1", None, 1, 3, 2, 1, 1),
+        ("P2", None, 2, 2, 2, 1, 1),
+        ("P3", None, 2, 2, 2, 1, 1),
+        ("P4", None, 3, 1, 1, 0, 1),
+        *(("P5", edge / 10, 3, 1, 1, 0, 1) for edge in range(1, 4)),
+        *(("P5", edge / 10, 4, 0, 0, 0, 0) for edge in range(4, 10)),
+    ]
+    p4 = next(each for each in rungs if each.policy.name == "P4")
+    assert p4.approved == sum(each.status == "approved" for each in run.cases)
+
+
 def test_the_schema_is_kept_after_the_run(looped: Path, database_url: str) -> None:
     schema = read_loop_run(looped).database_schema
 
@@ -142,6 +189,11 @@ def test_pipeline_prints_p50_and_p95_per_status_from_the_file_alone(
         ), row
     received = next(line for line in printed.splitlines() if "received" in line)
     assert received.endswith("$0.000838")
+    assert re.search(
+        r"\n  P4 \+ match held on any hold type.* 0\.750 +1 +1\.000", printed
+    )
+    assert "confidence below 0.9" in printed
+    assert "no labels run given" in printed
 
 
 def test_the_loop_run_carries_no_document_contents(looped: Path) -> None:
@@ -174,4 +226,4 @@ def test_a_server_that_drops_the_connection_is_a_loop_error(tmp_path: Path) -> N
     )[0]
 
     with pytest.raises(LoopError, match=re.escape(str(log))):
-        server.run(case, SYNTHETIC / "copies")
+        server.run(case, SYNTHETIC / "copies", {})

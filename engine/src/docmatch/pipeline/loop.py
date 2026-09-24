@@ -33,13 +33,13 @@ claim that finds the third lapse is the one that routes the document.
 Routing
 -------
 
-Decided once, at `matched`, with every reason attached: gate failed, match
-held (any hold finding). A gate that checked nothing and a match whose only
-findings are notes never route. No reason means `approved` with the system as
-actor. Two shortcuts route where the document stands: a failed extraction,
-with extraction failed, and a document whose lease lapsed a third time at one
-status, with pipeline failed naming that status and every reason already
-known there (ADR 0002, #155).
+Decided once, at `matched`, with every reason attached, by `routing.route`
+under P4: gate failed, match held (any hold finding). A gate that checked
+nothing and a match whose only findings are notes never route. No reason
+means `approved` with the system as actor. Two shortcuts route where the
+document stands: a failed extraction, with extraction failed, and a document
+whose lease lapsed a third time at one status, with pipeline failed naming
+that status and every reason already known there (ADR 0002, #155).
 
 Resolution is a pass-through checkpoint for now: `resolved` saves no output
 and the match never reads one (#170 fills it in).
@@ -73,6 +73,7 @@ from docmatch.matching.matcher import MatchResult, explain, match
 from docmatch.matching.records import read_record
 from docmatch.metrics.fields import Prediction
 from docmatch.pipeline.case import CASE, Case, case_json, digest
+from docmatch.pipeline.routing import P4, RoutingReason, route, standing
 from docmatch.pipeline.store import Connection
 
 Status = Literal[
@@ -85,19 +86,6 @@ Status = Literal[
     "approved",
     "rejected",
 ]
-
-RoutingReason = Literal[
-    "extraction failed",
-    "gate failed",
-    "match held",
-    "pipeline failed at received",
-    "pipeline failed at extracted",
-    "pipeline failed at validated",
-    "pipeline failed at resolved",
-    "pipeline failed at matched",
-]
-"""Why a document goes to review. Pipeline failed names the status the loop
-kept failing to move the document past, one reason per pending status."""
 
 PENDING: tuple[Status, ...] = (
     "received",
@@ -335,20 +323,6 @@ def _let_go(connection: Connection, taken: Claim) -> None:
     )
 
 
-def route(
-    checked: GateResult | None, result: MatchResult | None
-) -> tuple[RoutingReason, ...]:
-    """Every reason the saved gate and match results give, in the order a
-    reviewer reads them; an output not yet saved gives none. At `matched`,
-    none means the system approves the document."""
-    reasons: list[RoutingReason] = []
-    if checked is not None and checked.verdict == "failed":
-        reasons.append("gate failed")
-    if result is not None and result.verdict == "held":
-        reasons.append("match held")
-    return tuple(reasons)
-
-
 def _known(connection: Connection, document: int) -> tuple[RoutingReason, ...]:
     """The reasons the outputs saved so far already give."""
     row = connection.execute(
@@ -357,8 +331,11 @@ def _known(connection: Connection, document: int) -> tuple[RoutingReason, ...]:
     assert row is not None
     checked, matched = row
     return route(
-        None if checked is None else GATE.validate_python(checked),
-        None if matched is None else MATCH.validate_python(matched),
+        standing(
+            None if checked is None else GATE.validate_python(checked),
+            None if matched is None else MATCH.validate_python(matched),
+        ),
+        P4,
     )
 
 

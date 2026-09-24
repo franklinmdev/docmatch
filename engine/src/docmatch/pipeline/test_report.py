@@ -75,6 +75,10 @@ def approved(document_id: str, offset: float, *calls: SavedCall) -> SavedCase:
             moved("matched", "approved", t + 10, t + 11),
         ),
         vendor_calls=calls,
+        gate="passed",
+        holds=(),
+        gated_confidence=(),
+        misread=(),
     )
 
 
@@ -90,6 +94,10 @@ def failed_extraction(document_id: str, *calls: SavedCall) -> SavedCase:
             moved("received", "needs_review", 2, 20, "extraction failed"),
         ),
         vendor_calls=calls,
+        gate=None,
+        holds=(),
+        gated_confidence=(),
+        misread=(),
     )
 
 
@@ -167,6 +175,10 @@ def test_a_case_the_loop_never_settled_is_refused() -> None:
             moved("received", "extracted", 1, 2),
         ),
         vendor_calls=(),
+        gate=None,
+        holds=(),
+        gated_confidence=(),
+        misread=(),
     )
 
     with pytest.raises(LoopRunError, match="c never settled"):

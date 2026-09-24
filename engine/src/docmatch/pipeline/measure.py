@@ -41,13 +41,18 @@ import httpx
 
 from docmatch.docile.dataset import DocileDataset
 from docmatch.evals import public
+from docmatch.evals.confidence import gated_confidence
 from docmatch.evals.manifest import Manifest
+from docmatch.extraction.derived import derived_header
 from docmatch.matching import generator
 from docmatch.matching.generator import one_per_document
 from docmatch.matching.pool import pool_from
+from docmatch.metrics.fields import FieldValues, labeled_fields
 from docmatch.pipeline import replay
 from docmatch.pipeline.case import Case, case_json
-from docmatch.pipeline.loop import LAPSES, LEASE, SETTLED
+from docmatch.pipeline.ladder import misread
+from docmatch.pipeline.loop import GATE, LAPSES, LEASE, MATCH, SETTLED, Reading
+from docmatch.pipeline.routing import standing
 from docmatch.pipeline.saved import LoopRun, SavedCase, write_loop_run
 from docmatch.pipeline.serve import HOST
 from docmatch.resolution.store import DATABASE_URL_VARIABLE, connect
@@ -112,7 +117,12 @@ def measure(
     out = RUNS / schema if out is None else out
     out.mkdir(parents=True, exist_ok=True)
     with _served(backend, source, schema, database_url, out / LOG_FILE) as server:
-        saved = [server.run(each, copies) for each in cases]
+        saved = [
+            server.run(
+                each, copies, labeled_fields(dataset.annotation(each.document_id))
+            )
+            for each in cases
+        ]
     run = LoopRun(
         backend=backend,
         source=None if source is None else str(source),
@@ -171,8 +181,11 @@ class _Server:
                 f"in {self.log}"
             )
 
-    def run(self, case: generator.Case, copies: Path) -> SavedCase:
-        """One case uploaded, waited on until it settles, and its trace read."""
+    def run(
+        self, case: generator.Case, copies: Path, labeled: FieldValues
+    ) -> SavedCase:
+        """One case uploaded, waited on until it settles, and its trace read;
+        what the ladder reads worked out against the document's labels."""
         invoice = public.path(copies, case.document_id).read_bytes()
         body = json.dumps(case_json(Case(case.purchase_order, case.receipt)))
         uploaded = self._request(
@@ -200,6 +213,7 @@ class _Server:
                 "transitions": trace["transitions"],
                 "vendor_calls": trace["vendor_calls"],
                 "confidence": None if reading is None else reading["confidence"],
+                **_for_the_ladder(view, labeled),
             }
         )
 
@@ -233,6 +247,32 @@ class _Server:
                 f"{method} {path} got no answer from `docmatch serve` ({error!r}); "
                 f"its output is in {self.log}"
             ) from error
+
+
+def _for_the_ladder(view: dict[str, object], labeled: FieldValues) -> dict[str, object]:
+    """What routing and escape counting read of a settled document, worked out
+    from its view and its labels, keeping no value the document says."""
+    reading = (
+        None if view["reading"] is None else Reading.model_validate(view["reading"])
+    )
+    checked = None if view["gate"] is None else GATE.validate_python(view["gate"])
+    result = None if view["match"] is None else MATCH.validate_python(view["match"])
+    known = standing(checked, result)
+    confident = (
+        ()
+        if reading is None or reading.confidence is None or checked is None
+        else gated_confidence(reading.prediction.fields, reading.confidence, checked)
+    )
+    return {
+        "gate": known.gate,
+        "holds": known.holds,
+        "gated_confidence": confident,
+        "misread": ()
+        if reading is None
+        else misread(
+            derived_header(reading.prediction, reading.currency_symbols), labeled
+        ),
+    }
 
 
 @contextmanager
