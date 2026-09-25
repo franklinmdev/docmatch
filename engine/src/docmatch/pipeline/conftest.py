@@ -182,8 +182,10 @@ def connection(database_url: str, schema: str) -> Iterator[Connection]:
 
 
 @pytest.fixture
-def client(database_url: str, schema: str) -> Iterator[TestClient]:
-    with TestClient(api.create(database_url, schema, replay.BACKEND)) as client:
+def client(database_url: str, schema: str, resolver: Resolve) -> Iterator[TestClient]:
+    with TestClient(
+        api.create(database_url, schema, replay.BACKEND, resolver)
+    ) as client:
         yield client
 
 

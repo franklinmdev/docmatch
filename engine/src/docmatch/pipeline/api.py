@@ -9,7 +9,9 @@ pool, and `TestClient` from `fastapi.testclient` over httpx 0.28.1.
 `serve` binds it to 127.0.0.1 with no auth and no versioning (rule 1). The
 backend is fixed when the server starts, so the upload carries no benchmark
 parameter (#164). Each request opens its own connection on the schema, which
-`serve` has already prepared.
+`serve` has already prepared. An edit resolves through the resolver it is
+given, on a connection of its own that psycopg lets requests share (psycopg
+3.3.6, docs "Concurrent operations": connections are thread-safe).
 
 - `POST /documents`: part `invoice`, the PDF unchanged, and part `case`, the
   case as JSON text. 201 with the new document, 200 with the one already
@@ -20,6 +22,13 @@ parameter (#164). Each request opens its own connection on the schema, which
 - `GET /documents/{id}`: the document's full view, with the backend the
   server reads with.
 - `GET /documents/{id}/pages/{n}`: page n, 1-based, as a PNG.
+- `POST /documents/{id}/edits`: one edit to the reading as JSON, a header
+  value (`{"kind": "header", "fieldtype": ..., "value": ...}`), a line cell
+  (`"cell"` with `line`), or a line removed, restored or added (`"line
+  removed"`, `"line restored"` with `line`, `"line added"`). Saved, the gate,
+  resolution and match rerun in the request, and the full view answered;
+  409 outside `needs_review` or for a document with no reading, 422 for an
+  edit the reading cannot take. The purchase order and receipt take none.
 - `POST /documents/{id}/decision`: JSON `{"decision": "approved"}` or
   `"rejected"`, final; answers the full view, 409 outside `needs_review`.
 - `GET /documents/{id}/trace`: its transitions and vendor calls, without
@@ -44,6 +53,7 @@ from pydantic import BaseModel
 from docmatch.extraction.pages import MIME_TYPE, PageError
 from docmatch.pipeline import loop
 from docmatch.pipeline.case import CaseError, read_case
+from docmatch.pipeline.edits import Edit, EditError
 from docmatch.pipeline.store import Connection, open_schema
 
 
@@ -53,8 +63,11 @@ class Decided(BaseModel):
     decision: loop.Decision
 
 
-def create(database_url: str, schema: str, backend: str) -> FastAPI:
-    """The API over one prepared schema, read with one backend."""
+def create(
+    database_url: str, schema: str, backend: str, resolve: loop.Resolve
+) -> FastAPI:
+    """The API over one prepared schema, read with one backend, an edit's
+    lines resolved through `resolve`."""
     app = FastAPI(title="docmatch")
 
     def connection() -> Iterator[Connection]:
@@ -99,6 +112,19 @@ def create(database_url: str, schema: str, backend: str) -> FastAPI:
         if png is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "no such page")
         return Response(png, media_type=MIME_TYPE)
+
+    @app.post("/documents/{document}/edits")
+    def edits(document: int, change: Edit, connection: Connected) -> dict[str, object]:
+        _found(loop.view(connection, document))
+        try:
+            loop.correct(connection, document, change, resolve)
+        except loop.Refused as refused:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(refused)) from None
+        except EditError as error:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)
+            ) from None
+        return shown(connection, document)
 
     @app.post("/documents/{document}/decision")
     def decision(

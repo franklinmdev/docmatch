@@ -145,7 +145,9 @@ def test_the_match_result_is_the_same_with_and_without_resolution(
         prepare(database_url, schema)
         with (
             open_schema(database_url, schema) as opened,
-            TestClient(api.create(database_url, schema, replay.BACKEND)) as client,
+            TestClient(
+                api.create(database_url, schema, replay.BACKEND, resolve)
+            ) as client,
         ):
             document = uploaded(client, invoice, case)
             settle(opened, replayed, resolve)

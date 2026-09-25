@@ -79,6 +79,7 @@ from docmatch.matching.matcher import MatchResult, explain, match
 from docmatch.matching.records import read_record
 from docmatch.metrics.fields import Prediction
 from docmatch.pipeline.case import CASE, Case, case_json, digest
+from docmatch.pipeline.edits import EDIT, Edit, Edited, fold
 from docmatch.pipeline.labels import Labels
 from docmatch.pipeline.routing import P4, RoutingReason, route, standing
 from docmatch.pipeline.store import Connection
@@ -270,8 +271,7 @@ def advance(
     if taken.status == "received":
         return _extract(connection, taken, extractor, wait)
     if taken.status == "extracted":
-        reading = _reading(connection, taken.document)
-        checked = gate(derived_header(reading.prediction, reading.currency_symbols))
+        checked = _checked(_reading(connection, taken.document))
         return _commit(
             connection,
             taken,
@@ -279,13 +279,7 @@ def advance(
             ("gate", GATE.dump_python(checked, mode="json")),
         )
     if taken.status == "validated":
-        reading = _reading(connection, taken.document)
-        resolution = [
-            None
-            if (description := description_of(row)) is None
-            else resolve(description)
-            for row in reading.prediction.rows
-        ]
+        resolution = _resolved(_reading(connection, taken.document), resolve)
         return _commit(
             connection,
             taken,
@@ -293,12 +287,8 @@ def advance(
             ("resolution", RESOLUTION.dump_python(resolution, mode="json")),
         )
     if taken.status == "resolved":
-        reading = _reading(connection, taken.document)
-        case = _case(connection, taken.document)
-        result = match(
-            read_record(reading.prediction, reading.currency_symbols),
-            case.purchase_order,
-            case.receipt,
+        result = _matched(
+            _reading(connection, taken.document), _case(connection, taken.document)
         )
         return _commit(
             connection,
@@ -313,6 +303,28 @@ def advance(
         return _commit(connection, taken, "approved")
     raise Refused(
         f"document {taken.document} is {taken.status}; the loop moves it no further"
+    )
+
+
+def _checked(reading: Reading) -> GateResult:
+    """The gate on a reading's header, derived values beside it."""
+    return gate(derived_header(reading.prediction, reading.currency_symbols))
+
+
+def _resolved(reading: Reading, resolve: Resolve) -> list[Resolved | None]:
+    """Each line's resolution, None for a line with no description."""
+    return [
+        None if (description := description_of(row)) is None else resolve(description)
+        for row in reading.prediction.rows
+    ]
+
+
+def _matched(reading: Reading, case: Case) -> MatchResult:
+    """The reading set against the case's purchase order and receipt."""
+    return match(
+        read_record(reading.prediction, reading.currency_symbols),
+        case.purchase_order,
+        case.receipt,
     )
 
 
@@ -549,6 +561,69 @@ def decide(connection: Connection, document: int, to: Decision) -> None:
         )
 
 
+def correct(
+    connection: Connection, document: int, change: Edit, resolve: Resolve
+) -> None:
+    """A reviewer's edit, saved, and the gate, resolution and match rerun on
+    the reading it leaves through the steps the worker takes, kept beside the
+    system's checkpoints. The document stays in review: code redoes the
+    arithmetic and the reviewer still decides (#150 point 5). The row is
+    locked throughout, so a decision waits for the rerun. Raises `Refused`
+    when the document is not in review or has no reading to correct, and
+    `EditError`, saving nothing, when the reading cannot take the edit."""
+    with connection.transaction():
+        row = connection.execute(
+            'SELECT status, reading, "case" FROM documents WHERE id = %s FOR UPDATE',
+            (document,),
+        ).fetchone()
+        if row is None or row[0] != "needs_review":
+            raise Refused(f"document {document} is not in review")
+        if row[1] is None:
+            raise Refused(f"document {document} has no reading to correct")
+        _, reading = _edited(
+            Reading.model_validate(row[1]), [*_edits(connection, document), change]
+        )
+        connection.execute(
+            """
+            INSERT INTO edits (document, edit, made_at)
+            VALUES (%s, %s, clock_timestamp())
+            """,
+            (document, Jsonb(EDIT.dump_python(change, mode="json"))),
+        )
+        rerun = {
+            "gate": GATE.dump_python(_checked(reading), mode="json"),
+            "resolution": RESOLUTION.dump_python(
+                _resolved(reading, resolve), mode="json"
+            ),
+            "match": MATCH.dump_python(
+                _matched(reading, CASE.validate_python(row[2])), mode="json"
+            ),
+        }
+        connection.execute(
+            "UPDATE documents SET rerun = %s WHERE id = %s", (Jsonb(rerun), document)
+        )
+
+
+def _edits(connection: Connection, document: int) -> list[Edit]:
+    """Every edit made to the document's reading, in the order made."""
+    return [
+        EDIT.validate_python(row[0])
+        for row in connection.execute(
+            "SELECT edit FROM edits WHERE document = %s ORDER BY id", (document,)
+        ).fetchall()
+    ]
+
+
+def _edited(read: Reading, edits: Sequence[Edit]) -> tuple[Edited, Reading]:
+    """The reading as read with every edit applied, and what they leave."""
+    edited = fold(read.prediction, read.confidence, edits)
+    return edited, Reading(
+        prediction=edited.prediction,
+        currency_symbols=read.currency_symbols,
+        confidence=edited.confidence,
+    )
+
+
 def queue(connection: Connection, status: Status) -> list[dict[str, object]]:
     """The documents at one status, oldest first, each with its routing
     reasons: what the review page's strip lists."""
@@ -582,23 +657,44 @@ def view(connection: Connection, document: int) -> dict[str, object] | None:
     """One document as the API shows it: status, pages, case, reading, gate,
     resolution per line, match result with each finding explained, routing
     reasons, cost and latency; None when there is no such document. An
-    output not yet saved is null."""
+    output not yet saved is null.
+
+    Once a reviewer has edited it, the reading is the one the edits leave,
+    the gate, resolution and match are the rerun's, `line_ids` names the line
+    each place holds, and `corrections` lists the net changes: settled once
+    the document is decided, since no edit is taken after that."""
     row = connection.execute(
         """
-        SELECT status, pages, "case", reading, gate, resolution, match
+        SELECT status, pages, "case", reading, gate, resolution, match, rerun
         FROM documents WHERE id = %s
         """,
         (document,),
     ).fetchone()
     if row is None:
         return None
-    status, pages, case, reading, checked, resolution, matched = row
+    status, pages, case, read, checked, resolution, matched, rerun = row
+    if rerun is not None:
+        rerun = cast(dict[str, object], rerun)
+        checked, resolution, matched = (
+            rerun["gate"],
+            rerun["resolution"],
+            rerun["match"],
+        )
+    edited, reading = (
+        (None, None)
+        if read is None
+        else _edited(Reading.model_validate(read), _edits(connection, document))
+    )
     return {
         "id": document,
         "status": status,
         "pages": pages,
         "case": case,
-        "reading": reading,
+        "reading": None if reading is None else reading.model_dump(mode="json"),
+        "line_ids": [] if edited is None else list(edited.line_ids),
+        "corrections": []
+        if edited is None
+        else [each.model_dump(mode="json") for each in edited.corrections],
         "gate": None if checked is None else _gate_view(GATE.validate_python(checked)),
         "resolution": resolution,
         "match": None
