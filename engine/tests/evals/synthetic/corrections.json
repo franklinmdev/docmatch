@@ -29,7 +29,30 @@
           }
         }
       ],
-      "lines": {}
+      "lines": {
+        "0": {
+          "line_item_quantity": [
+            "2"
+          ],
+          "line_item_description": [
+            "Lunch platter"
+          ],
+          "line_item_amount_gross": [
+            "76.40"
+          ]
+        },
+        "1": {
+          "line_item_description": [
+            "Delivery"
+          ],
+          "line_item_quantity": [
+            "1"
+          ],
+          "line_item_amount_gross": [
+            "0.00"
+          ]
+        }
+      }
     },
     {
       "document_id": "eval0003",

@@ -172,6 +172,29 @@ def test_a_line_removed_asserts_no_line_pairs_with_it(
     )
 
 
+def test_the_lines_left_compete_for_the_run_s_rows_like_the_metric_s_pairing(
+    dataset: DocileDataset,
+) -> None:
+    """The removed line shares its quantity with the torque wrench, which
+    the run reads; the whole reading as left is paired, so the wrench claims
+    its own row and the removed line pairs with nothing, as it should."""
+    hex_key_set = {
+        "line_item_quantity": ["3"],
+        "line_item_description": ["Hex key set"],
+        "line_item_amount_gross": ["45.00"],
+    }
+    export = exported(
+        "eval0003",
+        {"kind": "line removed", "line": 2, "read": DELIVERY},
+        lines={"0": hex_key_set, "1": TORQUE_WRENCH},
+    )
+    run = {"eval0003": reading(line_items=[hex_key_set, TORQUE_WRENCH])}
+
+    assert score_corrections(export, run, dataset).lines[1] == Tally(
+        "line removed", corrections=1, read_right=1, label_agrees=1
+    )
+
+
 def test_a_document_the_run_did_not_read_is_read_as_nothing(
     dataset: DocileDataset,
 ) -> None:

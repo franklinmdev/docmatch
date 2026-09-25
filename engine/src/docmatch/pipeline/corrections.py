@@ -7,9 +7,9 @@ eval stays free of Postgres.
 
 A document is named in the file by its DocILE id, found from its PDF's
 SHA-256 against the digests the manifest pins, the way replay and labels
-recognize an upload. Only the values the reviewer changed leave, plus, for a
-cell correction, its line as left, which the eval needs to find the line in
-another reading.
+recognize an upload. Only the values the reviewer changed leave, plus, when a
+line was corrected, the reading's lines as left, which the eval pairs with
+another reading's the way the line-item metric does.
 """
 
 import json
@@ -59,11 +59,7 @@ def export(schema: str, settled: Sequence[Settled], pinned: Manifest) -> Export:
                 reading=reading_digest(each.read),
                 decision=each.decision,
                 corrections=tuple(_exported(c) for c in each.edited.corrections),
-                lines={
-                    c.line: _line(each.edited, c.line)
-                    for c in each.edited.corrections
-                    if isinstance(c, CellCorrection)
-                },
+                lines=_lines(each.edited),
             )
         )
     return Export(database_schema=schema, documents=tuple(documents))
@@ -92,10 +88,15 @@ def _exported(correction: Correction) -> Exported:
     )
 
 
-def _line(edited: Edited, line: int) -> dict[str, Texts]:
-    """A line as the edits left it, each cell with a value."""
-    row = edited.prediction.rows[edited.line_ids.index(line)]
-    return {fieldtype: tuple(texts) for fieldtype, texts in row.items() if texts}
+def _lines(edited: Edited) -> dict[int, dict[str, Texts]]:
+    """Every line as the edits left it, each cell with a value, when any line
+    was corrected; none when only the header was."""
+    if all(isinstance(each, HeaderCorrection) for each in edited.corrections):
+        return {}
+    return {
+        line: {fieldtype: tuple(texts) for fieldtype, texts in row.items() if texts}
+        for line, row in zip(edited.line_ids, edited.prediction.rows, strict=True)
+    }
 
 
 def write(exported: Export, out: Path) -> None:

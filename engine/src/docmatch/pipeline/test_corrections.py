@@ -35,7 +35,7 @@ def decide(client: TestClient, document: int, decision: str) -> None:
     assert response.status_code == 200, response.text
 
 
-def test_the_export_holds_only_what_the_reviewer_changed(
+def test_the_export_holds_what_the_reviewer_changed_and_the_lines_left(
     client: TestClient,
     connection: Connection,
     replayed: Replay,
@@ -45,8 +45,9 @@ def test_the_export_holds_only_what_the_reviewer_changed(
 ) -> None:
     """eval0003 approved with a header value and a cell put right, eval0005
     rejected with a line removed, one approved untouched and one still in
-    review: only the two decided with a correction leave, and of them only
-    what was changed, and the corrected cell's line as left."""
+    review: only the two decided with a correction leave, and of them what
+    was changed, and, since a line was corrected on each, every line as
+    left to pair them by."""
     totals = upload(client, pdf(tmp_path, "eval0003"), case_text(ordered("eval0003")))
     held = upload(
         client,
@@ -105,11 +106,21 @@ def test_the_export_holds_only_what_the_reviewer_changed(
                         },
                     ],
                     "lines": {
+                        "0": {
+                            "line_item_quantity": ["5"],
+                            "line_item_description": ["Work gloves"],
+                            "line_item_amount_gross": ["50.00"],
+                        },
+                        "1": {
+                            "line_item_quantity": ["3"],
+                            "line_item_description": ["Hex key set"],
+                            "line_item_amount_gross": ["45.00"],
+                        },
                         "2": {
                             "line_item_description": ["Torque wrench"],
                             "line_item_amount_gross": ["317.50"],
                             "line_item_quantity": ["1"],
-                        }
+                        },
                     },
                 },
                 {
@@ -127,6 +138,18 @@ def test_the_export_holds_only_what_the_reviewer_changed(
                             },
                         }
                     ],
+                    "lines": {
+                        "0": {
+                            "line_item_quantity": ["10"],
+                            "line_item_description": ["Cable reel, 25 m"],
+                            "line_item_amount_gross": ["900.00"],
+                        },
+                        "1": {
+                            "line_item_quantity": ["4"],
+                            "line_item_description": ["Junction box"],
+                            "line_item_amount_gross": ["42.00"],
+                        },
+                    },
                 },
             ],
         }
@@ -157,6 +180,7 @@ def test_the_export_is_written_as_the_eval_reads_it(
     write(exported, out)
 
     assert read_corrections(out) == exported
+    assert exported.documents[0].lines == {}, "only the header was corrected"
     assert json.loads(out.read_text("utf-8"))["schema"] == TEST_SCHEMA
 
 

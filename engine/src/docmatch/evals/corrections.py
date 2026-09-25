@@ -17,17 +17,22 @@ the decision, and each correction: a header value, a line cell, or a line added
 or removed. A correction carries the value left, never the value read, since
 nothing here scores the reading that was corrected. A line removed carries the
 cells it was read with, and a line added the cells left on it, since those are
-what they assert. A cell correction carries the fieldtype and the value left,
-and the file carries its line as left once per line: the other cells of that
-line are there only to find it in another reading, and nothing is scored on
-them (#175).
+what they assert. A cell correction carries the fieldtype and the value left.
+When any line was corrected, the file also carries every line of the reading
+as left: those lines are there only to pair the reading with another the way
+the line-item metric does, whole table against whole table, and nothing is
+scored on a line nobody corrected (#175, and the owner's call on #176).
+
+These shapes mirror the pipeline's corrections without the values read, and
+live here so the eval imports nothing of the pipeline.
 
 Finding a line
 --------------
 
 The line-item metric's pairing (`metrics.line_items.pair_rows`) pairs a
-document's corrected lines, as left, against the scored run's rows, all at
-once, so two corrected lines never claim one row. A cell correction is read
+document's lines as left, plus the lines removed as read, against the scored
+run's rows, so a line nobody corrected claims its own row and a removed line
+sharing one value with it does not take that row. A cell correction is read
 right when its line pairs and the paired row carries the value left; a line
 added when one pairs and carries every cell left on it; a line removed when
 none pairs with it. The labels are judged the same way, as one more reading.
@@ -120,7 +125,8 @@ class ExportedDocument(_Exported):
     decision: Literal["approved", "rejected"]
     corrections: tuple[Exported, ...]
     lines: dict[int, dict[str, Texts]] = {}
-    """Each line a cell correction names, as left, to find it by."""
+    """Every line of the reading as left, by the line it is, when any line
+    was corrected: only to pair the reading's lines as the metric does."""
 
 
 class Export(_Exported):
@@ -263,12 +269,10 @@ def _judged(
     document: ExportedDocument, header: FieldValues, rows: Sequence[FieldValues]
 ) -> list[bool]:
     """Whether a reading, the run's or the label's, holds each correction."""
-    lines: dict[int, FieldValues] = {}
+    lines: dict[int, FieldValues] = dict(document.lines)
     for correction in document.corrections:
-        if isinstance(correction, ExportedCell):
-            lines[correction.line] = document.lines.get(correction.line, {})
-        elif isinstance(correction, ExportedLineAdded):
-            lines[correction.line] = correction.left
+        if isinstance(correction, ExportedLineAdded):
+            lines.setdefault(correction.line, correction.left)
         elif isinstance(correction, ExportedLineRemoved):
             lines[correction.line] = correction.read
     ids = list(lines)
