@@ -261,7 +261,7 @@ def test_the_schema_is_kept_after_the_run(looped: Path, database_url: str) -> No
             "SELECT count(*) FROM information_schema.tables WHERE table_schema = %s",
             (schema,),
         ).fetchone()
-    assert found == (3,)
+    assert found == (4,)
 
 
 def test_pipeline_prints_p50_and_p95_per_status_from_the_file_alone(

@@ -5,7 +5,8 @@ is rebuilt beside the loop's schema, in a schema of its own named after it,
 since a rebuild drops the schema it builds in (`resolution.store`). A server
 restarted on a kept schema rebuilds the same entries under the same SKUs.
 The worker resolves every line through the hybrid at the operating threshold
-over that catalog, on its own connection (#151).
+over that catalog, on its own connection (#151), and the API resolves a
+reviewer's edit the same way on another (#155 point 4).
 
 One process: uvicorn 0.53.0 serves the API on 127.0.0.1 (`uvicorn.run`,
 signature read from the installed package 2026-09-24) while one worker thread
@@ -86,7 +87,10 @@ def serve(
     )
     worker.start()
     try:
-        uvicorn.run(api.create(database_url, schema, backend), host=HOST, port=port)
+        with resolving(database_url, schema, embedder) as resolve:
+            uvicorn.run(
+                api.create(database_url, schema, backend, resolve), host=HOST, port=port
+            )
     finally:
         stopped.set()
         worker.join()

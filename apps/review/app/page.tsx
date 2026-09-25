@@ -1,9 +1,21 @@
 import Link from "next/link";
 
 import { ApiError, queue, view, type Queued, type View } from "@/lib/api";
-import { header, label, ledger, openItems, placeName, stillOpen, type Read, type Row } from "@/lib/ledger";
+import {
+  header,
+  label,
+  ledger,
+  openItems,
+  placeName,
+  removedLines,
+  stillOpen,
+  type Cell,
+  type Read,
+  type Row,
+} from "@/lib/ledger";
 
 import { DecideBar } from "./decide-bar";
+import { EditField, LineButton, Was } from "./edit-field";
 
 const chip = "inline-flex items-center rounded-xs px-1.5 py-0.5 font-mono text-label whitespace-nowrap";
 const quiet = `${chip} bg-surface text-muted`;
@@ -90,6 +102,12 @@ function Empty({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
+/** Whether the reviewer can still correct the reading: in review, with a
+ * reading to correct (#156 point 3). */
+function editable(view: View): boolean {
+  return view.status === "needs_review" && view.reading != null;
+}
+
 function Document({ view, next }: { view: View; next: number | null }) {
   const open = openItems(view);
   const fields = view.reading?.prediction.fields ?? {};
@@ -126,6 +144,8 @@ function summary(view: View, open: string[]): string {
   const parts = [];
   if (view.gate) parts.push(`gate ${view.gate.verdict}`);
   if (view.match) parts.push(`match ${view.match.verdict}`);
+  const corrected = view.corrections.length;
+  if (corrected) parts.push(`${corrected} ${corrected === 1 ? "correction" : "corrections"}`);
   parts.push(open.length ? `${open.length} open` : "nothing open");
   return parts.join(", ");
 }
@@ -180,7 +200,8 @@ function Confidence({ value }: { value: number | null }) {
 const MONO_FIELDS = /^(amount_|date_|document_id|order_id|tax_detail_|currency_)/;
 
 function Header({ view }: { view: View }) {
-  const fields = header(view);
+  const editing = editable(view);
+  const fields = header(view, editing);
   const failed = new Set(
     (view.gate?.checks ?? []).filter((check) => check.outcome === "failed").flatMap((check) => check.used.map(([fieldtype]) => fieldtype)),
   );
@@ -189,7 +210,7 @@ function Header({ view }: { view: View }) {
   return (
     <section aria-labelledby="reading" className="flex flex-col gap-3">
       <h2 id="reading" className="text-title font-semibold">
-        Header, as read
+        {editing ? "Header, as read and corrected" : view.corrections.length ? "Header, as corrected" : "Header, as read"}
       </h2>
       <dl className="flex flex-wrap gap-px overflow-hidden rounded-sm border border-line bg-line">
         {fields.map((field) => (
@@ -198,12 +219,36 @@ function Header({ view }: { view: View }) {
               {field.label}
               {failed.has(field.fieldtype) && <span className="sr-only">, used by a failed gate rule</span>}
             </dt>
-            {field.values.map((value, index) => (
-              <dd key={index} className={`break-words ${MONO_FIELDS.test(field.fieldtype) ? "font-mono text-data" : ""}`}>
-                {value.text}
-                <Confidence value={value.confidence} />
+            {editing ? (
+              <dd className="flex flex-col gap-0.5">
+                <EditField
+                  id={view.id}
+                  target={{ kind: "header", fieldtype: field.fieldtype }}
+                  value={field.values.map((value) => value.text).join(", ")}
+                  was={field.was}
+                  label={field.label}
+                  mono={MONO_FIELDS.test(field.fieldtype)}
+                />
+                {field.values.length > 1 && (
+                  <span className="text-[0.6875rem] text-muted">read as {field.values.length} values, an edit leaves one</span>
+                )}
+                {field.values.length === 1 && <Confidence value={field.values[0].confidence} />}
               </dd>
-            ))}
+            ) : (
+              <>
+                {field.values.map((value, index) => (
+                  <dd key={index} className={`break-words ${MONO_FIELDS.test(field.fieldtype) ? "font-mono text-data" : ""}`}>
+                    {value.text}
+                    <Confidence value={value.confidence} />
+                  </dd>
+                ))}
+                {field.was != null && (
+                  <dd>
+                    <Was text={field.was} />
+                  </dd>
+                )}
+              </>
+            )}
           </div>
         ))}
       </dl>
@@ -243,28 +288,94 @@ function Severity({ severity }: { severity: "hold" | "note" }) {
   );
 }
 
-function Value({ read, ordered, align = "right" }: { read: Read | undefined; ordered?: string; align?: "left" | "right" }) {
+const CELL_LABELS: Record<Cell, string> = {
+  code: "Code",
+  description: "Description",
+  quantity: "Billed",
+  unit: "Unit",
+  "unit price": "Unit price",
+  amount: "Amount",
+};
+
+/** One billed cell: an input while the document is in review, text after. */
+function Value({
+  view,
+  row,
+  cell,
+  ordered,
+  align = "right",
+}: {
+  view: View;
+  row: Row;
+  cell: Cell;
+  ordered?: string;
+  align?: "left" | "right";
+}) {
+  const read: Read | undefined = row.billed[cell];
   const unlike = ordered != null && ordered !== read?.text;
   return (
-    <div className={align === "right" ? "text-right" : ""}>
-      {read ? (
-        <span className="font-mono text-data">
-          {read.text}
-          <Confidence value={read.confidence} />
-        </span>
-      ) : null}
+    <div className={`flex flex-col ${align === "right" ? "items-end text-right" : ""}`}>
+      {editable(view) && row.line != null ? (
+        <>
+          <EditField
+            id={view.id}
+            target={{ kind: "cell", line: row.line, fieldtype: row.fieldtypes[cell] }}
+            value={read?.text ?? ""}
+            was={row.was[cell]}
+            label={`${CELL_LABELS[cell]}, ${lineName(row)}`}
+            align={align}
+          />
+          <Confidence value={read?.confidence ?? null} />
+        </>
+      ) : (
+        <>
+          {read ? (
+            <span className="font-mono text-data">
+              {read.text}
+              <Confidence value={read.confidence} />
+            </span>
+          ) : null}
+          <Was text={row.was[cell]} />
+        </>
+      )}
       {unlike && <span className="block font-mono text-[0.6875rem] text-muted">PO {ordered}</span>}
     </div>
   );
 }
 
-function Item({ row }: { row: Row }) {
+function Item({ view, row }: { view: View; row: Row }) {
   const read = row.billed.description?.text;
   const ordered = row.ordered.description;
+  if (editable(view) && row.line != null) {
+    return (
+      <div className="flex min-w-0 flex-col gap-1">
+        <EditField
+          id={view.id}
+          target={{ kind: "cell", line: row.line, fieldtype: row.fieldtypes.description }}
+          value={read ?? ""}
+          was={row.was.description}
+          label={`Description, ${lineName(row)}`}
+          mono={false}
+        />
+        {ordered && ordered !== read && <span className="text-data text-muted">PO {ordered}</span>}
+        <EditField
+          id={view.id}
+          target={{ kind: "cell", line: row.line, fieldtype: row.fieldtypes.code }}
+          value={row.billed.code?.text ?? ""}
+          was={row.was.code}
+          label={`Code, ${lineName(row)}`}
+        />
+        {row.ordered.code && row.ordered.code !== row.billed.code?.text && (
+          <span className="font-mono text-[0.6875rem] text-muted">PO {row.ordered.code}</span>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="min-w-0">
       <span className={read ? "" : "text-muted"}>{read ?? ordered ?? "no description"}</span>
       <Confidence value={row.billed.description?.confidence ?? null} />
+      <Was text={row.was.description} />
       {read && ordered && ordered !== read && <span className="block text-data text-muted">PO {ordered}</span>}
       {(row.billed.code ?? row.ordered.code) && (
         <span className="block font-mono text-[0.6875rem] text-muted">{row.billed.code?.text ?? row.ordered.code}</span>
@@ -318,6 +429,20 @@ function lineName(row: Row): string {
   return row.po != null ? `PO ${row.po}` : `invoice ${row.invoice}`;
 }
 
+/** The line's name and, in review, the button that removes it. */
+function LineCell({ view, row }: { view: View; row: Row }) {
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <span className="font-mono text-data text-muted whitespace-nowrap">{lineName(row)}</span>
+      {editable(view) && row.line != null && (
+        <LineButton id={view.id} change={{ kind: "line removed", line: row.line }}>
+          Remove
+        </LineButton>
+      )}
+    </div>
+  );
+}
+
 function Ledger({ view }: { view: View }) {
   const rows = ledger(view);
   if (view.match == null) {
@@ -351,9 +476,11 @@ function Ledger({ view }: { view: View }) {
         <tbody>
           {rows.map((row) => (
             <tr key={row.key} className="border-b border-line">
-              <td className={`${td} font-mono text-data text-muted whitespace-nowrap`}>{lineName(row)}</td>
               <td className={td}>
-                <Item row={row} />
+                <LineCell view={view} row={row} />
+              </td>
+              <td className={td}>
+                <Item view={view} row={row} />
               </td>
               <td className={`${td} text-right font-mono text-data`}>{row.ordered.quantity ?? ""}</td>
               <td className={`${td} text-right font-mono text-data`}>{row.received ?? ""}</td>
@@ -364,16 +491,16 @@ function Ledger({ view }: { view: View }) {
               ) : (
                 <>
                   <td className={td}>
-                    <Value read={row.billed.quantity} />
+                    <Value view={view} row={row} cell="quantity" />
                   </td>
                   <td className={td}>
-                    <Value read={row.billed.unit} ordered={row.ordered.unit} align="left" />
+                    <Value view={view} row={row} cell="unit" ordered={row.ordered.unit} align="left" />
                   </td>
                   <td className={td}>
-                    <Value read={row.billed["unit price"]} ordered={row.ordered["unit price"]} />
+                    <Value view={view} row={row} cell="unit price" ordered={row.ordered["unit price"]} />
                   </td>
                   <td className={td}>
-                    <Value read={row.billed.amount} ordered={row.ordered.amount} />
+                    <Value view={view} row={row} cell="amount" ordered={row.ordered.amount} />
                   </td>
                 </>
               )}
@@ -387,22 +514,28 @@ function Ledger({ view }: { view: View }) {
       <ol className="flex flex-col gap-2 md:hidden">
         {rows.map((row) => (
           <li key={row.key} className="flex flex-col gap-2 rounded-sm border border-line p-3">
-            <div className="flex items-baseline gap-2">
-              <span className="font-mono text-data text-muted">{lineName(row)}</span>
-              <Item row={row} />
+            <div className="flex items-start gap-2">
+              <LineCell view={view} row={row} />
+              <div className="min-w-0 flex-1">
+                <Item view={view} row={row} />
+              </div>
             </div>
             <dl className="grid grid-cols-3 gap-2 text-data">
               <Pair label="Ordered">{row.ordered.quantity ?? ""}</Pair>
               <Pair label="Received">{row.received ?? ""}</Pair>
               <Pair label="Billed">
-                {row.invoice == null ? <span className="text-muted">not billed</span> : <Value read={row.billed.quantity} align="left" />}
+                {row.invoice == null ? (
+                  <span className="text-muted">not billed</span>
+                ) : (
+                  <Value view={view} row={row} cell="quantity" align="left" />
+                )}
               </Pair>
               {row.invoice != null &&
                 (["unit", "unit price", "amount"] as const)
-                  .filter((cell) => row.billed[cell] || row.ordered[cell])
+                  .filter((cell) => editable(view) || row.billed[cell] || row.ordered[cell] || row.was[cell] != null)
                   .map((cell) => (
-                    <Pair key={cell} label={cell[0].toUpperCase() + cell.slice(1)}>
-                      <Value read={row.billed[cell]} ordered={row.ordered[cell]} align="left" />
+                    <Pair key={cell} label={CELL_LABELS[cell]}>
+                      <Value view={view} row={row} cell={cell} ordered={row.ordered[cell]} align="left" />
                     </Pair>
                   ))}
             </dl>
@@ -410,7 +543,38 @@ function Ledger({ view }: { view: View }) {
           </li>
         ))}
       </ol>
+      <LineEdits view={view} />
     </section>
+  );
+}
+
+/** The lines removed, each restorable, and a line to add, in review; the
+ * lines removed, after the decision. */
+function LineEdits({ view }: { view: View }) {
+  const removed = removedLines(view);
+  const editing = editable(view);
+  if (!editing && !removed.length) return null;
+  return (
+    <div className="flex flex-col gap-1 text-data">
+      {removed.map((each) => (
+        <p key={each.line} className="flex flex-wrap items-center gap-x-2">
+          <span className="text-muted">Removed from the reading:</span>
+          <s className="text-muted decoration-muted">{each.description ?? `line ${each.line}, no description`}</s>
+          {editing && (
+            <LineButton id={view.id} change={{ kind: "line restored", line: each.line }}>
+              Restore
+            </LineButton>
+          )}
+        </p>
+      ))}
+      {editing && (
+        <p>
+          <LineButton id={view.id} change={{ kind: "line added" }}>
+            Add a line the reading missed
+          </LineButton>
+        </p>
+      )}
+    </div>
   );
 }
 

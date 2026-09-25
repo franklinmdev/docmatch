@@ -940,6 +940,7 @@ curl localhost:8000/documents/1
 curl localhost:8000/documents/1/trace
 curl 'localhost:8000/documents?status=needs_review'
 curl localhost:8000/documents/1/pages/1 -o page-1.png
+curl -H 'content-type: application/json' -d '{"kind": "header", "fieldtype": "amount_due", "value": "412.50"}' localhost:8000/documents/1/edits
 curl -H 'content-type: application/json' -d '{"decision": "approved"}' localhost:8000/documents/1/decision
 ```
 
@@ -954,6 +955,22 @@ each page of the uploaded PDF comes back as a PNG, and a decision moves a
 document in review to approved or rejected for good, with the reviewer as
 actor; a second decision, or one on a document not in review, is refused
 with 409.
+
+An edit corrects the reading of a document in review, one per request: a
+header value (`"kind": "header"`), a line cell (`"cell"` with `line` and
+`fieldtype`), or a line removed, restored or added (`"line removed"`, `"line
+restored"` with `line`, `"line added"`). A line keeps the number it was read
+with; an added line is numbered after them. Each edit is saved, append-only,
+and the gate, resolution and match rerun on the corrected reading inside the
+request, which answers with the document's view: the reading as corrected,
+`line_ids` naming the line each place holds, and `corrections`, the net
+change per value, the value read against the last value left, so a value put
+back is none. The document stays in review; the routing reasons it was sent
+with stay listed, and the reviewer still decides. The purchase order and
+receipt take no edit, and neither does a document with no reading. An edit
+outside review is refused with 409, one the reading cannot take with 422, and
+after the decision the corrections stand as they were left, a rejection
+keeping its own.
 
 ```bash
 uv run docmatch loop --backend replay --run data/runs/gemini --out data/runs/loop-replay-gemini
@@ -999,16 +1016,21 @@ uv run docmatch serve --backend replay --run data/runs/gemini --schema loop_repl
 cd apps/review && npm install && npm run dev
 ```
 
-`apps/review` is the one review page, Next.js 16.3.6, talking only to the
-API. Serve the schema a loop run kept, open `127.0.0.1:3000`, and the strip at
-the top lists the documents in review; the open one's id is in the URL. For
-each it shows the routing reasons, backend, cost and latency by the title,
-the header as read, one ledger row per purchase-order line (ordered, received
-and billed, the finding with its explanation, the catalog entry), extra lines
-under the order's lines, a missing line as not billed, what the matcher did
-not compare, and the scanned page beside it. Approve and reject are final;
-approving with a hold, a failed gate, a failed extraction or a pipeline
-failure still open asks first and lists it. `DOCMATCH_API_URL` points it elsewhere than
+`apps/review` is the one review page, Next.js 16.3.6, talking only to the API.
+Serve the schema a loop run kept, open `127.0.0.1:3000`, and the strip at the
+top lists the documents in review; the open one's id is in the URL. For each it
+shows the routing reasons, backend, cost and latency by the title, the header
+as read, one ledger row per purchase-order line (ordered, received and billed,
+the finding with its explanation, the catalog entry), extra lines under the
+order's lines, a missing line as not billed, what the matcher did not compare,
+and the scanned page beside it. Approve and reject are final; approving with a
+hold, a failed gate, a failed extraction or a pipeline failure still open asks
+first and lists it. While a document is in review with a reading, every header
+value and line cell is an input that commits on blur or Enter (Escape puts it
+back), a line can be removed, restored, or added, and the page redraws with the
+rerun: a corrected value shows the value read struck through under it, each
+routing reason is marked cleared when the rerun no longer gives it, and the
+decide bar counts the corrections. `DOCMATCH_API_URL` points it elsewhere than
 `http://127.0.0.1:8000`. `npm run lint` and `npm run typecheck` check it. The
 design decisions are in `DESIGN.md`.
 

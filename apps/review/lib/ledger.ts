@@ -1,7 +1,8 @@
 // What the page derives from one document's view: the ledger rows, the header
-// reading, and what is still open. Pure, so it reads the same on every render.
+// reading, the corrections, and what is still open. Pure, so it reads the same
+// on every render.
 
-import type { Finding, Place, Values, View, Written } from "./api";
+import type { Correction, Finding, Place, Values, View, Written } from "./api";
 
 /** Each line cell's fieldtypes, first one carried wins: the matcher's own
  * table (engine/src/docmatch/matching/records.py, CELL_FIELDTYPES). */
@@ -16,6 +17,8 @@ const CELL_FIELDTYPES = {
 
 export type Cell = keyof typeof CELL_FIELDTYPES;
 
+const CELLS = Object.keys(CELL_FIELDTYPES) as Cell[];
+
 /** One value as the backend read it, with its own confidence when it gave one. */
 export type Read = { text: string; confidence: number | null };
 
@@ -23,8 +26,16 @@ export type Row = {
   key: string;
   /** The purchase-order line, or null for a line only the invoice has. */
   po: number | null;
-  /** The invoice line as read, or null for an order line nobody billed. */
+  /** The invoice line's place in the reading, or null for an order line
+   * nobody billed. */
   invoice: number | null;
+  /** The invoice line's name, which an edit names it by. */
+  line: number | null;
+  /** The fieldtype an edit to each cell names: the one the line carries,
+   * else the matcher's first. */
+  fieldtypes: Record<Cell, string>;
+  /** Each corrected cell's value as read, "" when it was not read. */
+  was: Partial<Record<Cell, string>>;
   ordered: Partial<Record<Cell, string>>;
   received: string | null;
   billed: Partial<Record<Cell, Read>>;
@@ -61,6 +72,30 @@ function billedCells(
   return cells;
 }
 
+/** A line's cell corrections, by fieldtype, as the value read. */
+function cellCorrections(corrections: Correction[], line: number): Map<string, string> {
+  return new Map(
+    corrections.flatMap((each) => (each.kind === "cell" && each.line === line ? [[each.fieldtype, each.read.join(", ")]] : [])),
+  );
+}
+
+/** The fieldtype an edit to each cell names: the one the line carries, else
+ * the one a correction already names, so a cell cleared is edited again under
+ * the fieldtype it was read with, else the matcher's first. */
+function editedFieldtypes(row: Written, corrected: Map<string, string>): Record<Cell, string> {
+  return Object.fromEntries(
+    CELLS.map((cell) => {
+      const fieldtypes: readonly string[] = CELL_FIELDTYPES[cell];
+      return [
+        cell,
+        fieldtypes.find((each) => texts(row[each]) != null) ??
+          fieldtypes.find((each) => corrected.has(each)) ??
+          fieldtypes[0],
+      ];
+    }),
+  ) as Record<Cell, string>;
+}
+
 /** One row per purchase-order line in the order's order, then a row per
  * invoice line the order has no line for. */
 export function ledger(view: View): Row[] {
@@ -71,10 +106,24 @@ export function ledger(view: View): Row[] {
   const findings = view.match?.findings ?? [];
   const on = (kind: Place["kind"], line: number) =>
     findings.filter((each) => each.place.kind === kind && each.place.line === line);
-  const invoiceCells = (line: number) => ({
-    billed: billedCells(lines[line], confidence[line]),
-    resolved: view.resolution?.[line] ?? null,
-  });
+  const invoiceCells = (line: number) => {
+    const name = view.line_ids[line] ?? line;
+    const corrected = cellCorrections(view.corrections, name);
+    const fieldtypes = editedFieldtypes(lines[line], corrected);
+    const was: Partial<Record<Cell, string>> = {};
+    for (const cell of CELLS) {
+      const read = corrected.get(fieldtypes[cell]);
+      if (read != null) was[cell] = read;
+    }
+    return {
+      line: name,
+      billed: billedCells(lines[line], confidence[line]),
+      fieldtypes,
+      was,
+      resolved: view.resolution?.[line] ?? null,
+    };
+  };
+  const unbilled = { line: null, billed: {}, fieldtypes: editedFieldtypes({}, new Map()), was: {}, resolved: null };
 
   const rows: Row[] = order.map((line, po) => {
     const paired = pairings.find((each) => each.po_line === po);
@@ -86,13 +135,13 @@ export function ledger(view: View): Row[] {
       ordered: orderedCells(line),
       received: texts(received?.cells.line_item_quantity),
       findings: on("po line", po),
-      ...(paired ? invoiceCells(paired.invoice_line) : { billed: {}, resolved: null }),
+      ...(paired ? invoiceCells(paired.invoice_line) : unbilled),
     };
   });
   lines.forEach((_, line) => {
     if (pairings.some((each) => each.invoice_line === line)) return;
     rows.push({
-      key: `invoice-${line}`,
+      key: `invoice-${view.line_ids[line] ?? line}`,
       po: null,
       invoice: line,
       ordered: {},
@@ -123,31 +172,53 @@ export function label(fieldtype: string): string {
   return HEADER_LABELS[fieldtype] ?? fieldtype.replaceAll("_", " ");
 }
 
-/** The header's fields as read, known ones first in the order a reader
- * checks them, each value beside its confidence. */
-export function header(view: View): { fieldtype: string; label: string; values: Read[] }[] {
+export type HeaderField = {
+  fieldtype: string;
+  label: string;
+  values: Read[];
+  /** The value as read, "" when it was not, once a correction changed it. */
+  was: string | null;
+};
+
+/** The header's fields as they stand, known ones first in the order a
+ * reader checks them, each value beside its confidence. With `everyKnown`, every
+ * known field is listed, so one the backend missed can be filled in. */
+export function header(view: View, everyKnown = false): HeaderField[] {
   const fields = view.reading?.prediction.fields ?? {};
   const confidence = view.reading?.confidence?.fields ?? {};
+  const corrected = new Map(
+    view.corrections.flatMap((each) => (each.kind === "header" ? [[each.fieldtype, each.read.join(", ")]] : [])),
+  );
   const known = Object.keys(HEADER_LABELS);
+  const listed = (fieldtype: string) => fields[fieldtype] != null || corrected.has(fieldtype);
   const fieldtypes = [
-    ...known.filter((each) => each in fields),
-    ...Object.keys(fields).filter((each) => !known.includes(each)).sort(),
+    ...known.filter((each) => everyKnown || listed(each)),
+    ...[...new Set([...Object.keys(fields), ...corrected.keys()])]
+      .filter((each) => !known.includes(each) && listed(each))
+      .sort(),
   ];
-  return fieldtypes.flatMap((fieldtype) => {
+  return fieldtypes.map((fieldtype) => {
     const value = fields[fieldtype];
-    if (value == null) return [];
-    const values = Array.isArray(value) ? value : [value];
-    return [
-      {
-        fieldtype,
-        label: label(fieldtype),
-        values: values.map((text, index) => ({
-          text,
-          confidence: confidence[fieldtype]?.[index] ?? null,
-        })),
-      },
-    ];
+    const values = value == null ? [] : Array.isArray(value) ? value : [value];
+    return {
+      fieldtype,
+      label: label(fieldtype),
+      values: values.map((text, index) => ({
+        text,
+        confidence: confidence[fieldtype]?.[index] ?? null,
+      })),
+      was: corrected.get(fieldtype) ?? null,
+    };
   });
+}
+
+/** The lines read and then removed, by name, each with its description. */
+export function removedLines(view: View): { line: number; description: string | null }[] {
+  return view.corrections.flatMap((each) =>
+    each.kind === "line removed"
+      ? [{ line: each.line, description: texts(each.read.line_item_description) }]
+      : [],
+  );
 }
 
 /** A place the way the engine's explanations name it. */

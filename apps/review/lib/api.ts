@@ -44,6 +44,20 @@ export type GateCheck = {
   used: [string, string][];
 };
 
+/** One edit to the reading; the order and the receipt take none (#154). */
+export type Change =
+  | { kind: "header"; fieldtype: string; value: string }
+  | { kind: "cell"; line: number; fieldtype: string; value: string }
+  | { kind: "line removed" | "line restored"; line: number }
+  | { kind: "line added" };
+
+/** A net change to the reading: the value read against the last value left. */
+export type Correction =
+  | { kind: "header"; fieldtype: string; read: string[]; left: string[] }
+  | { kind: "cell"; line: number; fieldtype: string; read: string[]; left: string[] }
+  | { kind: "line removed"; line: number; read: Values }
+  | { kind: "line added"; line: number; left: Values };
+
 export type View = {
   id: number;
   status: Status;
@@ -68,6 +82,9 @@ export type View = {
     findings: Finding[];
     not_compared: NotCompared[];
   } | null;
+  /** The line, by its name among the edits, each place of the reading holds. */
+  line_ids: number[];
+  corrections: Correction[];
   routing_reasons: string[];
   cost: string;
   latency: number | null;
@@ -108,4 +125,20 @@ export async function decide(id: number, decision: Decision): Promise<string | n
   if (response.ok) return null;
   if (response.status === 409) return `Document ${id} is no longer in review.`;
   return `The decision answered ${response.status}.`;
+}
+
+/** One edit, saved and rerun by the engine; its refusal as a sentence. */
+export async function edit(id: number, change: Change): Promise<string | null> {
+  const response = await call(`/documents/${id}/edits`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(change),
+  });
+  if (response.ok) return null;
+  if (response.status === 409) return `Document ${id} can no longer be edited.`;
+  if (response.status === 422) {
+    const { detail } = (await response.json()) as { detail: unknown };
+    return typeof detail === "string" ? `The reading cannot take that: ${detail}.` : "The reading cannot take that edit.";
+  }
+  return `The edit answered ${response.status}.`;
 }
