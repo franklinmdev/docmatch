@@ -48,6 +48,11 @@ settled on that schema to a file, which is how they leave Postgres; `docmatch
 eval --corrections <file>` scores them against the same predictions in a
 section of their own, never in either number.
 
+`docmatch eval --aggregate <file>` writes the run's field F1 and line-item F1
+into the regression gate's aggregate, and `docmatch regression` compares the
+aggregate at a commit with the one at its merge base, which is the check CI
+runs on every pull request.
+
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
 """
@@ -62,6 +67,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import get_args
 
+from docmatch import regression
 from docmatch.docile.annotation import Annotation, FieldExtraction
 from docmatch.docile.dataset import DatasetNotFoundError, DocileDataset, DocileError
 from docmatch.evals import corpus, manifest, public
@@ -149,6 +155,7 @@ from docmatch.pipeline.report import Report, Spread, report
 from docmatch.pipeline.routing import P0
 from docmatch.pipeline.saved import LOOP_FILE, LoopRun, LoopRunError, read_loop_run
 from docmatch.pipeline.store import open_schema
+from docmatch.regression import RegressionError
 from docmatch.resolution import run as resolution
 from docmatch.resolution import sweep as resolution_sweep
 from docmatch.resolution.catalog import (
@@ -437,6 +444,43 @@ def main(argv: Sequence[str] | None = None) -> int:
         help=(
             "a file `docmatch corrections` wrote, scored against the same "
             "predictions in a section of its own, never in either number"
+        ),
+    )
+    evaluate.add_argument(
+        "--aggregate",
+        type=Path,
+        default=None,
+        help=(
+            "write this backend's field F1 and line-item F1 into the regression "
+            f"gate's aggregate ({regression.AGGREGATE}); the run beside "
+            "--predictions must cover the whole pinned subset and record a "
+            "clean commit, and the scoring code must be committed"
+        ),
+    )
+    gating = subcommands.add_parser(
+        "regression",
+        help=(
+            "compare the aggregate at a commit with the one at its merge base, "
+            "and check it is fresh for what the change touches"
+        ),
+    )
+    gating.add_argument(
+        "--base",
+        default="main",
+        help="the branch or commit the change merges into (default: main)",
+    )
+    gating.add_argument(
+        "--head",
+        default="HEAD",
+        help="the change's commit (default: HEAD)",
+    )
+    gating.add_argument(
+        "--event",
+        type=Path,
+        default=None,
+        help=(
+            "a GitHub pull request event, for its labels and body; without "
+            f"one, no {regression.LABEL} label"
         ),
     )
     matching = subcommands.add_parser(
@@ -787,6 +831,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         LoopError,
         LoopRunError,
         CorrectionsError,
+        RegressionError,
     ) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
@@ -809,6 +854,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
         )
     if arguments.command == "corrections":
         return _corrections(arguments)
+    if arguments.command == "regression":
+        return _regression(arguments)
     dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
     if arguments.command == "serve":
         return _serve(arguments, dataset)
@@ -849,7 +896,10 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
                 ),
             )
         )
-        return render_eval(arguments.manifest, run, corrected), 0
+        written = (
+            None if arguments.aggregate is None else _aggregate(arguments, dataset, run)
+        )
+        return render_eval(arguments.manifest, run, corrected, written), 0
     annotation = dataset.annotation(arguments.document_id)
     if arguments.command == "show":
         return render(arguments.document_id, annotation), 0
@@ -879,6 +929,157 @@ def _serve(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
         port=arguments.port,
     )
     return "", 0
+
+
+def _aggregate(
+    arguments: argparse.Namespace, dataset: DocileDataset, run: SubsetScore
+) -> tuple[str, Path]:
+    """Write the scored run's row into the regression gate's aggregate.
+
+    Only a run over the whole pinned subset of a benchmark backend is a row,
+    and only one whose numbers a commit can vouch for: `measured_row` refuses
+    the rest.
+    """
+    saved = read_saved_run(
+        arguments.predictions.parent, run.manifest, arguments.manifest
+    )
+    backend = saved.record.backend
+    if backend not in backends.BACKENDS:
+        raise RegressionError(
+            f"{backend} is not a benchmark backend, so it has no aggregate row; "
+            f"the backends are {', '.join(backends.BACKENDS)}"
+        )
+    row = regression.measured_row(
+        regression.root(SOURCE),
+        backend,
+        requested_model=saved.record.requested_model,
+        extracted_on=saved.record.commit,
+        dirty=saved.record.dirty,
+        field_f1=run.fields.f1,
+        line_item_f1=run.line_items.f1,
+        predictions=arguments.predictions,
+    )
+    regression.write_row(arguments.aggregate, backend, row)
+    return backend, arguments.aggregate
+
+
+def _regression(arguments: argparse.Namespace) -> tuple[str, int]:
+    """The change's aggregate against its merge base's; exit 1 unless it passes."""
+    repo = regression.root(Path.cwd())
+    head = regression.commit_of(repo, arguments.head)
+    base = regression.merge_base(repo, arguments.base, head)
+    path = regression.AGGREGATE.as_posix()
+    before = regression.show(repo, base, path)
+    after = regression.show(repo, head, path)
+    labeled, body = (
+        (False, "")
+        if arguments.event is None
+        else regression.read_event(arguments.event.read_text("utf-8"))
+    )
+    verdict = regression.check(
+        None if before is None else regression.read_aggregate(before),
+        None if after is None else regression.read_aggregate(after),
+        regression.changed_paths(repo, base, head),
+        regression.listing(repo, head),
+        labeled=labeled,
+        body=body,
+    )
+    return render_regression(base, verdict), 0 if verdict.passed else 1
+
+
+METRIC_NAMES = {"field_f1": "field F1", "line_item_f1": "line-item F1"}
+
+
+def render_regression(base: str, verdict: regression.Verdict) -> str:
+    """Every backend's two numbers before and after, what the change owed,
+    what was stale, the extraction noise with its procedure, and the verdict."""
+    owed = [
+        *(
+            [f"re-extract {', '.join(sorted(verdict.demand.re_extract))}"]
+            if verdict.demand.re_extract
+            else []
+        ),
+        *(["re-score every row"] if verdict.demand.re_score else []),
+    ]
+    lines = [
+        "Regression gate",
+        *_rows(
+            (
+                "baseline",
+                "none at the merge base: this aggregate is born"
+                if verdict.born
+                else f"{base[:7]}, the merge base",
+            ),
+            ("owed", "; ".join(owed) or "nothing, neither path list touched"),
+        ),
+        "",
+        *_table(
+            ["", "before", "after", "change", "kind", "allowed", ""],
+            [
+                [
+                    f"{each.backend} {METRIC_NAMES[each.metric]}",
+                    _f1(each.before),
+                    _f1(each.after),
+                    ""
+                    if each.before is None or each.after is None
+                    else f"{each.after - each.before:+.4f}",
+                    each.kind,
+                    f"{each.allowed:.4f}",
+                    "regression" if each.regressed else "",
+                ]
+                for each in verdict.comparisons
+            ],
+        ),
+        *(
+            [
+                "",
+                "Stale, not produced on this change's code",
+                *(
+                    f"  {each.backend} {each.what}: tree {each.recorded[:12]}, "
+                    f"this change's {each.wanted[:12]}"
+                    for each in verdict.stale
+                ),
+            ]
+            if verdict.stale
+            else []
+        ),
+        "",
+        "Extraction noise",
+        *_table(
+            ["", "field F1", "line-item F1"],
+            [
+                [backend, f"{noise.field_f1:.4f}", f"{noise.line_item_f1:.4f}"]
+                for backend, noise in regression.EXTRACTION_NOISE.items()
+            ],
+        ),
+        "  procedure: three re-extractions of the same 100 train documents per",
+        "  backend, the largest difference between any two; zero until measured",
+        "",
+        "Verdict",
+        f"  {_verdict(verdict)}",
+    ]
+    return "\n".join([*(line.rstrip() for line in lines), ""])
+
+
+def _f1(value: float | None) -> str:
+    return "" if value is None else f"{value:.4f}"
+
+
+def _verdict(verdict: regression.Verdict) -> str:
+    regressions = len(verdict.regressions)
+    counted = f"{regressions} regression{'' if regressions == 1 else 's'}"
+    if verdict.stale:
+        return f"failed: {len(verdict.stale)} stale, which no label passes"
+    if not regressions:
+        return "passed"
+    if verdict.accepted:
+        return f"passed: {counted} accepted with the label and a reason"
+    if verdict.labeled:
+        return (
+            f"failed: {counted}, labeled but with no "
+            f"{regression.REASON_HEADING} section"
+        )
+    return f"failed: {counted}, and no {regression.LABEL} label"
 
 
 def _corrections(arguments: argparse.Namespace) -> tuple[str, int]:
@@ -1157,6 +1358,7 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
         cost_cap=arguments.cost_cap,
     )
     _prepare(arguments.out)
+    commit, dirty = _extracted_on(arguments.backend)
 
     def finished(covered: Manifest, documents: Sequence[DocumentRun]) -> Run:
         return Run(
@@ -1167,6 +1369,8 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
                 arguments.long_edge if arguments.backend in backends.RENDERING else None
             ),
             documents=tuple(documents),
+            commit=commit,
+            dirty=dirty,
         )
 
     documents: list[DocumentRun] = []
@@ -1188,6 +1392,23 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
         render_extract(arguments.out, extracted),
         0 if extracted.predicted else 1,
     )
+
+
+SOURCE = Path(__file__).parent
+"""Where the engine's code is, whose checkout a run or a score was made on."""
+
+
+def _extracted_on(backend: str) -> tuple[str | None, bool]:
+    """The commit the engine's checkout is at, and whether this backend's
+    extraction paths differ from it; no commit outside a git checkout."""
+    try:
+        repo = regression.root(SOURCE)
+        dirty = regression.dirty_paths(
+            repo, lambda path: regression.extraction_path(path, backend)
+        )
+        return regression.commit_of(repo), bool(dirty)
+    except RegressionError:
+        return None, False
 
 
 def _prepare(out: Path) -> None:
@@ -1949,9 +2170,11 @@ def render_eval(
     path: Path,
     run: SubsetScore,
     corrected: tuple[Path, CorrectionsScore] | None = None,
+    written: tuple[str, Path] | None = None,
 ) -> str:
     """A whole run over the fixed subset as a block a human can paste anywhere,
-    and the corrections scored against it when given, last and apart.
+    and the corrections scored against it when given, last and apart, then
+    the backend whose aggregate row was written, and where.
 
     Counts and ratios only: `run` explains why no label text appears here.
     """
@@ -1988,6 +2211,11 @@ def render_eval(
         "",
         *_ablation(run.ablation, run.gate.checked, run.sweep),
         *([] if corrected is None else ["", *_corrected(*corrected)]),
+        *(
+            []
+            if written is None
+            else ["", "Aggregate", f"  {written[0]}'s row written to {written[1]}"]
+        ),
     ]
     return "\n".join([*lines, ""])
 

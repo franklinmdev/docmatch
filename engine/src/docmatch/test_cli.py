@@ -15,15 +15,15 @@ from pathlib import Path
 
 import pytest
 
-from docmatch import cli
+from docmatch import cli, regression
 from docmatch.cli import main, render_extract, render_pipeline, render_resolve
-from docmatch.conftest import TEST_SCHEMA
+from docmatch.conftest import TEST_SCHEMA, git
 from docmatch.docile.dataset import DocileDataset
 from docmatch.evals import public
 from docmatch.evals.conftest import annotate
 from docmatch.evals.manifest import Manifest, load, rank, select, write
 from docmatch.evals.public import FetchError
-from docmatch.evals.run import read_predictions
+from docmatch.evals.run import read_predictions, score_subset
 from docmatch.extraction import gemini
 from docmatch.extraction.conftest import write_pdf
 from docmatch.extraction.extractor import Confidence, Usage
@@ -52,6 +52,7 @@ from docmatch.resolution.queries import (
 )
 from docmatch.resolution.store import Build, Machine, ServerVersions, connect
 from docmatch.resolution.sweep import Point, Sweep
+from docmatch.test_regression import a_row, three
 
 EXPECTED_SHOW_OUTPUT = "\n".join(
     [
@@ -1540,6 +1541,24 @@ def test_extract_keeps_the_documents_read_before_it_was_interrupted(
     assert json.loads((out / "currency_symbols.json").read_text()) == {}
 
 
+def test_extract_records_the_commit_it_was_extracted_on(
+    tmp_path: Path, pinned_copies: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The commit of the checkout the code ran from, whatever the working
+    directory, so the regression gate can tell a fresh row (#153)."""
+    fake = FakeExtractor(answers=[READING])
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / "run"
+
+    assert main(extracting(pinned_copies, out)) == 0
+
+    record = json.loads((out / "run.json").read_text())
+    source = regression.root(Path(regression.__file__).parent)
+    assert record["commit"] == regression.commit_of(source)
+    assert isinstance(record["dirty"], bool)
+
+
 def test_extract_keeps_the_documents_read_before_an_unexpected_failure(
     tmp_path: Path, pinned_copies: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2562,3 +2581,164 @@ def test_pipeline_prints_a_labels_run_as_the_labels_control() -> None:
 
     assert "Loop run, labels" in out
     assert "no labels run given" not in out
+
+
+# The regression gate.
+
+
+def saved_copy(synthetic_subset: Path, where: Path, commit: str | None) -> Path:
+    """The synthetic run copied to `where`, recording `commit`, and its
+    predictions file."""
+    where.mkdir()
+    for name in ("predictions.json", "manifest.json", "confidence.json"):
+        shutil.copy(synthetic_subset / name, where / name)
+    (where / "run.json").write_text(
+        json.dumps(
+            {
+                "backend": "gemini",
+                "requested_model": "synthetic-001",
+                "commit": commit,
+                "dirty": False,
+            }
+        )
+    )
+    return where / "predictions.json"
+
+
+def test_eval_writes_the_backends_row_into_the_aggregate(
+    synthetic_subset: Path,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "SOURCE", repo)
+    commit = git(repo, "rev-parse", "HEAD")
+    predictions = saved_copy(synthetic_subset, repo / "run", commit)
+    aggregate = repo / "benchmark" / "aggregate.json"
+    arguments = evaluate(synthetic_subset, "--aggregate", str(aggregate))
+    arguments[arguments.index("--predictions") + 1] = str(predictions)
+
+    assert main(arguments) == 0
+
+    scored = score_subset(
+        DocileDataset(synthetic_subset),
+        load(synthetic_subset / "subset.json"),
+        read_predictions(predictions),
+    )
+    row = regression.read_aggregate(aggregate.read_text())["gemini"]
+    assert (row.field_f1, row.line_item_f1) == (
+        scored.fields.f1,
+        scored.line_items.f1,
+    )
+    assert (row.extracted_on.commit, row.scored_on.commit) == (commit, commit)
+    assert row.requested_model == "synthetic-001"
+    assert capsys.readouterr().out.endswith(
+        f"Aggregate\n  gemini's row written to {aggregate}\n"
+    )
+
+
+def test_eval_refuses_an_aggregate_row_for_a_run_with_no_commit(
+    synthetic_subset: Path,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "SOURCE", repo)
+    predictions = saved_copy(synthetic_subset, repo / "run", None)
+    aggregate = repo / "aggregate.json"
+    arguments = evaluate(synthetic_subset, "--aggregate", str(aggregate))
+    arguments[arguments.index("--predictions") + 1] = str(predictions)
+
+    assert main(arguments) == 1
+
+    assert "records no commit" in capsys.readouterr().err
+    assert not aggregate.exists()
+
+
+def committed_aggregate(repo: Path, rows: regression.Aggregate, message: str) -> None:
+    for backend, row in rows.items():
+        regression.write_row(repo / regression.AGGREGATE, backend, row)
+    git(repo, "add", ".")
+    git(repo, "commit", "--quiet", "-m", message)
+
+
+def a_gate(repo: Path, head_rows: regression.Aggregate, *, born: bool = False) -> None:
+    """Main with the baseline, then a branch touching the README with its own."""
+    if not born:
+        committed_aggregate(repo, three(), "baseline")
+    git(repo, "switch", "--quiet", "-c", "change")
+    (repo / "README.md").write_text("changed\n")
+    committed_aggregate(repo, head_rows, "change")
+
+
+def test_regression_passes_an_unchanged_aggregate(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(repo)
+    a_gate(repo, three())
+
+    assert main(["regression", "--base", "main"]) == 0
+
+    out = capsys.readouterr().out
+    assert "  gemini field F1      0.6150  0.6150  +0.0000  re-scored   0.0000\n" in out
+    assert out.endswith("Verdict\n  passed\n")
+
+
+def test_regression_fails_a_drop_and_prints_it(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(repo)
+    a_gate(repo, three(azure=a_row("azure", line_item_f1=0.3)))
+
+    assert main(["regression", "--base", "main"]) == 1
+
+    out = capsys.readouterr().out
+    assert (
+        "  azure line-item F1   0.3740  0.3000  -0.0740  re-scored   0.0000"
+        "  regression\n" in out
+    )
+    assert out.endswith(
+        "Verdict\n  failed: 1 regression, and no regression-accepted label\n"
+    )
+
+
+def test_regression_passes_a_drop_labeled_and_reasoned(
+    repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(repo)
+    a_gate(repo, three(azure=a_row("azure", line_item_f1=0.3)))
+    event = tmp_path / "event.json"
+    event.write_text(
+        json.dumps(
+            {
+                "pull_request": {
+                    "labels": [{"name": "regression-accepted"}],
+                    "body": "## Regression reason\n\nThe trade buys recall.",
+                }
+            }
+        )
+    )
+
+    assert main(["regression", "--base", "main", "--event", str(event)]) == 0
+
+    out = capsys.readouterr().out
+    assert "  regression" in out
+    assert out.endswith(
+        "Verdict\n  passed: 1 regression accepted with the label and a reason\n"
+    )
+
+
+def test_regression_passes_an_aggregate_born_in_the_change(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(repo)
+    a_gate(repo, three(), born=True)
+
+    assert main(["regression", "--base", "main"]) == 0
+
+    out = capsys.readouterr().out
+    assert "none at the merge base: this aggregate is born" in out
+    assert "  openai line-item F1          0.3740          first row   0.0000\n" in out

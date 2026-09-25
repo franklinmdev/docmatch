@@ -133,13 +133,19 @@ def read_predictions(path: Path) -> dict[str, Prediction]:
 
 
 class RunRecord(BaseModel):
-    """What a run's `run.json` names it by: the backend and the model asked for.
+    """What a run's `run.json` names it by: the backend and the model asked
+    for, and the commit it was extracted on.
 
     The file carries tokens, cost and latency too, which nothing scoring a
     run reads, so they are left to the reader of the file."""
 
     backend: str
     requested_model: str
+    commit: str | None = None
+    """The commit the run was extracted on; None for a run saved before runs
+    recorded one (#153)."""
+    dirty: bool = False
+    """Whether the backend's extraction code differed from that commit."""
 
     @property
     def name(self) -> str:
