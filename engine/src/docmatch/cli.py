@@ -1024,7 +1024,7 @@ def render_regression(base: str, verdict: regression.Verdict) -> str:
         ),
         "",
         *_table(
-            ["", "before", "after", "change", "kind", "allowed", ""],
+            ["", "before", "after", "change", "kind", "noise", ""],
             [
                 [
                     f"{each.backend} {METRIC_NAMES[each.metric]}",
@@ -1034,7 +1034,7 @@ def render_regression(base: str, verdict: regression.Verdict) -> str:
                     if each.before is None or each.after is None
                     else f"{each.after - each.before:+.4f}",
                     each.kind,
-                    f"{each.allowed:.4f}",
+                    f"{each.noise:.4f}",
                     "regression" if each.regressed else "",
                 ]
                 for each in verdict.comparisons

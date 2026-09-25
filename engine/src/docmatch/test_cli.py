@@ -2681,7 +2681,8 @@ def test_regression_passes_an_unchanged_aggregate(
 
     out = capsys.readouterr().out
     assert "  owed      nothing, neither path list touched\n" in out
-    assert "  gemini field F1      0.6150  0.6150  +0.0000  re-scored   0.0000\n" in out
+    assert "before   after   change       kind   noise\n" in out
+    assert "  gemini field F1      0.6150  0.6150  +0.0000  re-scored  0.0000\n" in out
     assert out.endswith("Verdict\n  passed\n")
 
 
@@ -2695,7 +2696,7 @@ def test_regression_fails_a_drop_and_prints_it(
 
     out = capsys.readouterr().out
     assert (
-        "  azure line-item F1   0.3740  0.3000  -0.0740  re-scored   0.0000"
+        "  azure line-item F1   0.3740  0.3000  -0.0740  re-scored  0.0000"
         "  regression\n" in out
     )
     assert out.endswith(
@@ -2743,7 +2744,7 @@ def test_regression_passes_an_aggregate_born_in_the_change(
     out = capsys.readouterr().out
     assert "none at the merge base: this aggregate is born" in out
     assert "  owed      nothing while the aggregate is born\n" in out
-    assert "  openai line-item F1          0.3740          first row   0.0000\n" in out
+    assert "  openai line-item F1          0.3740          first row  0.0000\n" in out
 
 
 def test_regression_refuses_a_merge_base_older_than_the_aggregate(

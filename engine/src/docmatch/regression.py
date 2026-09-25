@@ -316,8 +316,9 @@ class Comparison:
     before: float | None
     after: float | None
     kind: Kind
-    allowed: float
-    """The drop this kind of change may make without being a regression."""
+    noise: float
+    """The extraction noise this row's change may drop by without being a
+    regression: the backend's for an owed re-extraction, else zero."""
 
     @property
     def drop(self) -> float:
@@ -330,7 +331,7 @@ class Comparison:
         # Rounded so a drop equal to the noise is not beyond it by a float's
         # last bit; F1 over the subset's counts moves in steps near 1e-4, so
         # twelve places keep every real drop.
-        return self.kind == "removed" or round(self.drop, 12) > self.allowed
+        return self.kind == "removed" or round(self.drop, 12) > self.noise
 
 
 @dataclass(frozen=True)
@@ -424,14 +425,14 @@ def _compare(
     noise: Mapping[str, Noise],
 ) -> Comparison:
     kind: Kind
-    allowed = 0.0
+    extraction_noise = 0.0
     if before is None:
         kind = "first row"
     elif after is None:
         kind = "removed"
     elif after.predictions != before.predictions:
         kind = "re-extracted"
-        allowed = noise[backend].of(metric) if backend in noise else 0.0
+        extraction_noise = noise[backend].of(metric) if backend in noise else 0.0
     else:
         kind = "re-scored"
     return Comparison(
@@ -440,7 +441,7 @@ def _compare(
         before=None if before is None else before.of(metric),
         after=None if after is None else after.of(metric),
         kind=kind,
-        allowed=allowed,
+        noise=extraction_noise,
     )
 
 

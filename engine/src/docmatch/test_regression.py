@@ -245,7 +245,7 @@ def test_a_re_extraction_within_its_noise_passes() -> None:
 
     assert verdict.passed
     gemini = verdict.comparisons[0]
-    assert (gemini.kind, gemini.allowed) == ("re-extracted", 0.02)
+    assert (gemini.kind, gemini.noise) == ("re-extracted", 0.02)
 
 
 def test_a_re_extraction_beyond_its_noise_fails() -> None:
@@ -272,7 +272,7 @@ def test_noise_covers_only_a_re_extraction_the_change_owed() -> None:
 
     verdict = check(three(), head, changed, after, noise=NOISE)
 
-    assert [(each.metric, each.kind, each.allowed) for each in verdict.regressions] == [
+    assert [(each.metric, each.kind, each.noise) for each in verdict.regressions] == [
         ("field_f1", "re-extracted", 0.0)
     ]
 
