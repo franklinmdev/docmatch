@@ -27,6 +27,7 @@ from docmatch.regression import (
     extraction_tree,
     has_reason,
     listing,
+    measured_noise,
     measured_row,
     read_aggregate,
     read_event,
@@ -277,15 +278,60 @@ def test_noise_covers_only_a_re_extraction_the_change_owed() -> None:
     ]
 
 
-def test_extraction_noise_is_strict_until_it_is_measured() -> None:
-    assert all(
-        each == Noise(field_f1=0.0, line_item_f1=0.0)
-        for each in EXTRACTION_NOISE.values()
+def test_a_re_extraction_beside_a_re_score_is_held_to_any_drop() -> None:
+    """Owing both, the row's drop could be the scoring change's hiding inside
+    the extraction noise, so the noise covers a re-extraction only when the
+    change owes no re-score (#178)."""
+    changed = [f"{ROOT}/extraction/gemini.py", f"{ROOT}/metrics/fields.py"]
+    after = tuple(
+        (path, f"{blob}-changed" if path in changed else blob)
+        for path, blob in with_blob(changed[1], "f1")
     )
+    head = {b: a_row(b, listing=after) for b in EXTRACTION_NOISE}
+    head["gemini"] = a_row(field_f1=0.615 - 0.01, predictions="p2", listing=after)
+
+    verdict = check(three(), head, changed, after, noise=NOISE)
+
+    assert [(each.metric, each.kind, each.noise) for each in verdict.regressions] == [
+        ("field_f1", "re-extracted", 0.0)
+    ]
+
+
+def test_extraction_noise_is_the_largest_difference_between_any_two_runs() -> None:
+    measured = measured_noise({"gemini": [(0.61, 0.37), (0.63, 0.36), (0.62, 0.39)]})
+
+    assert list(measured) == ["gemini"]
+    assert measured["gemini"].field_f1 == pytest.approx(0.02)
+    assert measured["gemini"].line_item_f1 == pytest.approx(0.03)
+
+
+def test_three_identical_runs_measure_no_noise() -> None:
+    assert measured_noise({"azure": [(0.556, 0.396)] * 3}) == {
+        "azure": Noise(field_f1=0.0, line_item_f1=0.0)
+    }
+
+
+def test_extraction_noise_is_measured_for_benchmark_backends_only() -> None:
+    with pytest.raises(RegressionError, match="labels is not a benchmark backend"):
+        measured_noise({"labels": [(1.0, 1.0)] * 3})
+
+
+@pytest.mark.parametrize("runs", [2, 4])
+def test_extraction_noise_is_measured_over_three_runs_only(runs: int) -> None:
+    with pytest.raises(RegressionError, match=f"openai has {runs} runs"):
+        measured_noise({"openai": [(0.5, 0.2)] * runs})
+
+
+def test_a_re_extraction_is_held_to_the_measured_noise_by_default() -> None:
     changed = [f"{ROOT}/extraction/gemini.py"]
     after = with_blob(changed[0], "g2")
-    head = three(gemini=a_row(field_f1=0.614, predictions="p2", listing=after))
-    assert not check(three(), head, changed, after).passed
+    within = EXTRACTION_NOISE["gemini"].field_f1
+    head = three(gemini=a_row(field_f1=0.615 - within, predictions="p2", listing=after))
+    assert check(three(), head, changed, after).passed
+    beyond = three(
+        gemini=a_row(field_f1=0.615 - within - 1e-4, predictions="p2", listing=after)
+    )
+    assert not check(three(), beyond, changed, after).passed
 
 
 def test_a_stale_extraction_fails_for_the_row_a_backend_module_touches() -> None:
