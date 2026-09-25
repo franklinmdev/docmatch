@@ -29,9 +29,8 @@ flowchart LR
   C --> D["Resolve<br/>line items to catalog"]
   D --> E["Match<br/>invoice vs PO vs receipt"]
   E -->|clean| F["Approved"]
-  E -->|discrepancy or low confidence| G["Review<br/>human inbox"]
-  G -->|corrections| H[("Eval set")]
-  H --> I["Measure<br/>CI benchmark"]
+  E -->|hold, gate failed, extraction or pipeline failed| G["Review<br/>human inbox"]
+  G -->|corrections| H[("Corrections eval<br/>apart from the F1")]
 ```
 
 Every status change and every vendor call is recorded in Postgres with its times and cost, and every part of the loop has an eval that runs in CI.
@@ -660,16 +659,17 @@ at resolved matching, at matched routing.
 | resolved, matching | 0.003 / 0.015 s | 0.003 / 0.015 s | 0.003 / 0.020 s | 0.003 / 0.025 s |
 | matched, routing | 0.002 / 0.002 s | 0.002 / 0.002 s | 0.002 / 0.002 s | 0.002 / 0.002 s |
 
-Every cent is spent at received; the gate, resolution and matching make no
-vendor call and cost $0. The wait before the worker takes a document up is
-0.15 s p50 at received, the idle worker polling every 0.2 s, and 7 ms p95 or
-less at every other status. Extraction is all but the whole latency: the
-gate, resolution, matching and routing p95s sum to under 0.4 s on every row.
+The whole cost per document is at received; the gate, resolution and matching
+make no vendor call and cost $0. The wait before the worker takes a document up
+is 0.15 s p50 at received, the idle worker polling every 0.2 s, and 7 ms p95 or
+less at every other status. Extraction is all but the whole latency: the gate,
+resolution, matching and routing p95s sum to under 0.4 s on every row.
 
-**The loop, shown.** On the Gemini run's schema, `loop_gemini_20260925_131602`,
-served with `docmatch serve`, one document in review with a match hold was
-approved from the review page after its confirmation, and one with a failed
-gate and a hold rejected; both transitions carry the reviewer as actor.
+**The loop, shown.** On the Gemini run's schema,
+`loop_gemini_20260925_131602`, served with `docmatch serve`, one document in
+review with a match hold was approved from the review page after its
+confirmation, and one with a failed gate and a hold rejected; both transitions
+carry the reviewer as actor.
 
 ## Data
 
