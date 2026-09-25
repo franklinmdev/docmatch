@@ -79,13 +79,16 @@ jobs:
       # report runs on every push while the real dataset never leaves the
       # machine it was downloaded on. The numbers this prints are the
       # harness's own, not a benchmark; the README's numbers come from the
-      # same command run locally against `data/docile`.
+      # same command run locally against `data/docile`. The corrections
+      # section scores a committed export a review of the fixture's replay
+      # loop left, synthetic like the rest (#25), never in either number.
       - name: Eval
         run: >-
           uv run docmatch eval
           --data-dir engine/tests/evals/synthetic
           --manifest engine/tests/evals/synthetic/subset.json
           --predictions engine/tests/evals/synthetic/predictions.json
+          --corrections engine/tests/evals/synthetic/corrections.json
 
       # The matching report on the same synthetic subset: cases generated
       # from its labels at the real sizes, matched and scored, then matched

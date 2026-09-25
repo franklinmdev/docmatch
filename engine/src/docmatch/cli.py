@@ -62,6 +62,14 @@ from docmatch.docile.dataset import DatasetNotFoundError, DocileDataset, DocileE
 from docmatch.evals import corpus, manifest, public
 from docmatch.evals.confidence import Buckets, Calibration, Sweep
 from docmatch.evals.corpus import Census, Coverage, RuleCoverage, Survey
+from docmatch.evals.corrections import (
+    CORRECTIONS,
+    CorrectionsError,
+    CorrectionsScore,
+    Tally,
+    read_corrections,
+    score_corrections,
+)
 from docmatch.evals.manifest import Manifest, ManifestError, Reason
 from docmatch.evals.public import PublicCopyError
 from docmatch.evals.run import (
@@ -128,12 +136,14 @@ from docmatch.metrics.line_items import (
     score_line_items,
 )
 from docmatch.metrics.score import Score, ratio, share_of
-from docmatch.pipeline import labels, replay, serve
+from docmatch.pipeline import corrections, labels, replay, serve
 from docmatch.pipeline.ladder import Rung
+from docmatch.pipeline.loop import settled
 from docmatch.pipeline.measure import RUNS, LoopError, measure
 from docmatch.pipeline.report import Report, Spread, report
 from docmatch.pipeline.routing import P0
 from docmatch.pipeline.saved import LOOP_FILE, LoopRun, LoopRunError, read_loop_run
+from docmatch.pipeline.store import open_schema
 from docmatch.resolution import run as resolution
 from docmatch.resolution import sweep as resolution_sweep
 from docmatch.resolution.catalog import (
@@ -415,6 +425,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=manifest.MANIFEST,
         help=f"the subset to score over (default: {manifest.MANIFEST.name})",
     )
+    evaluate.add_argument(
+        "--corrections",
+        type=Path,
+        default=None,
+        help=(
+            "a file `docmatch corrections` wrote, scored against the same "
+            "predictions in a section of its own, never in either number"
+        ),
+    )
     matching = subcommands.add_parser(
         "match",
         parents=[dataset],
@@ -563,6 +582,38 @@ def main(argv: Sequence[str] | None = None) -> int:
         help=(
             "a directory `loop --out` wrote; each is reported on its own, and it "
             "can be given more than once"
+        ),
+    )
+    exporting = subcommands.add_parser(
+        "corrections",
+        help="export a loop schema's settled corrections for `eval --corrections`",
+    )
+    exporting.add_argument(
+        "--schema",
+        required=True,
+        help="the Postgres schema a loop run and its review kept",
+    )
+    exporting.add_argument(
+        "--manifest",
+        type=Path,
+        default=manifest.MANIFEST,
+        help=(
+            "the subset each corrected PDF is recognized in by its digest "
+            f"(default: {manifest.MANIFEST.name})"
+        ),
+    )
+    exporting.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=f"the file to write (default: {CORRECTIONS}/ and the schema's name)",
+    )
+    exporting.add_argument(
+        "--database-url",
+        default=None,
+        help=(
+            "the Postgres the schema lives in "
+            f"(default: ${DATABASE_URL_VARIABLE}, else {DEFAULT_DATABASE_URL})"
         ),
     )
     counts = subcommands.add_parser(
@@ -730,6 +781,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ResolutionError,
         LoopError,
         LoopRunError,
+        CorrectionsError,
     ) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
@@ -750,6 +802,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
             ),
             0,
         )
+    if arguments.command == "corrections":
+        return _corrections(arguments)
     dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
     if arguments.command == "serve":
         return _serve(arguments, dataset)
@@ -770,16 +824,27 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
     if arguments.command == "loop":
         return _loop(arguments, dataset)
     if arguments.command == "eval":
+        predictions = read_predictions(arguments.predictions)
         run = score_subset(
             dataset,
             manifest.load(arguments.manifest),
-            read_predictions(arguments.predictions),
+            predictions,
             currency_symbols=read_currency_symbols(
                 arguments.predictions.parent / CURRENCY_SYMBOLS_FILE
             ),
             confidence=read_confidence(arguments.predictions.parent / CONFIDENCE_FILE),
         )
-        return render_eval(arguments.manifest, run), 0
+        corrected = (
+            None
+            if arguments.corrections is None
+            else (
+                arguments.corrections,
+                score_corrections(
+                    read_corrections(arguments.corrections), predictions, dataset
+                ),
+            )
+        )
+        return render_eval(arguments.manifest, run, corrected), 0
     annotation = dataset.annotation(arguments.document_id)
     if arguments.command == "show":
         return render(arguments.document_id, annotation), 0
@@ -809,6 +874,41 @@ def _serve(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
         port=arguments.port,
     )
     return "", 0
+
+
+def _corrections(arguments: argparse.Namespace) -> tuple[str, int]:
+    """A schema's settled corrections written to a file; the report comes
+    from `eval --corrections`."""
+    pinned = manifest.load(arguments.manifest)
+    with open_schema(
+        resolve_database_url(arguments.database_url), arguments.schema
+    ) as connection:
+        exported = corrections.export(arguments.schema, settled(connection), pinned)
+    out = (
+        CORRECTIONS / f"{arguments.schema}.json"
+        if arguments.out is None
+        else arguments.out
+    )
+    corrections.write(exported, out)
+    return (
+        "\n".join(
+            [
+                "Corrections",
+                *_rows(
+                    ("schema", arguments.schema),
+                    ("documents", str(len(exported.documents))),
+                    (
+                        "corrections",
+                        str(sum(len(each.corrections) for each in exported.documents)),
+                    ),
+                    ("written to", str(out)),
+                ),
+                f"  `docmatch eval --corrections {out}` scores them",
+                "",
+            ]
+        ),
+        0,
+    )
 
 
 def _extractor(arguments: argparse.Namespace, dataset: DocileDataset) -> Extractor:
@@ -1840,8 +1940,13 @@ def _failures(failed: Sequence[DocumentRun]) -> list[str]:
     ]
 
 
-def render_eval(path: Path, run: SubsetScore) -> str:
-    """A whole run over the fixed subset as a block a human can paste anywhere.
+def render_eval(
+    path: Path,
+    run: SubsetScore,
+    corrected: tuple[Path, CorrectionsScore] | None = None,
+) -> str:
+    """A whole run over the fixed subset as a block a human can paste anywhere,
+    and the corrections scored against it when given, last and apart.
 
     Counts and ratios only: `run` explains why no label text appears here.
     """
@@ -1877,8 +1982,53 @@ def render_eval(path: Path, run: SubsetScore) -> str:
         *_gate(run.gate),
         "",
         *_ablation(run.ablation, run.gate.checked, run.sweep),
+        *([] if corrected is None else ["", *_corrected(*corrected)]),
     ]
     return "\n".join([*lines, ""])
+
+
+def _corrected(path: Path, scored: CorrectionsScore) -> list[str]:
+    """The corrections section: how many the run reads right and how many
+    the label agrees with, by header field, by line cell and by line, and the
+    run's own corrections skipped. None of it is in the numbers above."""
+    return [
+        "Corrections, never in the numbers above",
+        *_rows(
+            ("file", str(path)),
+            ("documents", str(scored.documents)),
+            (
+                "skipped",
+                f"{scored.skipped} made on this run's reading, "
+                f"on {scored.skipped_documents} documents",
+            ),
+        ),
+        "",
+        "Corrections by header field",
+        *_tallies(scored.header),
+        "",
+        "Corrections by line cell",
+        *_tallies(scored.cells),
+        "",
+        "Corrections by line",
+        *_tallies(scored.lines),
+    ]
+
+
+def _tallies(tallies: Sequence[Tally]) -> list[str]:
+    if not tallies:
+        return ["  none"]
+    return _table(
+        ("", "n", "read right", "label agrees"),
+        [
+            (
+                each.what,
+                str(each.corrections),
+                str(each.read_right),
+                str(each.label_agrees),
+            )
+            for each in tallies
+        ],
+    )
 
 
 def _listed(title: str, document_ids: Sequence[str]) -> list[str]:

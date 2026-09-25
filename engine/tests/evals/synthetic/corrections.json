@@ -1,0 +1,104 @@
+{
+  "schema": "loop_replay_20260925_024716",
+  "documents": [
+    {
+      "document_id": "eval0006",
+      "reading": "b88cf4dac93f892425c08aab9aa485c616d781d93202458e0782c6a778740874",
+      "decision": "approved",
+      "corrections": [
+        {
+          "kind": "header",
+          "fieldtype": "date_issue",
+          "left": [
+            "2026-09-12"
+          ]
+        },
+        {
+          "kind": "line added",
+          "line": 1,
+          "left": {
+            "line_item_description": [
+              "Delivery"
+            ],
+            "line_item_quantity": [
+              "1"
+            ],
+            "line_item_amount_gross": [
+              "0.00"
+            ]
+          }
+        }
+      ],
+      "lines": {}
+    },
+    {
+      "document_id": "eval0003",
+      "reading": "0460d84990fb42a432226a66eb6120a3f6ace631652b99199a69416f803b89dc",
+      "decision": "rejected",
+      "corrections": [
+        {
+          "kind": "header",
+          "fieldtype": "amount_due",
+          "left": [
+            "412.50"
+          ]
+        },
+        {
+          "kind": "line removed",
+          "line": 0,
+          "read": {
+            "line_item_quantity": [
+              "3"
+            ],
+            "line_item_description": [
+              "Hex key set"
+            ],
+            "line_item_amount_gross": [
+              "45.00"
+            ]
+          }
+        },
+        {
+          "kind": "cell",
+          "line": 1,
+          "fieldtype": "line_item_quantity",
+          "left": [
+            "2"
+          ]
+        },
+        {
+          "kind": "cell",
+          "line": 2,
+          "fieldtype": "line_item_amount_gross",
+          "left": [
+            "50"
+          ]
+        }
+      ],
+      "lines": {
+        "1": {
+          "line_item_description": [
+            "Torque wrench"
+          ],
+          "line_item_amount_gross": [
+            "317.50"
+          ],
+          "line_item_quantity": [
+            "2"
+          ]
+        },
+        "2": {
+          "line_item_quantity": [
+            "5"
+          ],
+          "line_item_description": [
+            "Work gloves"
+          ],
+          "line_item_amount_gross": [
+            "50"
+          ]
+        }
+      }
+    }
+  ]
+}
