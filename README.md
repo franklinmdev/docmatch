@@ -827,7 +827,8 @@ noise is the largest difference between any two of the three runs.
 
 The documents are pinned in `engine/src/docmatch/noise_subset.json`, drawn from
 train with the fixed subset's seed and admission (`docmatch subset --write
---split train`), so none is in the fixed subset. Nine runs cost $5.68. The
+--split train --manifest engine/src/docmatch/noise_subset.json`), so none is in
+the fixed subset. Nine runs cost $5.68. The
 sampled models' line-item noise is wide because a document's table is read
 right on one run and wrong on the next, a whole document at a time: one
 63-line Gemini document scored 0, 62 and 48 matched lines. To measure it again:

@@ -311,6 +311,11 @@ def test_three_identical_runs_measure_no_noise() -> None:
     }
 
 
+def test_extraction_noise_is_measured_for_benchmark_backends_only() -> None:
+    with pytest.raises(RegressionError, match="labels is not a benchmark backend"):
+        measured_noise({"labels": [(1.0, 1.0)] * 3})
+
+
 @pytest.mark.parametrize("runs", [2, 4])
 def test_extraction_noise_is_measured_over_three_runs_only(runs: int) -> None:
     with pytest.raises(RegressionError, match=f"openai has {runs} runs"):

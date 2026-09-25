@@ -485,7 +485,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"one, no {regression.LABEL} label"
         ),
     )
-    measuring = subcommands.add_parser(
+    noising = subcommands.add_parser(
         "noise",
         parents=[dataset],
         help=(
@@ -493,7 +493,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "noise subset, and print it beside the regression gate's constants"
         ),
     )
-    measuring.add_argument(
+    noising.add_argument(
         "--run",
         dest="runs",
         type=Path,
@@ -504,7 +504,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "backend measured; repeat it"
         ),
     )
-    measuring.add_argument(
+    noising.add_argument(
         "--manifest",
         type=Path,
         default=regression.NOISE_SUBSET,
@@ -847,6 +847,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             command_parser.error(
                 "--run is the saved run replay answers from, and only replay's"
             )
+    if (
+        arguments.command == "subset"
+        and arguments.write
+        and arguments.split not in (None, manifest.SPLIT)
+        and arguments.manifest.resolve() == manifest.MANIFEST.resolve()
+    ):
+        subset.error(
+            f"--split {arguments.split} would replace the fixed subset; give "
+            "--manifest, the noise subset's is "
+            f"{regression.NOISE_SUBSET.relative_to(SOURCE.parent.parent.parent)}"
+        )
     if arguments.command == "subset" and not arguments.write:
         drawing = [
             flag
@@ -1120,8 +1131,16 @@ def _noise(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
     measured from its runs, printed beside the constant the gate uses."""
     pinned = manifest.load(arguments.manifest)
     scores: dict[str, list[tuple[float, float]]] = {}
+    commits: dict[str, set[str | None]] = {}
     for directory in arguments.runs:
         saved = read_saved_run(directory, pinned, arguments.manifest)
+        if saved.record.dirty:
+            raise RegressionError(
+                f"{directory} was extracted from uncommitted "
+                f"{saved.record.backend} extraction code, so it is not a run "
+                "with nothing changed"
+            )
+        commits.setdefault(saved.record.backend, set()).add(saved.record.commit)
         scored = score_subset(
             dataset,
             pinned,
@@ -1131,13 +1150,13 @@ def _noise(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
         scores.setdefault(saved.record.backend, []).append(
             (scored.fields.f1, scored.line_items.f1)
         )
-    unknown = sorted(set(scores) - set(backends.BACKENDS))
-    if unknown:
-        raise RegressionError(
-            f"{', '.join(unknown)} is not a benchmark backend, so the gate has "
-            f"no extraction noise for it; the backends are "
-            f"{', '.join(backends.BACKENDS)}"
-        )
+    for backend, extracted_on in commits.items():
+        if len(extracted_on) > 1:
+            raise RegressionError(
+                f"{backend}'s runs were extracted on {len(extracted_on)} commits, "
+                "and its extraction noise is what moves with nothing changed "
+                "but the run"
+            )
     measured = regression.measured_noise(scores)
     rows = [
         [

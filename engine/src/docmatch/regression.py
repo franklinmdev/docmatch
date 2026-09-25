@@ -126,7 +126,7 @@ Procedure: the same 100 DocILE train documents (the noise subset below:
 pinned seed, the fixed subset's admission rules, never the fixed subset
 itself) re-extracted three times per backend; the noise is the largest
 difference between any two of the three runs, for field F1 and line-item F1
-apart, kept to the four places `docmatch noise` prints it at. Line items
+apart, rounded to the four places `docmatch noise` prints it at. Line items
 move a document at a time, a whole table read right on one run and wrong on
 the next, which is why the sampled models' line-item noise is wide.
 """
@@ -152,6 +152,12 @@ def measured_noise(
     """Each backend's extraction noise from its runs' field F1 and line-item
     F1: the largest difference between any two runs, which is the highest
     less the lowest, for each metric apart."""
+    unknown = sorted(set(scores) - set(BACKENDS))
+    if unknown:
+        raise RegressionError(
+            f"{', '.join(unknown)} is not a benchmark backend, so the gate has "
+            f"no extraction noise for it; the backends are {', '.join(BACKENDS)}"
+        )
     for backend, runs in scores.items():
         if len(runs) != RUNS:
             raise RegressionError(

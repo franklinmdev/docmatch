@@ -724,11 +724,23 @@ def test_subset_draws_from_the_split_it_is_given(
     written = load(path)
     assert written.split == "train"
     assert written.document_ids == select(trained, seed=20260912, size=100)
-    assert exit_code_checking(path, split_dir) == 0
+    assert main(["subset", "--manifest", str(path), "--data-dir", str(split_dir)]) == 0
 
 
-def exit_code_checking(path: Path, split_dir: Path) -> int:
-    return main(["subset", "--manifest", str(path), "--data-dir", str(split_dir)])
+def test_subset_never_writes_another_split_over_the_fixed_subset(
+    split_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit):
+        main(["subset", "--write", "--split", "train", "--data-dir", str(split_dir)])
+
+    assert "would replace the fixed subset" in capsys.readouterr().err
+
+
+def test_the_noise_subset_is_train_and_shares_nothing_with_the_fixed_subset() -> None:
+    noise_subset = load(regression.NOISE_SUBSET)
+
+    assert (noise_subset.split, noise_subset.size) == ("train", 100)
+    assert not set(noise_subset.document_ids) & set(load().document_ids)
 
 
 def test_subset_asks_for_write_before_drawing_from_another_split(
@@ -2770,6 +2782,33 @@ def test_noise_refuses_a_backend_with_other_than_three_runs(
     assert main(noise(synthetic_subset, *runs)) == 1
 
     assert "azure has 2 runs of the noise subset" in capsys.readouterr().err
+
+
+def test_noise_refuses_a_run_extracted_from_uncommitted_code(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runs = noise_runs(synthetic_subset, tmp_path)
+    record = tmp_path / "azure-2" / "run.json"
+    recorded = json.loads(record.read_text())
+    record.write_text(json.dumps({**recorded, "dirty": True}))
+
+    assert main(noise(synthetic_subset, *runs)) == 1
+
+    assert "uncommitted" in capsys.readouterr().err
+
+
+def test_noise_refuses_a_backends_runs_extracted_on_different_commits(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Noise is what moves with nothing changed but the run."""
+    runs = noise_runs(synthetic_subset, tmp_path)
+    record = tmp_path / "gemini-2" / "run.json"
+    recorded = json.loads(record.read_text())
+    record.write_text(json.dumps({**recorded, "commit": "decaf"}))
+
+    assert main(noise(synthetic_subset, *runs)) == 1
+
+    assert "gemini's runs were extracted on 2 commits" in capsys.readouterr().err
 
 
 def test_noise_refuses_a_run_over_another_subset(
