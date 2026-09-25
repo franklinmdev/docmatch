@@ -112,6 +112,8 @@ Exported = Annotated[
 
 
 class ExportedDocument(_Exported):
+    """One decided document and the corrections a reviewer left on it."""
+
     document_id: str
     reading: str
     """The digest of the reading as read, before any edit."""

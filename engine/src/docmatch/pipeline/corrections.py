@@ -25,6 +25,7 @@ from docmatch.evals.corrections import (
     ExportedHeader,
     ExportedLineAdded,
     ExportedLineRemoved,
+    Texts,
     reading_digest,
 )
 from docmatch.evals.manifest import Manifest
@@ -91,7 +92,7 @@ def _exported(correction: Correction) -> Exported:
     )
 
 
-def _line(edited: Edited, line: int) -> dict[str, tuple[str, ...]]:
+def _line(edited: Edited, line: int) -> dict[str, Texts]:
     """A line as the edits left it, each cell with a value."""
     row = edited.prediction.rows[edited.line_ids.index(line)]
     return {fieldtype: tuple(texts) for fieldtype, texts in row.items() if texts}

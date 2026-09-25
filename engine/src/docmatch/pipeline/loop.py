@@ -671,7 +671,7 @@ def settled(connection: Connection) -> list[Settled]:
 
     Only a document in review takes an edit, and none after its decision, so
     what these hold is settled (#154)."""
-    settled = []
+    found = []
     for row in connection.execute(
         """
         SELECT id, invoice, status, reading FROM documents
@@ -683,7 +683,7 @@ def settled(connection: Connection) -> list[Settled]:
         reading = Reading.model_validate(read)
         edited, _ = _edited(reading, _edits(connection, _id(document)))
         if edited.corrections:
-            settled.append(
+            found.append(
                 Settled(
                     _id(document),
                     cast(bytes, invoice),
@@ -692,7 +692,7 @@ def settled(connection: Connection) -> list[Settled]:
                     edited,
                 )
             )
-    return settled
+    return found
 
 
 def view(connection: Connection, document: int) -> dict[str, object] | None:
