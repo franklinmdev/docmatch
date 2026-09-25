@@ -30,10 +30,12 @@ export function DecideBar({
   next: number | null;
 }) {
   const [pending, start] = useTransition();
+  const [sending, setSending] = useState<Decision | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
 
   function send(decision: Decision) {
+    setSending(decision);
     start(async () => {
       setRefused(await decide(id, decision));
       setConfirming(false);
@@ -89,7 +91,8 @@ export function DecideBar({
             Keep reviewing
           </button>
           <button type="button" className={primary} onClick={() => send("approved")} disabled={pending}>
-            {pending ? "Approving" : "Approve anyway"}
+            Approve anyway
+            {pending && <Spinner />}
           </button>
         </div>
       </div>
@@ -109,6 +112,7 @@ export function DecideBar({
       <div className="flex gap-2">
         <button type="button" className={`${secondary} text-hold`} onClick={() => send("rejected")} disabled={pending}>
           Reject
+          {pending && sending === "rejected" && <Spinner />}
         </button>
         <button
           type="button"
@@ -117,8 +121,19 @@ export function DecideBar({
           disabled={pending}
         >
           Approve
+          {pending && sending === "approved" && <Spinner />}
         </button>
       </div>
     </div>
+  );
+}
+
+/** Joins a button's label once its request has started; the label stays. */
+function Spinner() {
+  return (
+    <span
+      aria-hidden
+      className="ml-2 inline-block size-3 rounded-full border border-current border-t-transparent align-[-1px] motion-safe:animate-spin"
+    />
   );
 }

@@ -63,7 +63,7 @@ function Shell({ queued, open, children }: { queued: Queued[]; open: number | nu
                   <Link
                     href={`/?doc=${each.id}`}
                     aria-current={each.id === open ? "page" : undefined}
-                    className="flex h-8 items-center gap-2 pointer-coarse:h-11 rounded-xs border border-line px-2.5 text-data no-underline transition-colors duration-100 aria-[current=page]:border-primary aria-[current=page]:bg-primary-wash [@media(hover:hover)]:hover:bg-surface"
+                    className="flex h-8 items-center gap-2 pointer-coarse:h-11 rounded-xs border border-line px-2.5 text-data no-underline transition-colors duration-100 aria-[current=page]:bg-primary-wash [@media(hover:hover)]:hover:bg-surface"
                   >
                     <span className="font-mono">{each.id}</span>
                     <span className="text-muted">{each.routing_reasons.join(", ")}</span>
@@ -76,7 +76,7 @@ function Shell({ queued, open, children }: { queued: Queued[]; open: number | nu
           )}
         </nav>
       </header>
-      <main className="px-4 pt-4">{children}</main>
+      <main className="mx-auto max-w-screen-2xl px-4 pt-4">{children}</main>
     </>
   );
 }

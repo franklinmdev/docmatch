@@ -1000,15 +1000,15 @@ cd apps/review && npm install && npm run dev
 ```
 
 `apps/review` is the one review page, Next.js 16.3.6, talking only to the
-API. Serve the schema a loop run kept, open `localhost:3000`, and the strip at
+API. Serve the schema a loop run kept, open `127.0.0.1:3000`, and the strip at
 the top lists the documents in review; the open one's id is in the URL. For
 each it shows the routing reasons, backend, cost and latency by the title,
 the header as read, one ledger row per purchase-order line (ordered, received
 and billed, the finding with its explanation, the catalog entry), extra lines
 under the order's lines, a missing line as not billed, what the matcher did
 not compare, and the scanned page beside it. Approve and reject are final;
-approving with a hold, a failed gate or a failed extraction still open asks
-first and lists it. `DOCMATCH_API_URL` points it elsewhere than
+approving with a hold, a failed gate, a failed extraction or a pipeline
+failure still open asks first and lists it. `DOCMATCH_API_URL` points it elsewhere than
 `http://127.0.0.1:8000`. `npm run lint` and `npm run typecheck` check it. The
 design decisions are in `DESIGN.md`.
 

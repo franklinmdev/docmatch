@@ -14,6 +14,7 @@ The one surface is the review page under `apps/review` (#156, #174): a reviewer 
 - shadcn components: not used; plain elements styled from the tokens. Reason: the page needs a button, a details disclosure and a table, none of which needs a primitive, and rule 7 prefers fewer components.
 - Confirm dialogs: the approval confirmation is inline in the decide bar, never a dialog. Reason: #156 chose it, and it keeps what is open in view beside the ledger that shows it.
 - Confidence: a gray number in the data face, never colored, never weighted, never a bar. Reason: Azure's header confidence is uncalibrated (#48), so it must not look like a verdict (#156).
+- Decide bar: bottom-anchored on every width, sticky at the foot of the ledger column, where the personal file anchors desktop actions at the top. Reason: #156 chose prototype D, which puts the decision after the ledger the reviewer has just read, and the bar keeps it in view while the ledger scrolls.
 - Line numbers: the ledger numbers lines from 0. Reason: the engine's finding explanations shown beside them count from 0 (#76), and two counts on one row would contradict each other.
 
 ## Benchmarks
