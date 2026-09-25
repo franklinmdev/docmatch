@@ -43,6 +43,11 @@ loop run; `docmatch pipeline --run <dir>` prints its latency and cost per
 status and its routing ladder from that file alone, with no Postgres and no
 model call.
 
+`docmatch corrections --schema <name>` writes the corrections a reviewer
+settled on that schema to a file, which is how they leave Postgres; `docmatch
+eval --corrections <file>` scores them against the same predictions in a
+section of their own, never in either number.
+
 Rendering lives here rather than beside each metric: the numbers are the
 engine's, the terminal is this module's.
 """
