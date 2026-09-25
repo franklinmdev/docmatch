@@ -34,7 +34,7 @@ flowchart LR
   H --> I["Measure<br/>CI benchmark"]
 ```
 
-Every status change and every vendor call is recorded in Postgres with its times and cost, and every stage has an eval that runs in CI.
+Every status change and every vendor call is recorded in Postgres with its times and cost, and every part of the loop has an eval that runs in CI.
 
 ## Phases
 
@@ -93,7 +93,7 @@ Measurement before modeling.
 - Review inbox: document viewer, extracted fields with confidence, discrepancy list, approve or correct. Corrections are exported and scored in their own eval section, never in the fixed subset's F1.
 - A written decision on whether a graph orchestration library earns its place for pause-and-resume, or why plain code is enough: [ADR 0002](docs/adr/0002-plain-code-orchestration.md), plain code.
 
-**The number:** end-to-end p95 latency and cost per document; review rate as a function of routing strictness; a CI regression gate that fails when F1 drops beyond a threshold.
+**The number:** end-to-end p95 latency and cost per document; review rate as a function of routing strictness; a CI regression gate that fails when F1 regresses.
 **Exit:** the full loop works from upload to approval on the fixed subset.
 
 ### Phase 5. Packaging
@@ -587,7 +587,7 @@ most. No pivot discussion opens.
 ### Pipeline, end to end
 
 The full loop, upload to approval, over the fixed subset: one case per
-document on the 93 documents with labeled lines, half clean and half with one
+document on the 93 documents with labeled lines, 47 clean and 46 with one
 injected discrepancy, uploaded through the HTTP API one at a time on a live
 backend, as [The loop](#the-loop) describes. The other 7 seed no case.
 Latency runs from the upload accepted to `approved` or `needs_review`, queue
@@ -608,7 +608,8 @@ Each row is one `docmatch loop --backend <row> --out data/runs/loop/<row>`,
 with `labels`, `gemini`, `azure` and `openai`, run one after the other, then
 `docmatch pipeline --run` over the four, no model call. The whole measurement
 cost $1.59. Machine: AMD Ryzen 7 5800H, 8 logical CPUs and 9.7 GiB given to
-WSL2 on Ubuntu 24.04, Postgres 16.15 with pgvector 0.6.0 and pg_trgm 1.6,
+WSL2 on Ubuntu 24.04 (the resolution row had 10 and 11.7 GiB before WSL's
+allotment changed), Postgres 16.15 with pgvector 0.6.0 and pg_trgm 1.6,
 nothing else running.
 
 **The routing ladder.** Review rate over all 93 documents, then escape rate
@@ -644,7 +645,7 @@ once. The gate buys little on its own (P2 routes 0.03 to 0.08), and holds on
 every type are where review comes from, as #152 expected. Confidence on Azure
 routes up to 10 more documents and catches none of the 2 escapes P4 leaves:
 the escape rate climbs only because fewer documents are approved. Confidence
-adds review and no protection here, which is why it never gates on its own.
+adds review and no protection here, in line with it never gating on its own.
 
 **Per status.** Work at each status, p50 / p95, the time from the worker
 taking the document up at that status to committing the next one: at
@@ -663,7 +664,7 @@ Every cent is spent at received; the gate, resolution and matching make no
 vendor call and cost $0. The wait before the worker takes a document up is
 0.15 s p50 at received, the idle worker polling every 0.2 s, and 7 ms p95 or
 less at every other status. Extraction is all but the whole latency: the
-local stages' p95s sum to under 0.4 s on every row.
+gate, resolution, matching and routing p95s sum to under 0.4 s on every row.
 
 **The loop, shown.** On the Gemini run's schema, `loop_gemini_20260925_131602`,
 served with `docmatch serve`, one document in review with a match hold was
