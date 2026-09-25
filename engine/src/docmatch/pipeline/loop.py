@@ -72,7 +72,7 @@ from docmatch.extraction.extractor import (
     Extraction,
     Extractor,
 )
-from docmatch.extraction.pages import count
+from docmatch.extraction.pages import count, render
 from docmatch.extraction.run import Attempt, read_document
 from docmatch.gate import GateResult, gate
 from docmatch.matching.matcher import MatchResult, explain, match
@@ -106,6 +106,9 @@ PENDING: tuple[Status, ...] = (
 
 SETTLED: tuple[Status, ...] = ("approved", "needs_review")
 """Where the loop leaves a document for good or for a reviewer."""
+
+Decision = Literal["approved", "rejected"]
+"""What a reviewer can move a document in review to, for good (#150)."""
 
 PIPELINE_FAILED: dict[Status, RoutingReason] = {
     "received": "pipeline failed at received",
@@ -521,24 +524,79 @@ def _id(value: object) -> int:
     return value
 
 
+def decide(connection: Connection, document: int, to: Decision) -> None:
+    """A reviewer's decision, final: the document moves from `needs_review`
+    under compare-and-set with its transition, actor `reviewer` and no take
+    time, since only a change the system makes is taken up (#157). Raises
+    `Refused` when the document does not stand in review."""
+    with connection.transaction():
+        moved = connection.execute(
+            """
+            UPDATE documents SET status = %s
+            WHERE id = %s AND status = 'needs_review'
+            """,
+            (to, document),
+        ).rowcount
+        if moved != 1:
+            raise Refused(f"document {document} is not in review")
+        connection.execute(
+            """
+            INSERT INTO transitions
+                (document, from_status, to_status, committed_at, actor)
+            VALUES (%s, 'needs_review', %s, clock_timestamp(), 'reviewer')
+            """,
+            (document, to),
+        )
+
+
+def queue(connection: Connection, status: Status) -> list[dict[str, object]]:
+    """The documents at one status, oldest first, each with its routing
+    reasons: what the review page's strip lists."""
+    ids = [
+        _id(row[0])
+        for row in connection.execute(
+            "SELECT id FROM documents WHERE status = %s ORDER BY id", (status,)
+        ).fetchall()
+    ]
+    return [
+        {"id": each, "status": status, "routing_reasons": _reasons(connection, each)}
+        for each in ids
+    ]
+
+
+def page(connection: Connection, document: int, number: int) -> bytes | None:
+    """One page of the uploaded PDF as a PNG, rendered the way a vision
+    backend is sent it; None when there is no such document or page."""
+    row = connection.execute(
+        "SELECT invoice, pages FROM documents WHERE id = %s", (document,)
+    ).fetchone()
+    if row is None or not 1 <= number <= cast(int, row[1]):
+        return None
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "invoice.pdf"
+        path.write_bytes(cast(bytes, row[0]))
+        return render(path)[number - 1].png
+
+
 def view(connection: Connection, document: int) -> dict[str, object] | None:
-    """One document as the API shows it: status, case, reading, gate,
+    """One document as the API shows it: status, pages, case, reading, gate,
     resolution per line, match result with each finding explained, routing
     reasons, cost and latency; None when there is no such document. An
     output not yet saved is null."""
     row = connection.execute(
         """
-        SELECT status, "case", reading, gate, resolution, match
+        SELECT status, pages, "case", reading, gate, resolution, match
         FROM documents WHERE id = %s
         """,
         (document,),
     ).fetchone()
     if row is None:
         return None
-    status, case, reading, checked, resolution, matched = row
+    status, pages, case, reading, checked, resolution, matched = row
     return {
         "id": document,
         "status": status,
+        "pages": pages,
         "case": case,
         "reading": reading,
         "gate": None if checked is None else _gate_view(GATE.validate_python(checked)),

@@ -15,7 +15,13 @@ parameter (#164). Each request opens its own connection on the schema, which
   case as JSON text. 201 with the new document, 200 with the one already
   stored under the same content, 422 for a PDF pdfium cannot open or a case
   that is not one.
-- `GET /documents/{id}`: the document's full view.
+- `GET /documents?status=<status>`: the documents at that status, each with
+  its routing reasons; the review page lists `needs_review`.
+- `GET /documents/{id}`: the document's full view, with the backend the
+  server reads with.
+- `GET /documents/{id}/pages/{n}`: page n, 1-based, as a PNG.
+- `POST /documents/{id}/decision`: JSON `{"decision": "approved"}` or
+  `"rejected"`, final; answers the full view, 409 outside `needs_review`.
 - `GET /documents/{id}/trace`: its transitions and vendor calls, without
   what came back.
 """
@@ -23,16 +29,32 @@ parameter (#164). Each request opens its own connection on the schema, which
 from collections.abc import Iterator
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
+from pydantic import BaseModel
 
-from docmatch.extraction.pages import PageError
+from docmatch.extraction.pages import MIME_TYPE, PageError
 from docmatch.pipeline import loop
 from docmatch.pipeline.case import CaseError, read_case
 from docmatch.pipeline.store import Connection, open_schema
 
 
-def create(database_url: str, schema: str) -> FastAPI:
-    """The API over one prepared schema."""
+class Decided(BaseModel):
+    """A reviewer's decision, the body of `POST .../decision`."""
+
+    decision: loop.Decision
+
+
+def create(database_url: str, schema: str, backend: str) -> FastAPI:
+    """The API over one prepared schema, read with one backend."""
     app = FastAPI(title="docmatch")
 
     def connection() -> Iterator[Connection]:
@@ -59,15 +81,42 @@ def create(database_url: str, schema: str) -> FastAPI:
             ) from None
         if not stored.created:
             response.status_code = status.HTTP_200_OK
-        return _found(loop.view(connection, stored.document))
+        return shown(connection, stored.document)
+
+    @app.get("/documents")
+    def documents(
+        at: Annotated[loop.Status, Query(alias="status")], connection: Connected
+    ) -> dict[str, list[dict[str, object]]]:
+        return {"documents": loop.queue(connection, at)}
 
     @app.get("/documents/{document}")
     def document(document: int, connection: Connected) -> dict[str, object]:
-        return _found(loop.view(connection, document))
+        return shown(connection, document)
+
+    @app.get("/documents/{document}/pages/{number}")
+    def page(document: int, number: int, connection: Connected) -> Response:
+        png = loop.page(connection, document, number)
+        if png is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no such page")
+        return Response(png, media_type=MIME_TYPE)
+
+    @app.post("/documents/{document}/decision")
+    def decision(
+        document: int, decided: Decided, connection: Connected
+    ) -> dict[str, object]:
+        _found(loop.view(connection, document))
+        try:
+            loop.decide(connection, document, decided.decision)
+        except loop.Refused as refused:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(refused)) from None
+        return shown(connection, document)
 
     @app.get("/documents/{document}/trace")
     def trace(document: int, connection: Connected) -> dict[str, object]:
         return _found(loop.trace(connection, document))
+
+    def shown(connection: Connection, document: int) -> dict[str, object]:
+        return {**_found(loop.view(connection, document)), "backend": backend}
 
     return app
 

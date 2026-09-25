@@ -21,13 +21,14 @@ from docmatch.evals.manifest import Manifest
 from docmatch.evals.public import digest
 from docmatch.evals.run import read_predictions
 from docmatch.extraction.conftest import write_pdf
+from docmatch.extraction.extractor import Extractor
 from docmatch.matching.records import ReceiptLine, ReceivingRecord, Record
 from docmatch.metrics.fields import FieldValues
 from docmatch.metrics.normalization import normalize_text
 from docmatch.pipeline import api, labels, replay
 from docmatch.pipeline.case import Case, case_json
 from docmatch.pipeline.labels import Labels
-from docmatch.pipeline.loop import Resolve
+from docmatch.pipeline.loop import Resolve, Status, claim_and_advance
 from docmatch.pipeline.replay import Replay
 from docmatch.pipeline.serve import catalog_schema, resolving
 from docmatch.pipeline.store import Connection, drop_schema, open_schema, prepare
@@ -182,7 +183,7 @@ def connection(database_url: str, schema: str) -> Iterator[Connection]:
 
 @pytest.fixture
 def client(database_url: str, schema: str) -> Iterator[TestClient]:
-    with TestClient(api.create(database_url, schema)) as client:
+    with TestClient(api.create(database_url, schema, replay.BACKEND)) as client:
         yield client
 
 
@@ -197,3 +198,31 @@ def resolver(database_url: str) -> Iterator[Resolve]:
         )
     with resolving(database_url, TEST_SCHEMA, embedder) as resolve:
         yield resolve
+
+
+def uploaded(client: TestClient, invoice: Path, case: str, expected: int = 201) -> int:
+    response = client.post(
+        "/documents",
+        files={"invoice": ("invoice.pdf", invoice.read_bytes(), "application/pdf")},
+        data={"case": case},
+    )
+    assert response.status_code == expected, response.text
+    document = response.json()["id"]
+    assert isinstance(document, int)
+    return document
+
+
+def settle(
+    connection: Connection, extractor: Extractor, resolver: Resolve
+) -> list[Status]:
+    """Every status the worker moves a document to until nothing is pending."""
+    moved = []
+    while (
+        status := claim_and_advance(connection, extractor, resolver, wait=no_wait)
+    ) is not None:
+        moved.append(status)
+    return moved
+
+
+def no_wait(_: float) -> None:
+    pass
