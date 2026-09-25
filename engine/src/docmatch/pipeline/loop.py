@@ -565,13 +565,13 @@ def correct(
     connection: Connection, document: int, change: Edit, resolve: Resolve
 ) -> None:
     """A reviewer's edit, saved, and the gate, resolution and match rerun on
-    the reading it leaves through the functions the worker runs at each status,
-    kept beside the
-    system's checkpoints. The document stays in review: code redoes the
-    arithmetic and the reviewer still decides (#150 point 5). The row is
-    locked throughout, so a decision waits for the rerun. Raises `Refused`
-    when the document is not in review or has no reading to correct, and
-    `EditError`, saving nothing, when the reading cannot take the edit."""
+    the reading it leaves through the functions the worker runs at each
+    status, kept beside the system's checkpoints. The document stays in
+    review: code redoes the arithmetic and the reviewer still decides (#150
+    point 5). The row is locked throughout, so a decision waits for the
+    rerun. Raises `Refused` when the document is not in review or has no
+    reading to correct, and `EditError`, saving nothing, when the reading
+    cannot take the edit."""
     with connection.transaction():
         row = connection.execute(
             'SELECT status, reading, "case" FROM documents WHERE id = %s FOR UPDATE',
