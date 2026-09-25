@@ -2,7 +2,7 @@
 
 **Document reconciliation engine.** docmatch extracts invoices and receipts with vision language models, validates them with deterministic gates, matches them against purchase orders and receiving records, routes exceptions to human review, and measures every change against a labeled benchmark in CI.
 
-> **Status:** phases 0 to 3 are done: their numbers are in the Benchmarks section with the commits that produced them, three extraction rows, the calibration table, the gate ablation, the matching table and its end-to-end rows, and the entity resolution table with the verdict on the reranker. Phase 4, the pipeline, review and observability, is next. The remaining tables fill in as phases complete, and a phase is not done until its number is here.
+> **Status:** phases 0 to 4 are done: their numbers are in the Benchmarks section with the commits that produced them, three extraction rows, the calibration table, the gate ablation, the matching table and its end-to-end rows, the entity resolution table with the verdict on the reranker, and the pipeline end to end with its routing ladder; the CI regression gate guards F1 on every pull request. Phase 5, packaging, is next. The remaining tables fill in as phases complete, and a phase is not done until its number is here.
 
 ## Why
 
@@ -34,7 +34,7 @@ flowchart LR
   H --> I["Measure<br/>CI benchmark"]
 ```
 
-Every stage records cost and latency to a tracing backend, and every stage has an eval that runs in CI.
+Every status change and every vendor call is recorded in Postgres with its times and cost, and every stage has an eval that runs in CI.
 
 ## Phases
 
@@ -79,7 +79,7 @@ Measurement before modeling.
 - A catalog of minted SKUs and canonical descriptions, every description that appears in two or more DocILE train documents, and a query set of exact queries and noisy variants that imitate how the saved readings differ from their labels, plus out-of-catalog queries.
 - Postgres with `pgvector` and `pg_trgm`. Hybrid retrieval with reciprocal rank fusion.
 - Cross-encoder reranking over the hybrid's candidates, kept or dropped by a rule written before the number.
-- A separability diagnostic per arm, how well its top-1 score tells an answerable query from an out-of-catalog one; the operating threshold that routes a line to review is Phase 4's.
+- A separability diagnostic per arm, how well its top-1 score tells an answerable query from an out-of-catalog one; the operating threshold that annotates a line is Phase 4's.
 
 **The number:** top-1 and top-5 for trigram only, vector only, hybrid, and hybrid plus rerank, with latency per query.
 **Exit:** the table, and a documented keep-or-drop decision on the reranker.
@@ -89,11 +89,11 @@ Measurement before modeling.
 - Explicit status state machine in Postgres: received, extracted, validated, resolved, matched, needs_review, approved, rejected.
 - Postgres-backed worker with idempotent handlers under at-least-once delivery.
 - HTTP API in front of the engine.
-- Tracing with cost and latency per stage.
-- Review inbox: document viewer, extracted fields with confidence, discrepancy list, approve or correct. Corrections are appended to the eval set as new cases.
-- A written decision on whether a graph orchestration library earns its place for pause-and-resume, or why plain code is enough.
+- Traces in Postgres: every status change with when it was taken up and committed, and every vendor call with its units and list-price cost.
+- Review inbox: document viewer, extracted fields with confidence, discrepancy list, approve or correct. Corrections are exported and scored in their own eval section, never in the fixed subset's F1.
+- A written decision on whether a graph orchestration library earns its place for pause-and-resume, or why plain code is enough: [ADR 0002](docs/adr/0002-plain-code-orchestration.md), plain code.
 
-**The number:** end-to-end p95 latency and cost per document; review rate as a function of gate strictness; a CI regression gate that fails when F1 drops beyond a threshold.
+**The number:** end-to-end p95 latency and cost per document; review rate as a function of routing strictness; a CI regression gate that fails when F1 drops beyond a threshold.
 **Exit:** the full loop works from upload to approval on the fixed subset.
 
 ### Phase 5. Packaging
@@ -586,16 +586,96 @@ most. No pivot discussion opens.
 
 ### Pipeline, end to end
 
-| Stage | p95 latency | Cost / doc | Review rate | Commit |
+The full loop, upload to approval, over the fixed subset: one case per
+document on the 93 documents with labeled lines, half clean and half with one
+injected discrepancy, uploaded through the HTTP API one at a time on a live
+backend, as [The loop](#the-loop) describes. The other 7 seed no case.
+Latency runs from the upload accepted to `approved` or `needs_review`, queue
+wait included; cost is list price summed over every vendor call the document
+made. The labels control reads each document with its DocILE labels, so its
+latency is the loop without extraction and its escapes are the routing's own.
+Review and escape rates are at P4, any hold routes to review, the loop's own
+policy.
+
+| Row | p50 | p95 | Cost / doc | Review rate | Escape rate | Commit |
+|---|---|---|---|---|---|---|
+| labels control | 0.24 s | 0.54 s | $0 | 0.409 | 0.000 | [`89483a3`](https://github.com/franklinmdev/docmatch/commit/89483a3) |
+| `gemini-3.1-flash-lite` | 5.36 s | 10.03 s | $0.00236 | 0.484 | 0.104 | [`89483a3`](https://github.com/franklinmdev/docmatch/commit/89483a3) |
+| Azure `prebuilt-invoice` | 9.82 s | 19.74 s | $0.0112 | 0.559 | 0.049 | [`89483a3`](https://github.com/franklinmdev/docmatch/commit/89483a3) |
+| `gpt-5.6-luna` | 17.08 s | 35.09 s | $0.00350 | 0.516 | 0.111 | [`89483a3`](https://github.com/franklinmdev/docmatch/commit/89483a3) |
+
+Each row is one `docmatch loop --backend <row> --out data/runs/loop/<row>`,
+with `labels`, `gemini`, `azure` and `openai`, run one after the other, then
+`docmatch pipeline --run` over the four, no model call. The whole measurement
+cost $1.59. Machine: AMD Ryzen 7 5800H, 8 logical CPUs and 9.7 GiB given to
+WSL2 on Ubuntu 24.04, Postgres 16.15 with pgvector 0.6.0 and pg_trgm 1.6,
+nothing else running.
+
+**The routing ladder.** Review rate over all 93 documents, then escape rate
+over the documents the rung approves. An escaped document is one the system
+approved with an injected discrepancy of a hold type or a gate value read
+unlike its label; each rung adds a routing reason to the one above it.
+
+| Rung, routes to review | labels control | Gemini | Azure | OpenAI |
 |---|---|---|---|---|
-| | | | | |
+| P0 nothing | 0.000 / 0.366 | 0.000 / 0.409 | 0.000 / 0.376 | 0.000 / 0.452 |
+| P1 + extraction or pipeline failed | 0.000 / 0.366 | 0.000 / 0.409 | 0.000 / 0.376 | 0.000 / 0.452 |
+| P2 + gate failed | 0.075 / 0.360 | 0.054 / 0.398 | 0.032 / 0.378 | 0.075 / 0.442 |
+| P3 + match held on price variance or tax mismatch | 0.151 / 0.304 | 0.097 / 0.381 | 0.140 / 0.350 | 0.151 / 0.405 |
+| P4 + match held on any hold type | 0.409 / 0.000 | 0.484 / 0.104 | 0.559 / 0.049 | 0.516 / 0.111 |
+| P5 + confidence below 0.1, 0.2, 0.3 | | | 0.559 / 0.049 | |
+| P5 + confidence below 0.4 | | | 0.570 / 0.050 | |
+| P5 + confidence below 0.5 | | | 0.613 / 0.056 | |
+| P5 + confidence below 0.6 | | | 0.634 / 0.059 | |
+| P5 + confidence below 0.7 | | | 0.656 / 0.062 | |
+| P5 + confidence below 0.8, 0.9 | | | 0.667 / 0.065 | |
+
+Each cell is review rate / escape rate. P5 is only on Azure, the one backend
+that reports confidence. At P4 the escapes split by cause into an injected
+hold and a misread gate value: Gemini 0.083 and 0.021, Azure 0.049 and 0.000,
+OpenAI 0.022 and 0.089; a document escaping on both counts once in the total
+and once under each cause.
+
+No extraction failed and no document hit a pipeline failure, so P1 adds
+nothing on any row. With a perfect reading, P4 lets nothing escape at 0.409
+review; a backend's reading costs 7.5 to 15 points more review and still lets
+0.05 to 0.11 of what it approves escape, so extraction costs both axes at
+once. The gate buys little on its own (P2 routes 0.03 to 0.08), and holds on
+every type are where review comes from, as #152 expected. Confidence on Azure
+routes up to 10 more documents and catches none of the 2 escapes P4 leaves:
+the escape rate climbs only because fewer documents are approved. Confidence
+adds review and no protection here, which is why it never gates on its own.
+
+**Per status.** Work at each status, p50 / p95, the time from the worker
+taking the document up at that status to committing the next one: at
+received that is extraction, at extracted the gate, at validated resolution,
+at resolved matching, at matched routing.
+
+| Status taken up | labels control | Gemini | Azure | OpenAI |
+|---|---|---|---|---|
+| received, extraction | 0.003 / 0.005 s | 5.136 / 9.527 s | 9.588 / 18.836 s | 16.903 / 34.633 s |
+| extracted, gate | 0.002 / 0.003 s | 0.002 / 0.003 s | 0.002 / 0.003 s | 0.002 / 0.002 s |
+| validated, resolution | 0.070 / 0.356 s | 0.068 / 0.341 s | 0.069 / 0.344 s | 0.071 / 0.343 s |
+| resolved, matching | 0.003 / 0.015 s | 0.003 / 0.015 s | 0.003 / 0.020 s | 0.003 / 0.025 s |
+| matched, routing | 0.002 / 0.002 s | 0.002 / 0.002 s | 0.002 / 0.002 s | 0.002 / 0.002 s |
+
+Every cent is spent at received; the gate, resolution and matching make no
+vendor call and cost $0. The wait before the worker takes a document up is
+0.15 s p50 at received, the idle worker polling every 0.2 s, and 7 ms p95 or
+less at every other status. Extraction is all but the whole latency: the
+local stages' p95s sum to under 0.4 s on every row.
+
+**The loop, shown.** On the Gemini run's schema, `loop_gemini_20260925_131602`,
+served with `docmatch serve`, one document in review with a match hold was
+approved from the review page after its confirmation, and one with a failed
+gate and a hold rejected; both transitions carry the reviewer as actor.
 
 ## Data
 
 - **Real invoices:** DocILE, 6,680 real annotated invoices with key-field and line-item labels, plus 100k synthetic and close to 1M unlabeled documents. Access is a request form that returns a download token. The terms are non-commercial research use only, no redistribution, no third-party access, GDPR compliance, and deletion when the permission ends. They restrict the data, not the publication of results, so the numbers in this README are publishable and the documents are not.
 - **Purchase orders, receiving records, catalog:** generated from the labels with controlled, labeled perturbations, so every discrepancy case has an exact expected answer. The generator and its seed are committed; the outputs are reproducible.
 - **Regional private sets:** real documents with personal data. Never committed. Only aggregate numbers appear in this README.
-- **Corrections from review:** appended to the eval set as new cases, forming the data flywheel.
+- **Corrections from review:** exported from Postgres to the ignored `data/corrections/` and scored against a run in their own eval section, beside how often the reviewer agrees with the DocILE label, never in the fixed subset's F1.
 
 **Getting DocILE.** Request a token at https://docile.rossum.ai/. The form returns it immediately; there is no approval wait. Put it in `.env` as `DOCILE_TOKEN` (see `.env.example`), then download the annotated subset, 1.14 GB, into the gitignored `data/`:
 
@@ -1273,11 +1353,11 @@ A list price is not a cost per document, and for the vision models it is not eve
 | Storage and retrieval | Postgres, `pgvector`, `pg_trgm` | One ACID store for records, vectors, and fuzzy text. Trigram similarity fits short SKU strings; it is not BM25 and is not called that here. |
 | Queue | Postgres-backed worker | No second datastore for a single-node system. |
 | API | FastAPI | Thin, typed, boring. |
-| Tracing | Langfuse | Open source, self-hostable, per-stage cost and latency. |
+| Tracing | Postgres: transitions and vendor calls | Every status change with when it was taken up and committed, every vendor call with its units and list-price cost, in the store the loop already writes; a loop run exports them for the report. |
 | Evals | pytest plus a metrics module, `scipy` for the row assignment | Ground-truth extraction needs field-level and assignment metrics, not judge models. Pairing predicted line items to labeled ones is the rectangular assignment problem, which is a solved one. |
 | Review UI | Next.js, TypeScript | One page, timeboxed. |
 
-Deliberately cut: schema DSLs, document-parsing SaaS as a foundation, Celery and Redis, judge-model eval frameworks, graph orchestration until phase 4 proves the need.
+Deliberately cut: schema DSLs, document-parsing SaaS as a foundation, Celery and Redis, judge-model eval frameworks, Langfuse (self-hosted v4 runs six containers with Redis, against the Redis cut, and the cloud would put document contents on a third party), graph orchestration (settled by [ADR 0002](docs/adr/0002-plain-code-orchestration.md): plain code over the documents table).
 
 ## Definition of done
 

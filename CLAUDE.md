@@ -20,9 +20,9 @@ A document reconciliation engine: extract invoices with vision language models, 
 ## Stack
 
 - Engine: Python 3.12, `uv`, Pydantic, `scipy` for assignment metrics, provider SDKs
-  with native structured output, Postgres with `pgvector` and `pg_trgm`, a Postgres-backed worker, FastAPI, Langfuse, pytest.
+  with native structured output, Postgres with `pgvector` and `pg_trgm`, a Postgres-backed worker, FastAPI, pytest; traces are Postgres tables.
 - Review UI: Next.js with TypeScript under `apps/review`, one page, timeboxed.
-- Cut on purpose: schema DSLs, document-parsing SaaS as a foundation, Celery and Redis, judge-model eval frameworks. Graph orchestration is a phase 4 decision, not a default.
+- Cut on purpose: schema DSLs, document-parsing SaaS as a foundation, Celery and Redis, judge-model eval frameworks, Langfuse (self-hosted needs Redis and five more containers). Graph orchestration is cut by ADR 0002: plain code.
 
 ## Conventions
 
