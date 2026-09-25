@@ -51,7 +51,7 @@ _Avoid_: actual model, resolved model
 ### Measurement
 
 **Regression**:
-A change that lowers field F1 or line-item F1 on the fixed subset, for a backend it touches, below what that backend scored before the change. When the change only re-scores that backend's saved readings, any drop is a regression; when it re-extracts them, only a drop larger than the backend's extraction noise. A backend's first row has nothing to regress from.
+A change that lowers field F1 or line-item F1 on the fixed subset, for a backend it touches, below what that backend scored before the change. When the change only re-scores that backend's saved readings, any drop is a regression; when it re-extracts them and re-scores nothing, only a drop larger than the backend's extraction noise. A backend's first row has nothing to regress from.
 _Avoid_: degradation
 
 **Extraction noise**:

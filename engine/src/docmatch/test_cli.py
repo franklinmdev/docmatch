@@ -2747,9 +2747,12 @@ def test_noise_prints_the_measured_noise_beside_each_constant(
         f1,
         f"{short.fields.f1:.4f}",
         f"{full.fields.f1 - short.fields.f1:.4f}",
-        "0.0000",
+        f"{regression.EXTRACTION_NOISE['gemini'].field_f1:.4f}",
     ]
-    assert rows["azure line-item F1"][3:] == ["0.0000", "0.0000"]
+    assert rows["azure line-item F1"][3:] == [
+        "0.0000",
+        f"{regression.EXTRACTION_NOISE['azure'].line_item_f1:.4f}",
+    ]
     assert "openai" not in rows
     assert out.startswith(
         "Extraction noise\n"

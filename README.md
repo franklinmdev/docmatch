@@ -805,12 +805,39 @@ checks it is fresh for what the pull request touches:
 
 A re-scored row fails on any drop. A re-extracted row fails only on a drop
 larger than that backend's extraction noise for that metric, six constants in
-`engine/src/docmatch/regression.py`, zero until they are measured. A stale row
-always fails. A regression passes only with the `regression-accepted` label and
+`engine/src/docmatch/regression.py`, and only when the pull request owes no
+re-score: beside a scoring change a drop inside the noise could be the scoring
+change's, so land the scoring change first and the re-extraction after it. A
+stale row always fails. A regression passes only with the `regression-accepted` label and
 a `## Regression reason` section in the pull request's body, and the drop is
 printed either way. Run the same check locally before pushing with
 `uv run docmatch regression`, which compares `HEAD` with its merge base on
 `main`.
+
+**Extraction noise.** Each backend re-extracted the same 100 DocILE train
+documents three times, at
+[`e299b77`](https://github.com/franklinmdev/docmatch/commit/e299b77); the
+noise is the largest difference between any two of the three runs.
+
+| Backend | Field F1 | Line-item F1 |
+|---|---|---|
+| Gemini | 0.0165 | 0.1447 |
+| Azure | 0.0009 | 0.0004 |
+| OpenAI | 0.0204 | 0.0592 |
+
+The documents are pinned in `engine/src/docmatch/noise_subset.json`, drawn from
+train with the fixed subset's seed and admission (`docmatch subset --write
+--split train`), so none is in the fixed subset. Nine runs cost $5.68. The
+sampled models' line-item noise is wide because a document's table is read
+right on one run and wrong on the next, a whole document at a time: one
+63-line Gemini document scored 0, 62 and 48 matched lines. To measure it again:
+
+```bash
+uv run docmatch noise --run data/runs/noise/gemini-1 --run data/runs/noise/gemini-2 \
+  --run data/runs/noise/gemini-3   # and three runs per other backend
+```
+
+It prints each run's two numbers, the measured noise and the constant beside it.
 
 ### Matching
 

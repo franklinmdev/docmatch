@@ -317,15 +317,16 @@ def test_extraction_noise_is_measured_over_three_runs_only(runs: int) -> None:
         measured_noise({"openai": [(0.5, 0.2)] * runs})
 
 
-def test_extraction_noise_is_strict_until_it_is_measured() -> None:
-    assert all(
-        each == Noise(field_f1=0.0, line_item_f1=0.0)
-        for each in EXTRACTION_NOISE.values()
-    )
+def test_a_re_extraction_is_held_to_the_measured_noise_by_default() -> None:
     changed = [f"{ROOT}/extraction/gemini.py"]
     after = with_blob(changed[0], "g2")
-    head = three(gemini=a_row(field_f1=0.614, predictions="p2", listing=after))
-    assert not check(three(), head, changed, after).passed
+    within = EXTRACTION_NOISE["gemini"].field_f1
+    head = three(gemini=a_row(field_f1=0.615 - within, predictions="p2", listing=after))
+    assert check(three(), head, changed, after).passed
+    beyond = three(
+        gemini=a_row(field_f1=0.615 - within - 1e-4, predictions="p2", listing=after)
+    )
+    assert not check(three(), beyond, changed, after).passed
 
 
 def test_a_stale_extraction_fails_for_the_row_a_backend_module_touches() -> None:

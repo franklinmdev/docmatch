@@ -116,16 +116,19 @@ class Noise:
 
 
 EXTRACTION_NOISE: Mapping[str, Noise] = {
-    backend: Noise(field_f1=0.0, line_item_f1=0.0) for backend in BACKENDS
+    "gemini": Noise(field_f1=0.0165, line_item_f1=0.1447),
+    "azure": Noise(field_f1=0.0009, line_item_f1=0.0004),
+    "openai": Noise(field_f1=0.0204, line_item_f1=0.0592),
 }
-"""Each backend's extraction noise, strict until measured.
+"""Each backend's extraction noise, measured at `e299b77` (#178).
 
-Procedure: the same 100 DocILE train documents (pinned seed, the fixed
-subset's admission rules, never the fixed subset itself) re-extracted three
-times per backend; the noise is the largest difference between any two of
-the three runs, for field F1 and line-item F1 apart. Zero until the noise
-ticket (#178) measures them, so until then a re-extraction is held to any
-drop, like a re-score.
+Procedure: the same 100 DocILE train documents (the noise subset below:
+pinned seed, the fixed subset's admission rules, never the fixed subset
+itself) re-extracted three times per backend; the noise is the largest
+difference between any two of the three runs, for field F1 and line-item F1
+apart, kept to the four places `docmatch noise` prints it at. Line items
+move a document at a time, a whole table read right on one run and wrong on
+the next, which is why the sampled models' line-item noise is wide.
 """
 
 
