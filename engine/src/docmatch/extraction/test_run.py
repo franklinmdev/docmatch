@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -392,6 +392,21 @@ def test_writes_a_record_of_what_each_document_cost(
         "fake-002",
         "fake-002",
     ]
+
+
+def test_records_the_commit_the_run_was_extracted_on(
+    subset: Subset, tmp_path: Path
+) -> None:
+    """So the regression gate can tell whether the row is fresh (#153)."""
+    run = replace(
+        done(FakeExtractor(answers=[READING]), subset), commit="abc123", dirty=True
+    )
+    path = tmp_path / "run.json"
+
+    write_record(run, path)
+
+    record = json.loads(path.read_text())
+    assert (record["commit"], record["dirty"]) == ("abc123", True)
 
 
 def test_a_document_that_failed_has_no_served_model(subset: Subset) -> None:

@@ -773,6 +773,45 @@ message or an issue. CI runs the same command on a committed synthetic corpus
 in DocILE's shape, `engine/tests/evals/synthetic`, which exercises the whole
 path on every push while the dataset stays on the machine that downloaded it.
 
+### The regression gate
+
+A pull request may not lower field F1 or line-item F1 on any backend. The
+numbers stay on the machine with the dataset, so the eval writes them, per
+backend, into `benchmark/aggregate.json`, numbers and digests only, and the
+pull request commits it:
+
+```bash
+uv run docmatch eval --predictions data/runs/gemini/predictions.json \
+  --aggregate benchmark/aggregate.json
+```
+
+The run beside the predictions has to cover the whole pinned subset and record
+the commit it was extracted on, which `docmatch extract` writes into `run.json`,
+and the scoring code has to be committed, so a row always names the code its
+numbers came from.
+
+On every pull request, the `Regression` workflow runs `docmatch regression`,
+which compares the pull request's aggregate with the one at the merge base and
+checks it is fresh for what the pull request touches:
+
+- **Extraction paths**, `engine/src/docmatch/extraction/` except `derived.py`:
+  a backend's own module owes that backend's row a re-extraction, any other
+  file every row's, on a commit whose extraction files equal the pull
+  request's.
+- **Scoring paths**, `metrics/`, `evals/`, `extraction/derived.py`, `gate.py`
+  and `docile/`: every row re-scored on a commit whose scoring files equal the
+  pull request's.
+- Anything else, tests included, owes nothing.
+
+A re-scored row fails on any drop. A re-extracted row fails only on a drop
+larger than that backend's extraction noise for that metric, six constants in
+`engine/src/docmatch/regression.py`, zero until they are measured. A stale row
+always fails. A regression passes only with the `regression-accepted` label and
+a `## Regression reason` section in the pull request's body, and the drop is
+printed either way. Run the same check locally before pushing with
+`uv run docmatch regression`, which compares `HEAD` with its merge base on
+`main`.
+
 ### Matching
 
 ```bash
@@ -1232,9 +1271,10 @@ docmatch/
     tests/evals/       the synthetic corpus CI runs the eval, the match, the resolve and the loop on
   apps/review/         Next.js review page, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
+  benchmark/           the regression gate's aggregate: F1 per backend, committed
   docs/                decision records
   scripts/             the markdown-location check CI runs
-  .github/workflows/   CI: ruff, mypy and pytest against a pgvector container on every push
+  .github/workflows/   CI: ruff, mypy and pytest against a pgvector container on every push; the regression gate on every pull request
 ```
 
 Tests live next to the code they test, so `src/docmatch/docile/dataset.py` is

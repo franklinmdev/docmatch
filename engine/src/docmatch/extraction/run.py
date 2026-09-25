@@ -132,6 +132,12 @@ class Run:
     """What a rendering backend was asked to render at, kept with the record;
     None for a backend that reads the PDF and renders nothing."""
     documents: tuple[DocumentRun, ...]
+    commit: str | None = None
+    """The commit the run was extracted on, None outside a git checkout, so
+    the regression gate can tell whether its row is fresh (#153)."""
+    dirty: bool = False
+    """Whether this backend's extraction paths differed from that commit when
+    the run started, which makes the commit a lie a row cannot be born from."""
 
     @property
     def predicted(self) -> tuple[DocumentRun, ...]:
@@ -380,6 +386,8 @@ def write_record(run: Run, path: Path) -> None:
         "split": run.manifest.split,
         "size": run.manifest.size,
         "long_edge": run.long_edge,
+        "commit": run.commit,
+        "dirty": run.dirty,
         "cost": str(run.cost),
         "cost_per_document": str(run.cost_per_document),
         "input_tokens": run.tokens.input_tokens,

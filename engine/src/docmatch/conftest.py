@@ -6,6 +6,7 @@ here touches `data/`, which is how the suite stays runnable in CI.
 """
 
 import shutil
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -86,3 +87,27 @@ def store(database_url: str) -> Iterator[Store]:
         yield Store(connection, TEST_SCHEMA)
     finally:
         connection.close()
+
+
+def git(repo: Path, *arguments: str) -> str:
+    """What a git command printed in a repository a test made."""
+    return subprocess.run(
+        ["git", "-C", str(repo), *arguments],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """A git repository with one commit: a scoring file and a README."""
+    git(tmp_path, "init", "--quiet", "--initial-branch=main")
+    git(tmp_path, "config", "user.email", "test@example.com")
+    git(tmp_path, "config", "user.name", "test")
+    (tmp_path / "engine/src/docmatch/gate.py").parent.mkdir(parents=True)
+    (tmp_path / "engine/src/docmatch/gate.py").write_text("one\n")
+    (tmp_path / "README.md").write_text("readme\n")
+    git(tmp_path, "add", ".")
+    git(tmp_path, "commit", "--quiet", "-m", "first")
+    return tmp_path

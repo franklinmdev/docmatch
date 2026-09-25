@@ -1,0 +1,44 @@
+{
+  "gemini": {
+    "requested_model": "gemini-3.1-flash-lite",
+    "field_f1": 0.6145503840939901,
+    "line_item_f1": 0.37444279346210996,
+    "predictions": "db0d54d91a84353dd57286ae8af83b4489c5f2ebf9f28e7bb997059d1314812f",
+    "extracted_on": {
+      "commit": "28d07389e78363be8da6284e55f5163e049d3bff",
+      "tree": "0b1a1bd8b649d847f87e4d827d2259c920d522971606cba3eddaa005284cef84"
+    },
+    "scored_on": {
+      "commit": "54e96d9b8846c76080fd288877cbfa71ff4cf594",
+      "tree": "5056bc2cab55d03f43b06d8a9a9bdc3b267335e5f89471bc0dabe8f50ede1abc"
+    }
+  },
+  "azure": {
+    "requested_model": "prebuilt-invoice",
+    "field_f1": 0.5557071396089132,
+    "line_item_f1": 0.39598278335724535,
+    "predictions": "9a088c0795ddf19d19c1b431218a09cb66903eaeb766d2ab85f657aaef772aca",
+    "extracted_on": {
+      "commit": "d3bb01e5657861f392f63a36d85621efebc09346",
+      "tree": "1a7574f236b94a2ff032e520f8a70923cb39c7b564c3f824be6950b9535c18d4"
+    },
+    "scored_on": {
+      "commit": "54e96d9b8846c76080fd288877cbfa71ff4cf594",
+      "tree": "5056bc2cab55d03f43b06d8a9a9bdc3b267335e5f89471bc0dabe8f50ede1abc"
+    }
+  },
+  "openai": {
+    "requested_model": "gpt-5.6-luna",
+    "field_f1": 0.5880266075388026,
+    "line_item_f1": 0.15886524822695036,
+    "predictions": "abcdb81a77c8adb49e01aae5246c81bca5c0efd2b766719669bf57cc953d5191",
+    "extracted_on": {
+      "commit": "42e69faaea0863c6c3b9dbf1da220e5d1c842e34",
+      "tree": "df459fee2719e7492aa0e9e03b59099d8ca9bbee6c543a37f37909124a2960b7"
+    },
+    "scored_on": {
+      "commit": "54e96d9b8846c76080fd288877cbfa71ff4cf594",
+      "tree": "5056bc2cab55d03f43b06d8a9a9bdc3b267335e5f89471bc0dabe8f50ede1abc"
+    }
+  }
+}
