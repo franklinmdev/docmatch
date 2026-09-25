@@ -41,7 +41,9 @@ saved reading is exact, so any drop fails. A row whose predictions changed was
 re-extracted, and when the pull request owed that re-extraction it fails only
 on a drop larger than that backend's extraction noise for that metric, the six
 constants below. A re-extraction nobody owed is held to any drop, since beside
-a scoring change it could hide a scoring drop inside the noise. A row the
+a scoring change it could hide a scoring drop inside the noise, and so is one
+owed beside a re-score, for the same reason: land the scoring change first,
+where the re-score is exact, and the re-extraction after it (#178). A row the
 baseline has and the pull request dropped fails like a regression; a
 backend's first row has nothing to regress from.
 
@@ -65,7 +67,7 @@ README's, scored from the saved runs of the commits the README links
 import hashlib
 import re
 import subprocess
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -127,8 +129,44 @@ drop, like a re-score.
 """
 
 
+NOISE_SUBSET = Path(__file__).parent / "noise_subset.json"
+"""The 100 train documents the extraction noise is measured over, drawn by
+`docmatch subset --write --split train` with the fixed subset's seed and
+admission, beside the code that reads it and outside both path lists."""
+
+RUNS = 3
+"""How many re-extractions of the noise subset each backend's noise is
+measured over."""
+
+
 class RegressionError(Exception):
     """An aggregate, an event or a git call the gate cannot read."""
+
+
+def measured_noise(
+    scores: Mapping[str, Sequence[tuple[float, float]]],
+) -> dict[str, Noise]:
+    """Each backend's extraction noise from its runs' field F1 and line-item
+    F1: the largest difference between any two runs, which is the highest
+    less the lowest, for each metric apart."""
+    for backend, runs in scores.items():
+        if len(runs) != RUNS:
+            raise RegressionError(
+                f"{backend} has {len(runs)} runs of the noise subset, and its "
+                f"extraction noise is measured over {RUNS}"
+            )
+    return {
+        backend: Noise(
+            field_f1=_spread(field for field, _ in runs),
+            line_item_f1=_spread(line_item for _, line_item in runs),
+        )
+        for backend, runs in scores.items()
+    }
+
+
+def _spread(values: Iterable[float]) -> float:
+    kept = tuple(values)
+    return max(kept) - min(kept)
 
 
 # The two path lists.
@@ -397,7 +435,7 @@ def check(
             metric,
             before.get(backend),
             after.get(backend),
-            noise if backend in demand.re_extract else {},
+            noise if backend in demand.re_extract and not demand.re_score else {},
         )
         for backend in _backends(before, after)
         for metric in METRICS

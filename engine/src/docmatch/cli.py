@@ -485,6 +485,34 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"one, no {regression.LABEL} label"
         ),
     )
+    measuring = subcommands.add_parser(
+        "noise",
+        parents=[dataset],
+        help=(
+            "measure each backend's extraction noise from three runs of the "
+            "noise subset, and print it beside the regression gate's constants"
+        ),
+    )
+    measuring.add_argument(
+        "--run",
+        dest="runs",
+        type=Path,
+        action="append",
+        required=True,
+        help=(
+            f"a saved run of the whole noise subset, {regression.RUNS} per "
+            "backend measured; repeat it"
+        ),
+    )
+    measuring.add_argument(
+        "--manifest",
+        type=Path,
+        default=regression.NOISE_SUBSET,
+        help=(
+            "the subset the runs read (default: "
+            f"{regression.NOISE_SUBSET.name}, 100 train documents)"
+        ),
+    )
     matching = subcommands.add_parser(
         "match",
         parents=[dataset],
@@ -762,6 +790,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         help=f"the pinned subset (default: {manifest.MANIFEST.name} beside the code)",
     )
     subset.add_argument(
+        "--split",
+        default=None,
+        help=(
+            "draw from this DocILE split, only with --write, and only for the "
+            "extraction noise subset, which is drawn from train (default: "
+            f"{manifest.SPLIT})"
+        ),
+    )
+    subset.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -813,7 +850,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.command == "subset" and not arguments.write:
         drawing = [
             flag
-            for flag, given in (("--seed", arguments.seed), ("--size", arguments.size))
+            for flag, given in (
+                ("--split", arguments.split),
+                ("--seed", arguments.seed),
+                ("--size", arguments.size),
+            )
             if given is not None
         ]
         if drawing:
@@ -875,6 +916,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
         return _match(arguments, dataset)
     if arguments.command == "resolve":
         return _resolve(arguments, dataset)
+    if arguments.command == "noise":
+        return _noise(arguments, dataset)
     if arguments.command == "loop":
         return _loop(arguments, dataset)
     if arguments.command == "eval":
@@ -1063,12 +1106,72 @@ def render_regression(base: str, verdict: regression.Verdict) -> str:
             ],
         ),
         "  procedure: three re-extractions of the same 100 train documents per",
-        "  backend, the largest difference between any two; zero until measured",
+        "  backend, the largest difference between any two; `docmatch noise`",
+        "  prints what the saved runs measure beside these",
         "",
         "Verdict",
         f"  {_verdict(verdict)}",
     ]
     return "\n".join([*(line.rstrip() for line in lines), ""])
+
+
+def _noise(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
+    """Each run scored over the noise subset, each backend's extraction noise
+    measured from its runs, printed beside the constant the gate uses."""
+    pinned = manifest.load(arguments.manifest)
+    scores: dict[str, list[tuple[float, float]]] = {}
+    for directory in arguments.runs:
+        saved = read_saved_run(directory, pinned, arguments.manifest)
+        scored = score_subset(
+            dataset,
+            pinned,
+            saved.predictions,
+            currency_symbols=saved.currency_symbols,
+        )
+        scores.setdefault(saved.record.backend, []).append(
+            (scored.fields.f1, scored.line_items.f1)
+        )
+    unknown = sorted(set(scores) - set(backends.BACKENDS))
+    if unknown:
+        raise RegressionError(
+            f"{', '.join(unknown)} is not a benchmark backend, so the gate has "
+            f"no extraction noise for it; the backends are "
+            f"{', '.join(backends.BACKENDS)}"
+        )
+    measured = regression.measured_noise(scores)
+    rows = [
+        [
+            f"{backend} {METRIC_NAMES[metric]}",
+            *(f"{run[index]:.4f}" for run in scores[backend]),
+            f"{measured[backend].of(metric):.4f}",
+            f"{regression.EXTRACTION_NOISE[backend].of(metric):.4f}",
+        ]
+        for backend in backends.BACKENDS
+        if backend in scores
+        for index, metric in enumerate(regression.METRICS)
+    ]
+    lines = [
+        "Extraction noise",
+        *_rows(
+            ("subset", str(arguments.manifest)),
+            (
+                "procedure",
+                "three re-extractions of the same documents per backend,",
+            ),
+        ),
+        "             the largest difference between any two runs",
+        "",
+        *_table(
+            [
+                "",
+                *(f"run {number}" for number in range(1, regression.RUNS + 1)),
+                "measured",
+                "constant",
+            ],
+            rows,
+        ),
+    ]
+    return "\n".join([*(line.rstrip() for line in lines), ""]), 0
 
 
 def _f1(value: float | None) -> str:
@@ -1303,9 +1406,10 @@ def _subset(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str,
     printed: what the seed draws now is the thing worth looking at.
     """
     if arguments.write:
+        split = manifest.SPLIT if arguments.split is None else arguments.split
         written = manifest.admitted(
-            _pool(dataset, manifest.SPLIT, manifest.SOURCE),
-            split=manifest.SPLIT,
+            _pool(dataset, split, manifest.SOURCE),
+            split=split,
             seed=manifest.SEED if arguments.seed is None else arguments.seed,
             source=manifest.SOURCE,
             size=manifest.SIZE if arguments.size is None else arguments.size,

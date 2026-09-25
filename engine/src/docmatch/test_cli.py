@@ -707,6 +707,39 @@ def test_subset_draws_with_the_seed_it_is_given(
     assert load(path).document_ids == select(UCSF_IDS, seed=1, size=100)
 
 
+def test_subset_draws_from_the_split_it_is_given(
+    split_dir: Path,
+    archive: Archive,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The extraction noise subset is drawn from train, never the fixed subset."""
+    trained = tuple(f"doc{number:04d}" for number in range(0, 300, 2))
+    (split_dir / "train.json").write_text(json.dumps(trained), encoding="utf-8")
+    path = tmp_path / "noise.json"
+
+    write_subset(path, split_dir, "--split", "train")
+
+    assert "  split     train\n" in capsys.readouterr().out
+    written = load(path)
+    assert written.split == "train"
+    assert written.document_ids == select(trained, seed=20260912, size=100)
+    assert exit_code_checking(path, split_dir) == 0
+
+
+def exit_code_checking(path: Path, split_dir: Path) -> int:
+    return main(["subset", "--manifest", str(path), "--data-dir", str(split_dir)])
+
+
+def test_subset_asks_for_write_before_drawing_from_another_split(
+    split_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit):
+        main(["subset", "--split", "train", "--data-dir", str(split_dir)])
+
+    assert "--split draws a subset, so it needs --write" in capsys.readouterr().err
+
+
 def test_subset_reports_a_manifest_that_is_not_there(
     split_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -2586,7 +2619,9 @@ def test_pipeline_prints_a_labels_run_as_the_labels_control() -> None:
 # The regression gate.
 
 
-def saved_copy(synthetic_subset: Path, where: Path, commit: str | None) -> Path:
+def saved_copy(
+    synthetic_subset: Path, where: Path, commit: str | None, backend: str = "gemini"
+) -> Path:
     """The synthetic run copied to `where`, recording `commit`, and its
     predictions file."""
     where.mkdir()
@@ -2595,7 +2630,7 @@ def saved_copy(synthetic_subset: Path, where: Path, commit: str | None) -> Path:
     (where / "run.json").write_text(
         json.dumps(
             {
-                "backend": "gemini",
+                "backend": backend,
                 "requested_model": "synthetic-001",
                 "commit": commit,
                 "dirty": False,
@@ -2653,6 +2688,99 @@ def test_eval_refuses_an_aggregate_row_for_a_run_with_no_commit(
 
     assert "records no commit" in capsys.readouterr().err
     assert not aggregate.exists()
+
+
+# Extraction noise.
+
+
+def noise_runs(synthetic_subset: Path, tmp_path: Path) -> list[str]:
+    """Three gemini runs and three azure runs of the synthetic subset, the
+    third gemini run missing its first document's reading."""
+    arguments = []
+    for backend in ("gemini", "azure"):
+        for number in (1, 2, 3):
+            where = tmp_path / f"{backend}-{number}"
+            predictions = saved_copy(synthetic_subset, where, "c0ffee", backend)
+            if (backend, number) == ("gemini", 3):
+                read = json.loads(predictions.read_text())
+                del read[sorted(read)[0]]
+                predictions.write_text(json.dumps(read))
+            arguments += ["--run", str(where)]
+    return arguments
+
+
+def noise(synthetic_subset: Path, *arguments: str) -> list[str]:
+    return [
+        "noise",
+        "--data-dir",
+        str(synthetic_subset),
+        "--manifest",
+        str(synthetic_subset / "subset.json"),
+        *arguments,
+    ]
+
+
+def test_noise_prints_the_measured_noise_beside_each_constant(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runs = noise_runs(synthetic_subset, tmp_path)
+    pinned = load(synthetic_subset / "subset.json")
+    dataset = DocileDataset(synthetic_subset)
+    full = score_subset(
+        dataset, pinned, read_predictions(synthetic_subset / "predictions.json")
+    )
+    short = score_subset(
+        dataset, pinned, read_predictions(tmp_path / "gemini-3" / "predictions.json")
+    )
+
+    assert main(noise(synthetic_subset, *runs)) == 0
+
+    out = capsys.readouterr().out
+    rows = {
+        " ".join(line.split()[:3]): line.split()[3:]
+        for line in out.splitlines()
+        if line.startswith("  gemini") or line.startswith("  azure")
+    }
+    f1 = f"{full.fields.f1:.4f}"
+    assert rows["gemini field F1"] == [
+        f1,
+        f1,
+        f"{short.fields.f1:.4f}",
+        f"{full.fields.f1 - short.fields.f1:.4f}",
+        "0.0000",
+    ]
+    assert rows["azure line-item F1"][3:] == ["0.0000", "0.0000"]
+    assert "openai" not in rows
+    assert out.startswith(
+        "Extraction noise\n"
+        f"  subset     {synthetic_subset / 'subset.json'}\n"
+        "  procedure  three re-extractions of the same documents per backend,\n"
+        "             the largest difference between any two runs\n"
+    )
+
+
+def test_noise_refuses_a_backend_with_other_than_three_runs(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runs = noise_runs(synthetic_subset, tmp_path)[:-2]
+
+    assert main(noise(synthetic_subset, *runs)) == 1
+
+    assert "azure has 2 runs of the noise subset" in capsys.readouterr().err
+
+
+def test_noise_refuses_a_run_over_another_subset(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A prefix run, or one over the fixed subset, measures other documents."""
+    runs = noise_runs(synthetic_subset, tmp_path)
+    covered = tmp_path / "gemini-1" / "manifest.json"
+    pinned = load(covered)
+    covered.write_text(pinned.first(pinned.size - 1).model_dump_json())
+
+    assert main(noise(synthetic_subset, *runs)) == 1
+
+    assert "is not the pinned subset" in capsys.readouterr().err
 
 
 def committed_aggregate(repo: Path, rows: regression.Aggregate, message: str) -> None:
