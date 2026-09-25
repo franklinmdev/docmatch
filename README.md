@@ -1034,6 +1034,35 @@ decide bar counts the corrections. `DOCMATCH_API_URL` points it elsewhere than
 `http://127.0.0.1:8000`. `npm run lint` and `npm run typecheck` check it. The
 design decisions are in `DESIGN.md`.
 
+### Corrections
+
+```bash
+uv run docmatch corrections --schema loop_replay_20260924_120000
+uv run docmatch eval --predictions data/runs/azure/predictions.json \
+  --corrections data/corrections/loop_replay_20260924_120000.json
+```
+
+`corrections` writes the corrections a schema's reviewer settled, on every
+approved or rejected document, to `--out`, by default the ignored
+`data/corrections/` and the schema's name. Each document is named by its
+DocILE id, found from its PDF's digest in `--manifest`, beside the digest of
+the reading the reviewer corrected. A correction carries the value left, not
+the value read; a line removed carries the cells it was read with, and a line
+added the cells left on it. When any line was corrected, the reading's lines
+as left go with it, only so the eval can pair lines the way the line-item
+score does; nothing is scored on a line nobody corrected. Nothing else of the
+reading leaves Postgres.
+
+`eval --corrections` scores that file against the predictions in a section of
+its own, after everything else and never in the field or line-item score: by
+header field, by line cell and by line added or removed, how many the run reads
+the way the reviewer left them and how many the DocILE label agrees with. A
+corrected line is found in the run's reading by the line-item score's pairing,
+the reading's lines as left against the run's;
+a line added asks for a line with its cells, a line removed for none pairing
+with it. Corrections made on a reading identical to the run's own are skipped
+and counted, since they are misses by construction.
+
 ### The baseline run
 
 `docmatch eval` scores a predictions file. `docmatch extract` is what produces

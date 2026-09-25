@@ -654,6 +654,47 @@ def page(connection: Connection, document: int, number: int) -> bytes | None:
         return render(path)[number - 1].png
 
 
+@dataclass(frozen=True)
+class Settled:
+    """A decided document a reviewer's edits left corrections on."""
+
+    document: int
+    invoice: bytes
+    decision: Decision
+    read: Prediction
+    """The reading as read, before any edit."""
+    edited: Edited
+
+
+def settled(connection: Connection) -> list[Settled]:
+    """Every approved or rejected document with a correction, oldest first.
+
+    Only a document in review takes an edit, and none after its decision, so
+    what these hold is settled (#154)."""
+    found = []
+    for row in connection.execute(
+        """
+        SELECT id, invoice, status, reading FROM documents
+        WHERE status IN ('approved', 'rejected') AND reading IS NOT NULL
+        ORDER BY id
+        """
+    ).fetchall():
+        document, invoice, status, read = row
+        reading = Reading.model_validate(read)
+        edited, _ = _edited(reading, _edits(connection, _id(document)))
+        if edited.corrections:
+            found.append(
+                Settled(
+                    _id(document),
+                    cast(bytes, invoice),
+                    cast(Decision, status),
+                    reading.prediction,
+                    edited,
+                )
+            )
+    return found
+
+
 def view(connection: Connection, document: int) -> dict[str, object] | None:
     """One document as the API shows it: status, pages, case, reading, gate,
     resolution per line, match result with each finding explained, routing

@@ -33,6 +33,7 @@ from docmatch.metrics.fields import Prediction
 from docmatch.metrics.line_items import labeled_line_items
 from docmatch.pipeline import labels
 from docmatch.pipeline.report import report
+from docmatch.pipeline.store import drop_schema, prepare
 from docmatch.pipeline.test_report import approved, failed_extraction
 from docmatch.pipeline.test_report import run as loop_run
 from docmatch.resolution import run as resolution
@@ -49,7 +50,7 @@ from docmatch.resolution.queries import (
     Slice,
     SliceName,
 )
-from docmatch.resolution.store import Build, Machine, ServerVersions
+from docmatch.resolution.store import Build, Machine, ServerVersions, connect
 from docmatch.resolution.sweep import Point, Sweep
 
 EXPECTED_SHOW_OUTPUT = "\n".join(
@@ -1000,6 +1001,113 @@ def test_eval_prints_no_label_text(
     out = capsys.readouterr().out
     assert "Junction box" not in out
     assert "Beacon" not in out
+
+
+def test_eval_scores_the_fixture_export_in_its_own_section(
+    synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The section CI's Eval step prints, over the export a replay loop on
+    the fixture's loop run left after a review: its readings are not the
+    scored run's, so nothing is skipped."""
+    corrections = synthetic_subset / "corrections.json"
+    exit_code = main(evaluate(synthetic_subset, "--corrections", str(corrections)))
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert out.endswith(
+        "\n".join(
+            [
+                "Corrections, never in the numbers above",
+                f"  file       {corrections}",
+                "  documents  2",
+                "  skipped    0 made on this run's reading, on 0 documents",
+                "",
+                "Corrections by header field",
+                "              n  read right  label agrees",
+                "  amount_due  1           0             0",
+                "  date_issue  1           0             1",
+                "",
+                "Corrections by line cell",
+                "                          n  read right  label agrees",
+                "  line_item_amount_gross  1           1             1",
+                "  line_item_quantity      1           0             0",
+                "",
+                "Corrections by line",
+                "                n  read right  label agrees",
+                "  line added    1           0             0",
+                "  line removed  1           0             0",
+                "",
+            ]
+        )
+    )
+    assert "Junction box" not in out
+    assert "Torque wrench" not in out
+
+
+def test_eval_scores_the_fixed_subset_the_same_with_corrections(
+    synthetic_subset: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Corrections never enter the fixed subset's field or line-item F1: the
+    report without them is the report with them, up to their section."""
+    main(evaluate(synthetic_subset))
+    without = capsys.readouterr().out
+
+    main(
+        evaluate(
+            synthetic_subset,
+            "--corrections",
+            str(synthetic_subset / "corrections.json"),
+        )
+    )
+    with_them = capsys.readouterr().out
+
+    assert with_them.startswith(without)
+    assert "Corrections" not in without
+
+
+def test_eval_reports_a_corrections_file_that_is_not_there(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    absent = tmp_path / "absent.json"
+
+    exit_code = main(evaluate(synthetic_subset, "--corrections", str(absent)))
+
+    assert exit_code == 1
+    assert f"cannot read the corrections {absent}" in capsys.readouterr().err
+
+
+def test_corrections_exports_a_schema_with_none_as_an_empty_file(
+    synthetic_subset: Path,
+    database_url: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The command's own path, on a schema nobody reviewed; what a review
+    leaves is pinned by the pipeline's export tests."""
+    schema = "corrections_cli_test"
+    with connect(database_url) as connection:
+        connection.autocommit = True
+        drop_schema(connection, schema)
+    prepare(database_url, schema)
+    out = tmp_path / "corrections.json"
+
+    exit_code = main(
+        [
+            "corrections",
+            "--schema",
+            schema,
+            "--manifest",
+            str(synthetic_subset / "runs" / "loop" / "manifest.json"),
+            "--database-url",
+            database_url,
+            "--out",
+            str(out),
+        ]
+    )
+
+    assert exit_code == 0
+    assert "  documents    0\n  corrections  0\n" in capsys.readouterr().out
+    assert json.loads(out.read_text("utf-8")) == {"schema": schema, "documents": []}
 
 
 def test_eval_scores_the_committed_subset_by_default(
