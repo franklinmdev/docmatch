@@ -85,6 +85,7 @@ $$;
 CREATE OR REPLACE TRIGGER transitions_are_append_only
     BEFORE UPDATE OR DELETE ON transitions
     FOR EACH STATEMENT EXECUTE FUNCTION append_only();
+DROP FUNCTION IF EXISTS transitions_are_append_only();
 CREATE OR REPLACE TRIGGER edits_are_append_only
     BEFORE UPDATE OR DELETE ON edits
     FOR EACH STATEMENT EXECUTE FUNCTION append_only();

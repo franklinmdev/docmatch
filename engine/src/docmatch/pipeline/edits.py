@@ -20,7 +20,7 @@ correction asserts only what the reviewer changed (#154 point 2). The
 corrections are settled at the decision because no edit is taken after it.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
@@ -87,18 +87,18 @@ EDIT: TypeAdapter[Edit] = TypeAdapter(Edit)
 Texts = tuple[str, ...]
 
 
-class HeaderCorrection(BaseModel):
+class _Correction(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+
+class HeaderCorrection(_Correction):
     kind: Literal["header"] = "header"
     fieldtype: str
     read: Texts
     left: Texts
 
 
-class CellCorrection(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CellCorrection(_Correction):
     kind: Literal["cell"] = "cell"
     line: int
     fieldtype: str
@@ -106,17 +106,13 @@ class CellCorrection(BaseModel):
     left: Texts
 
 
-class LineRemovedCorrection(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class LineRemovedCorrection(_Correction):
     kind: Literal["line removed"] = "line removed"
     line: int
     read: dict[str, Texts]
 
 
-class LineAddedCorrection(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class LineAddedCorrection(_Correction):
     kind: Literal["line added"] = "line added"
     line: int
     left: dict[str, Texts]
@@ -176,10 +172,7 @@ def fold(
     header, cells = _net(prediction, header, cells)
     ids = tuple(line for line in range(lines) if line not in removed)
     fields = _applied(prediction.fields, header)
-    rows = tuple(
-        _applied(read[line] if line < len(read) else {}, cells.get(line, {}))
-        for line in ids
-    )
+    rows = tuple(_applied(_line(read, line), cells.get(line, {})) for line in ids)
     return Edited(
         Prediction(fields=fields, line_items=rows),
         _confidence(confidence, header, cells, ids),
@@ -205,15 +198,21 @@ def _net(
             line: {
                 fieldtype: value
                 for fieldtype, value in edited.items()
-                if _texts(read[line] if line < len(read) else {}).get(fieldtype, ())
-                != _left(value)
+                if _texts(_line(read, line)).get(fieldtype, ()) != _left(value)
             }
             for line, edited in cells.items()
         },
     )
 
 
-def _applied(written: WrittenValues, edited: dict[str, str]) -> WrittenValues:
+def _line[T](lines: Sequence[Mapping[str, T]], line: int) -> Mapping[str, T]:
+    """A line as read, or nothing for a line added after them."""
+    return lines[line] if line < len(lines) else {}
+
+
+def _applied(
+    written: Mapping[str, str | list[str] | None], edited: dict[str, str]
+) -> WrittenValues:
     """Written values with each edited fieldtype left at one value, or gone
     when left blank."""
     applied = {
@@ -245,7 +244,7 @@ def _confidence(
         line_items=tuple(
             {
                 fieldtype: value
-                for fieldtype, value in (read[line] if line < len(read) else {}).items()
+                for fieldtype, value in _line(read, line).items()
                 if fieldtype not in cells.get(line, {})
             }
             for line in ids
@@ -253,9 +252,9 @@ def _confidence(
     )
 
 
-def _texts(written: WrittenValues) -> dict[str, Texts]:
+def _texts(written: Mapping[str, str | list[str] | None]) -> dict[str, Texts]:
     """Each fieldtype read with at least one value, as its texts."""
-    values = Prediction(fields=written).header
+    values = Prediction(fields=dict(written)).header
     return {fieldtype: tuple(texts) for fieldtype, texts in values.items() if texts}
 
 

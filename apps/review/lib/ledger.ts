@@ -72,24 +72,28 @@ function billedCells(
   return cells;
 }
 
-function editedFieldtypes(row: Written): Record<Cell, string> {
+/** A line's cell corrections, by fieldtype, as the value read. */
+function cellCorrections(corrections: Correction[], line: number): Map<string, string> {
+  return new Map(
+    corrections.flatMap((each) => (each.kind === "cell" && each.line === line ? [[each.fieldtype, each.read.join(", ")]] : [])),
+  );
+}
+
+/** The fieldtype an edit to each cell names: the one the line carries, else
+ * the one a correction already names, so a cell cleared is edited again under
+ * the fieldtype it was read with, else the matcher's first. */
+function editedFieldtypes(row: Written, corrected: Map<string, string>): Record<Cell, string> {
   return Object.fromEntries(
     CELLS.map((cell) => {
       const fieldtypes: readonly string[] = CELL_FIELDTYPES[cell];
-      return [cell, fieldtypes.find((each) => texts(row[each]) != null) ?? fieldtypes[0]];
+      return [
+        cell,
+        fieldtypes.find((each) => texts(row[each]) != null) ??
+          fieldtypes.find((each) => corrected.has(each)) ??
+          fieldtypes[0],
+      ];
     }),
   ) as Record<Cell, string>;
-}
-
-function wasRead(corrections: Correction[], line: number, row: Written): Partial<Record<Cell, string>> {
-  const fieldtypes = editedFieldtypes(row);
-  const was: Partial<Record<Cell, string>> = {};
-  for (const each of corrections) {
-    if (each.kind !== "cell" || each.line !== line) continue;
-    const cell = CELLS.find((one) => fieldtypes[one] === each.fieldtype);
-    if (cell) was[cell] = each.read.join(", ");
-  }
-  return was;
 }
 
 /** One row per purchase-order line in the order's order, then a row per
@@ -102,14 +106,24 @@ export function ledger(view: View): Row[] {
   const findings = view.match?.findings ?? [];
   const on = (kind: Place["kind"], line: number) =>
     findings.filter((each) => each.place.kind === kind && each.place.line === line);
-  const invoiceCells = (line: number) => ({
-    line: view.line_ids[line] ?? line,
-    billed: billedCells(lines[line], confidence[line]),
-    fieldtypes: editedFieldtypes(lines[line]),
-    was: wasRead(view.corrections, view.line_ids[line] ?? line, lines[line]),
-    resolved: view.resolution?.[line] ?? null,
-  });
-  const unbilled = { line: null, billed: {}, fieldtypes: editedFieldtypes({}), was: {}, resolved: null };
+  const invoiceCells = (line: number) => {
+    const name = view.line_ids[line] ?? line;
+    const corrected = cellCorrections(view.corrections, name);
+    const fieldtypes = editedFieldtypes(lines[line], corrected);
+    const was: Partial<Record<Cell, string>> = {};
+    for (const cell of CELLS) {
+      const read = corrected.get(fieldtypes[cell]);
+      if (read != null) was[cell] = read;
+    }
+    return {
+      line: name,
+      billed: billedCells(lines[line], confidence[line]),
+      fieldtypes,
+      was,
+      resolved: view.resolution?.[line] ?? null,
+    };
+  };
+  const unbilled = { line: null, billed: {}, fieldtypes: editedFieldtypes({}, new Map()), was: {}, resolved: null };
 
   const rows: Row[] = order.map((line, po) => {
     const paired = pairings.find((each) => each.po_line === po);
@@ -167,9 +181,9 @@ export type HeaderField = {
 };
 
 /** The header's fields as they stand, known ones first in the order a
- * reader checks them, each value beside its confidence. With `unread`, every
+ * reader checks them, each value beside its confidence. With `everyKnown`, every
  * known field is listed, so one the backend missed can be filled in. */
-export function header(view: View, unread = false): HeaderField[] {
+export function header(view: View, everyKnown = false): HeaderField[] {
   const fields = view.reading?.prediction.fields ?? {};
   const confidence = view.reading?.confidence?.fields ?? {};
   const corrected = new Map(
@@ -178,7 +192,7 @@ export function header(view: View, unread = false): HeaderField[] {
   const known = Object.keys(HEADER_LABELS);
   const listed = (fieldtype: string) => fields[fieldtype] != null || corrected.has(fieldtype);
   const fieldtypes = [
-    ...known.filter((each) => unread || listed(each)),
+    ...known.filter((each) => everyKnown || listed(each)),
     ...[...new Set([...Object.keys(fields), ...corrected.keys()])]
       .filter((each) => !known.includes(each) && listed(each))
       .sort(),
