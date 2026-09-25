@@ -2680,6 +2680,7 @@ def test_regression_passes_an_unchanged_aggregate(
     assert main(["regression", "--base", "main"]) == 0
 
     out = capsys.readouterr().out
+    assert "  owed      nothing, neither path list touched\n" in out
     assert "  gemini field F1      0.6150  0.6150  +0.0000  re-scored   0.0000\n" in out
     assert out.endswith("Verdict\n  passed\n")
 
@@ -2741,4 +2742,5 @@ def test_regression_passes_an_aggregate_born_in_the_change(
 
     out = capsys.readouterr().out
     assert "none at the merge base: this aggregate is born" in out
+    assert "  owed      nothing while the aggregate is born\n" in out
     assert "  openai line-item F1          0.3740          first row   0.0000\n" in out

@@ -993,12 +993,9 @@ METRIC_NAMES = {"field_f1": "field F1", "line_item_f1": "line-item F1"}
 def render_regression(base: str, verdict: regression.Verdict) -> str:
     """Every backend's two numbers before and after, what the change owed,
     what was stale, the extraction noise with its procedure, and the verdict."""
+    re_extract = [b for b in backends.BACKENDS if b in verdict.demand.re_extract]
     owed = [
-        *(
-            [f"re-extract {', '.join(sorted(verdict.demand.re_extract))}"]
-            if verdict.demand.re_extract
-            else []
-        ),
+        *([f"re-extract {', '.join(re_extract)}"] if re_extract else []),
         *(["re-score every row"] if verdict.demand.re_score else []),
     ]
     lines = [
@@ -1010,7 +1007,12 @@ def render_regression(base: str, verdict: regression.Verdict) -> str:
                 if verdict.born
                 else f"{base[:7]}, the merge base",
             ),
-            ("owed", "; ".join(owed) or "nothing, neither path list touched"),
+            (
+                "owed",
+                "nothing while the aggregate is born"
+                if verdict.born
+                else "; ".join(owed) or "nothing, neither path list touched",
+            ),
         ),
         "",
         *_table(
