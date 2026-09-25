@@ -128,7 +128,7 @@ itself) re-extracted three times per backend; the noise is the largest
 difference between any two of the three runs, for field F1 and line-item F1
 apart, rounded to the four places `docmatch noise` prints it at. Line items
 move a document at a time, a whole table read right on one run and wrong on
-the next, which is why the sampled models' line-item noise is wide.
+the next, which is why the language models' line-item noise is wide.
 """
 
 

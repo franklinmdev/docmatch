@@ -808,9 +808,9 @@ larger than that backend's extraction noise for that metric, six constants in
 `engine/src/docmatch/regression.py`, and only when the pull request owes no
 re-score: beside a scoring change a drop inside the noise could be the scoring
 change's, so land the scoring change first and the re-extraction after it. A
-stale row always fails. A regression passes only with the `regression-accepted` label and
-a `## Regression reason` section in the pull request's body, and the drop is
-printed either way. Run the same check locally before pushing with
+stale row always fails. A regression passes only with the `regression-accepted`
+label and a `## Regression reason` section in the pull request's body, and the
+drop is printed either way. Run the same check locally before pushing with
 `uv run docmatch regression`, which compares `HEAD` with its merge base on
 `main`.
 
@@ -828,10 +828,10 @@ noise is the largest difference between any two of the three runs.
 The documents are pinned in `engine/src/docmatch/noise_subset.json`, drawn from
 train with the fixed subset's seed and admission (`docmatch subset --write
 --split train --manifest engine/src/docmatch/noise_subset.json`), so none is in
-the fixed subset. Nine runs cost $5.68. The
-sampled models' line-item noise is wide because a document's table is read
-right on one run and wrong on the next, a whole document at a time: one
-63-line Gemini document scored 0, 62 and 48 matched lines. To measure it again:
+the fixed subset. Nine runs cost $5.68. The language models' line-item noise is
+wide because a document's table is read right on one run and wrong on the
+next, a whole document at a time: one 63-line Gemini document scored 0, 62 and
+48 matched lines. To measure it again:
 
 ```bash
 uv run docmatch noise --run data/runs/noise/gemini-1 --run data/runs/noise/gemini-2 \

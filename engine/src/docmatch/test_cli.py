@@ -19,7 +19,7 @@ from docmatch import cli, regression
 from docmatch.cli import main, render_extract, render_pipeline, render_resolve
 from docmatch.conftest import TEST_SCHEMA, git
 from docmatch.docile.dataset import DocileDataset
-from docmatch.evals import public
+from docmatch.evals import manifest, public
 from docmatch.evals.conftest import annotate
 from docmatch.evals.manifest import Manifest, load, rank, select, write
 from docmatch.evals.public import FetchError
@@ -2797,6 +2797,33 @@ def test_noise_refuses_a_run_extracted_from_uncommitted_code(
     assert "uncommitted" in capsys.readouterr().err
 
 
+def test_noise_refuses_a_run_that_records_no_commit(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runs = noise_runs(synthetic_subset, tmp_path)
+    record = tmp_path / "azure-1" / "run.json"
+    recorded = json.loads(record.read_text())
+    record.write_text(json.dumps({**recorded, "commit": None}))
+
+    assert main(noise(synthetic_subset, *runs)) == 1
+
+    assert "records no commit" in capsys.readouterr().err
+
+
+def test_noise_is_never_measured_over_the_fixed_subset(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#153: the noise comes from train documents, never the fixed subset."""
+    runs = noise_runs(synthetic_subset, tmp_path)
+    arguments = noise(synthetic_subset, *runs)
+    arguments[arguments.index("--manifest") + 1] = str(manifest.MANIFEST)
+
+    with pytest.raises(SystemExit):
+        main(arguments)
+
+    assert "never over the fixed subset" in capsys.readouterr().err
+
+
 def test_noise_refuses_a_backends_runs_extracted_on_different_commits(
     synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -2814,7 +2841,7 @@ def test_noise_refuses_a_backends_runs_extracted_on_different_commits(
 def test_noise_refuses_a_run_over_another_subset(
     synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A prefix run, or one over the fixed subset, measures other documents."""
+    """A prefix run measures other documents."""
     runs = noise_runs(synthetic_subset, tmp_path)
     covered = tmp_path / "gemini-1" / "manifest.json"
     pinned = load(covered)

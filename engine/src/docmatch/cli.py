@@ -858,6 +858,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--manifest, the noise subset's is "
             f"{regression.NOISE_SUBSET.relative_to(SOURCE.parent.parent.parent)}"
         )
+    if (
+        arguments.command == "noise"
+        and arguments.manifest.resolve() == manifest.MANIFEST.resolve()
+    ):
+        noising.error(
+            "extraction noise is measured over train documents, never over the "
+            "fixed subset (#153)"
+        )
     if arguments.command == "subset" and not arguments.write:
         drawing = [
             flag
@@ -1134,6 +1142,11 @@ def _noise(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
     commits: dict[str, set[str | None]] = {}
     for directory in arguments.runs:
         saved = read_saved_run(directory, pinned, arguments.manifest)
+        if saved.record.commit is None:
+            raise RegressionError(
+                f"{directory} records no commit, so nothing says its runs "
+                "were extracted on one code; re-extract it"
+            )
         if saved.record.dirty:
             raise RegressionError(
                 f"{directory} was extracted from uncommitted "
