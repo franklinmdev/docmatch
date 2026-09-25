@@ -181,6 +181,8 @@ from docmatch.resolution.store import (
 DATA_DIR_VARIABLE = "DOCMATCH_DATA_DIR"
 DEFAULT_DATA_DIR = Path("data/docile")
 DEFAULT_COPIES_DIR = Path("data/ucsf")
+SOURCE = Path(__file__).parent
+"""Where the engine's code is, whose checkout a run or a score was made on."""
 
 
 def money(given: str) -> Decimal:
@@ -457,24 +459,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             "clean commit, and the scoring code must be committed"
         ),
     )
-    gating = subcommands.add_parser(
+    regressing = subcommands.add_parser(
         "regression",
         help=(
             "compare the aggregate at a commit with the one at its merge base, "
             "and check it is fresh for what the change touches"
         ),
     )
-    gating.add_argument(
+    regressing.add_argument(
         "--base",
         default="main",
         help="the branch or commit the change merges into (default: main)",
     )
-    gating.add_argument(
+    regressing.add_argument(
         "--head",
         default="HEAD",
         help="the change's commit (default: HEAD)",
     )
-    gating.add_argument(
+    regressing.add_argument(
         "--event",
         type=Path,
         default=None,
@@ -970,6 +972,12 @@ def _regression(arguments: argparse.Namespace) -> tuple[str, int]:
     base = regression.merge_base(repo, arguments.base, head)
     path = regression.AGGREGATE.as_posix()
     before = regression.show(repo, base, path)
+    if before is None and regression.show(repo, arguments.base, path) is not None:
+        raise RegressionError(
+            f"the merge base {base[:7]} is older than the aggregate "
+            f"{arguments.base} holds, so there is no baseline to compare with; "
+            f"merge {arguments.base} into the change"
+        )
     after = regression.show(repo, head, path)
     labeled, body = (
         (False, "")
@@ -1037,7 +1045,7 @@ def render_regression(base: str, verdict: regression.Verdict) -> str:
                 "",
                 "Stale, not produced on this change's code",
                 *(
-                    f"  {each.backend} {each.what}: tree {each.recorded[:12]}, "
+                    f"  {each.backend} {each.paths}: tree {each.recorded[:12]}, "
                     f"this change's {each.wanted[:12]}"
                     for each in verdict.stale
                 ),
@@ -1394,10 +1402,6 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
         render_extract(arguments.out, extracted),
         0 if extracted.predicted else 1,
     )
-
-
-SOURCE = Path(__file__).parent
-"""Where the engine's code is, whose checkout a run or a score was made on."""
 
 
 def _extracted_on(backend: str) -> tuple[str | None, bool]:

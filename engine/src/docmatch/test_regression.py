@@ -262,6 +262,21 @@ def test_a_re_extraction_beyond_its_noise_fails() -> None:
     ]
 
 
+def test_noise_covers_only_a_re_extraction_the_change_owed() -> None:
+    """A re-extraction a scoring change did not owe could hide a scoring drop
+    inside the noise, so it is held to any drop."""
+    changed = [f"{ROOT}/metrics/fields.py"]
+    after = with_blob(changed[0], "f2")
+    head = {b: a_row(b, listing=after) for b in EXTRACTION_NOISE}
+    head["gemini"] = a_row(field_f1=0.615 - 0.01, predictions="p2", listing=after)
+
+    verdict = check(three(), head, changed, after, noise=NOISE)
+
+    assert [(each.metric, each.kind, each.allowed) for each in verdict.regressions] == [
+        ("field_f1", "re-extracted", 0.0)
+    ]
+
+
 def test_extraction_noise_is_strict_until_it_is_measured() -> None:
     assert all(
         each == Noise(field_f1=0.0, line_item_f1=0.0)
@@ -280,7 +295,7 @@ def test_a_stale_extraction_fails_for_the_row_a_backend_module_touches() -> None
     verdict = check(three(), three(), changed, after)
 
     assert not verdict.passed
-    assert [(each.backend, each.what) for each in verdict.stale] == [
+    assert [(each.backend, each.paths) for each in verdict.stale] == [
         ("openai", "extraction")
     ]
 
@@ -292,7 +307,7 @@ def test_a_stale_extraction_fails_for_every_row_a_shared_file_touches() -> None:
 
     verdict = check(three(), head, changed, after)
 
-    assert [(each.backend, each.what) for each in verdict.stale] == [
+    assert [(each.backend, each.paths) for each in verdict.stale] == [
         ("gemini", "extraction"),
         ("openai", "extraction"),
     ]
@@ -305,7 +320,7 @@ def test_a_stale_score_fails_for_every_row() -> None:
 
     verdict = check(three(), head, changed, after)
 
-    assert [(each.backend, each.what) for each in verdict.stale] == [
+    assert [(each.backend, each.paths) for each in verdict.stale] == [
         ("azure", "scoring"),
         ("openai", "scoring"),
     ]

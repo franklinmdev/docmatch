@@ -2744,3 +2744,21 @@ def test_regression_passes_an_aggregate_born_in_the_change(
     assert "none at the merge base: this aggregate is born" in out
     assert "  owed      nothing while the aggregate is born\n" in out
     assert "  openai line-item F1          0.3740          first row   0.0000\n" in out
+
+
+def test_regression_refuses_a_merge_base_older_than_the_aggregate(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A branch cut before the aggregate landed is not a birth: it would
+    skip every check until it merged main."""
+    monkeypatch.chdir(repo)
+    git(repo, "switch", "--quiet", "-c", "change")
+    (repo / "README.md").write_text("changed\n")
+    git(repo, "commit", "--quiet", "-am", "change")
+    git(repo, "switch", "--quiet", "main")
+    committed_aggregate(repo, three(), "baseline")
+    git(repo, "switch", "--quiet", "change")
+
+    assert main(["regression", "--base", "main"]) == 1
+
+    assert "merge main into the change" in capsys.readouterr().err

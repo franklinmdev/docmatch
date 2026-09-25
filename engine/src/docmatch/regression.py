@@ -21,7 +21,7 @@ What a pull request touches decides what it owes.
   that backend equals the pull request's.
 - Scoring paths, the metrics, the evals, derived currency, the gate and the
   DocILE loader: every row must be re-scored from its saved run on a commit
-  whose scoring tree equals the pull request's. Free, seconds.
+  whose scoring tree equals the pull request's, which costs nothing.
 - Anything else, matching, resolution, the pipeline and this module among
   them, owes nothing: none of it moves either number.
 
@@ -38,10 +38,12 @@ What fails
 
 A row whose predictions are the baseline's was re-scored, and re-scoring a
 saved reading is exact, so any drop fails. A row whose predictions changed was
-re-extracted, and it fails only on a drop larger than that backend's
-extraction noise for that metric, the six constants below. A row the baseline
-has and the pull request dropped fails as well; a backend's first row has
-nothing to regress from.
+re-extracted, and when the pull request owed that re-extraction it fails only
+on a drop larger than that backend's extraction noise for that metric, the six
+constants below. A re-extraction nobody owed is held to any drop, since beside
+a scoring change it could hide a scoring drop inside the noise. A row the
+baseline has and the pull request dropped fails like a regression; a
+backend's first row has nothing to regress from.
 
 A stale row always fails. A regression passes only with the
 `regression-accepted` label and a reason section in the pull request's body,
@@ -51,8 +53,11 @@ and it is printed either way, so a deliberate trade stays in the history
 The first aggregate
 -------------------
 
-When the merge base has no aggregate, the pull request's is born: there is
-nothing to compare and nothing to be fresh against. The born rows are the
+When neither the merge base nor the branch it merges into has an aggregate,
+the pull request's is born: there is nothing to compare and nothing to be
+fresh against. A merge base older than an aggregate the branch already holds
+is no birth; the command asks for the branch to be merged in first, or every
+change cut before the gate landed would pass unchecked. The born rows are the
 README's, scored from the saved runs of the commits the README links
 (`28d0738`, `d3bb01e`, `42e69fa`) without re-extracting them (#153).
 """
@@ -241,10 +246,7 @@ def write_row(path: Path, backend: str, row: Row) -> None:
     """Set one backend's row, keep the others, in the backends' order."""
     rows = read_aggregate(path.read_text("utf-8")) if path.exists() else {}
     rows[backend] = row
-    ordered = {
-        name: rows[name]
-        for name in sorted(rows, key=lambda b: (b not in BACKENDS, _rank(b), b))
-    }
+    ordered = {name: rows[name] for name in _backends(rows, {})}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(AGGREGATE_FORMAT.dump_json(ordered, indent=2) + b"\n")
 
@@ -336,13 +338,17 @@ class Stale:
     """A row the pull request owes and did not produce on its own code."""
 
     backend: str
-    what: Literal["extraction", "scoring"]
+    paths: Literal["extraction", "scoring"]
+    """Which path list the row is stale for."""
     recorded: str
     wanted: str
 
 
 @dataclass(frozen=True)
 class Verdict:
+    """What the gate found: every comparison, every stale row, and whether
+    the label and a reason let a regression through."""
+
     born: bool
     """Whether the merge base had no aggregate, so there was nothing to compare."""
     demand: Demand
@@ -385,7 +391,13 @@ def check(
     born = base is None
     before = {} if base is None else base
     comparisons = tuple(
-        _compare(backend, metric, before.get(backend), after.get(backend), noise)
+        _compare(
+            backend,
+            metric,
+            before.get(backend),
+            after.get(backend),
+            noise if backend in demand.re_extract else {},
+        )
         for backend in _backends(before, after)
         for metric in METRICS
     )
