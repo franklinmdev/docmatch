@@ -14,7 +14,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from docmatch.extraction import azure, gemini, openai
 from docmatch.extraction.conftest import write_pdf
+from docmatch.extraction.run import ATTEMPTS, BACKOFF
 from docmatch.pipeline import api, loop, replay
 from docmatch.pipeline.conftest import (
     CATALOG,
@@ -29,6 +31,7 @@ from docmatch.pipeline.conftest import (
 from docmatch.pipeline.labels import Labels
 from docmatch.pipeline.loop import (
     LAPSES,
+    LEASE,
     Claim,
     Refused,
     Resolve,
@@ -111,6 +114,7 @@ def test_resolution_never_routes_a_line_with_no_entry(
         client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
     )
 
+    # Resolves every line out of catalog with a score of zero.
     def nowhere(_: str) -> Resolved:
         return Resolved(sku=None, score=0.0)
 
@@ -134,6 +138,8 @@ def test_the_match_result_is_the_same_with_and_without_resolution(
     invoice = pdf(tmp_path, "eval0005")
     case = case_text(ordered("eval0005", billed_above=True))
 
+    # The hybrid answered nothing: no SKU and no score, unlike the zero score
+    # of the resolver in the test above.
     def nowhere(_: str) -> Resolved:
         return Resolved(sku=None, score=None)
 
@@ -672,3 +678,12 @@ def test_a_worker_that_raises_lets_its_lease_go_at_once(
     )
     view = client.get(f"/documents/{document}").json()
     assert view["routing_reasons"] == ["pipeline failed at extracted"]
+
+
+def test_a_lease_outlasts_the_slowest_bounded_extraction() -> None:
+    """Every attempt of every backend ends by its timeout, so three of them
+    with the backoffs between are the longest a live extraction holds a lease."""
+    slowest = max(gemini.TIMEOUT / 1000, openai.TIMEOUT, azure.TIMEOUT)
+    backoffs = sum(BACKOFF * 2**each for each in range(ATTEMPTS - 1))
+
+    assert LEASE.total_seconds() > ATTEMPTS * slowest + backoffs

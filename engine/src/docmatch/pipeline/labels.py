@@ -80,10 +80,10 @@ def load(pinned: Manifest, dataset: DocileDataset) -> Labels:
 def _reading(dataset: DocileDataset, document_id: str) -> Prediction:
     annotation = dataset.annotation(document_id)
     return Prediction(
-        fields=_written(labeled_fields(annotation)),
-        line_items=tuple(_written(row) for row in labeled_line_items(annotation)),
+        fields=_as_lists(labeled_fields(annotation)),
+        line_items=tuple(_as_lists(row) for row in labeled_line_items(annotation)),
     )
 
 
-def _written(values: FieldValues) -> dict[str, str | list[str] | None]:
+def _as_lists(values: FieldValues) -> dict[str, str | list[str] | None]:
     return {fieldtype: list(texts) for fieldtype, texts in values.items()}

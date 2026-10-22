@@ -271,7 +271,7 @@ def _weighted(strata: Sequence[tuple[list[float], float]]) -> list[tuple[float, 
 
 
 @dataclass(frozen=True)
-class Operating:
+class OperatingThreshold:
     """The operating threshold the loop runs at, beside the procedure's value
     on the development slice."""
 
@@ -289,7 +289,7 @@ class Measured:
     depth_sweep: Sweep
     """The depth sweep on the development slice, beside the constant the
     hybrid arm was measured at."""
-    operating: Operating
+    operating: OperatingThreshold
     versions: ServerVersions
     models: ModelVersions
     load_s: float
@@ -341,7 +341,7 @@ def resolve(
             development = query_set.development.queries
             depth_sweep = sweep("d", DEPTH, DEPTHS, hybrid_at, development)
             at_depth = hybrid_at(DEPTH)
-            operating = Operating(
+            operating = OperatingThreshold(
                 OPERATING_THRESHOLD,
                 operating_threshold(
                     _top1(

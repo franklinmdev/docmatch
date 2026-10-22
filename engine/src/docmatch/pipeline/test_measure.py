@@ -94,6 +94,7 @@ def _looped(out: Path, database_url: str, *backend: str) -> Iterator[Path]:
 
 
 def looping(out: Path, database_url: str, *backend: str) -> int:
+    """Run `docmatch loop` over the synthetic fixture; the exit code."""
     return main(
         [
             "loop",
