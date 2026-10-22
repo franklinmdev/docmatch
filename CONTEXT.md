@@ -41,11 +41,11 @@ The tax jurisdiction a benchmark set's documents belong to, declared once by the
 _Avoid_: locale, country (on its own), market
 
 **Filing annotation**:
-The choices a taxpayer makes about a document when reporting it, which the document itself does not carry: what kind of purchase it is, when and how it was paid, what was retained, and how the tax is credited. It is kept beside a document's labels, is the same whatever reading the report is built from, and is never scored.
+The choices a taxpayer makes about a document when reporting it, which the document itself does not carry, so they are never read from the page: what kind of purchase it is, how it divides between goods and services, when and how it was paid, what was retained, and how the tax is credited. It is kept beside a document's labels, is the same whatever reading the report is built from, and is never scored.
 _Avoid_: label (for these values), metadata, classification
 
 **Pre-validation**:
-Running a tax authority's own offline checker over an exported report. A file passes when the checker finds no error in it. Passing is not acceptance by the authority, which runs further checks of its own.
+Running a tax authority's own offline checker over an exported report. A file passes when the checker finds no error in it, which is not the authority's verdict on the file: that comes from further checks the authority runs on its own side.
 _Avoid_: validation (on its own), acceptance, submission
 
 **Gate ablation**:
