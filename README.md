@@ -2,7 +2,21 @@
 
 **Document reconciliation engine.** docmatch extracts invoices and receipts with vision language models, validates them with deterministic gates, matches them against purchase orders and receiving records, routes exceptions to human review, and measures every change against a labeled benchmark in CI.
 
-> **Status:** phases 0 to 4 are done: their numbers are in the Benchmarks section with the commits that produced them, three extraction rows, the calibration table, the gate ablation, the matching table and its end-to-end rows, the entity resolution table with the verdict on the reranker, and the pipeline end to end with its routing ladder; the CI regression gate guards F1 on every pull request. Phase 5, packaging, is next. The remaining tables fill in as phases complete, and a phase is not done until its number is here.
+> **Status:** phases 0 to 5 are done: a reader can reproduce the matching per-type table from a clean checkout with `docmatch reproduce`, which compares every cell with the saved copy `benchmark/matching.json`, produced by the code at [`ed897e3`](https://github.com/franklinmdev/docmatch/commit/ed897e3) and committed in [`4a4e049`](https://github.com/franklinmdev/docmatch/commit/4a4e049), cell for cell the table produced at [`08d14ca`](https://github.com/franklinmdev/docmatch/commit/08d14ca), and a clean clone was checked end to end. Phases 0 to 4's numbers are in the Benchmarks section with the commits that produced them, three extraction rows, the calibration table, the gate ablation, the matching table and its end-to-end rows, the entity resolution table with the verdict on the reranker, and the pipeline end to end with its routing ladder; the CI regression gate guards F1 on every pull request. Phase 5's number is this README: the [results summary](#results-at-a-glance), [Reproduce a row](#reproduce-a-row), the [failure analysis](#failure-analysis-error-classes) and [the demo](#the-demo).
+
+## Results at a glance
+
+One line per phase, taken from its Benchmarks section, which has the full table, the command and the caveats.
+
+| Phase | Headline number | Commit | Section |
+|---|---|---|---|
+| 0. Harness | Baseline field F1 0.515, line-item F1 0.101, on the first subset (superseded by Phase 1's row on the public copies) | [`65916b4`](https://github.com/franklinmdev/docmatch/blob/65916b4/README.md#benchmarks) | [Extraction, fixed subset](#extraction-fixed-subset) |
+| 1. Extraction | Field F1 0.615, line-item F1 0.374, $0.00203 per document, with Gemini; two more backends in the table | [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) | [Extraction, fixed subset](#extraction-fixed-subset) |
+| 2. Matching | Per type precision 0.977 to 1.000 and recall 0.977 to 1.000, clean-case false-positive rate 0.007 | [`08d14ca`](https://github.com/franklinmdev/docmatch/commit/08d14ca) | [Matching, injected discrepancies](#matching-injected-discrepancies) |
+| 3. Entity resolution | Trigram top-1 0.930 and top-5 0.990; the reranker is dropped | [`27bc70d`](https://github.com/franklinmdev/docmatch/commit/27bc70d) | [Entity resolution](#entity-resolution) |
+| 4. Pipeline | p95 10.03 s and $0.00236 per document end to end with Gemini, review rate 0.484 | [`89483a3`](https://github.com/franklinmdev/docmatch/commit/89483a3) | [Pipeline, end to end](#pipeline-end-to-end) |
+
+Beyond the numbers: [Reproduce a row](#reproduce-a-row) rebuilds the matching table from a clean checkout, [Failure analysis](#failure-analysis-error-classes) sorts every extraction error into a class, and [The demo](#the-demo) is a recording of the loop on the synthetic fixture.
 
 ## Why
 
@@ -134,6 +148,8 @@ Filled in as phases complete. Every row names the commit that produced it.
 | `gemini-3.1-flash-lite`, pages at 1600 px | 0.615 | 0.374 | 0.915 of 47, eval at [`a125b0b`](https://github.com/franklinmdev/docmatch/commit/a125b0b) | $0.00203 | 5.2 s / 9.3 s | [`28d0738`](https://github.com/franklinmdev/docmatch/commit/28d0738) |
 | Azure Document Intelligence `prebuilt-invoice`, API 2024-11-30, the PDF | 0.556 | 0.396 | 0.942 of 52 | $0.0112 | 7.9 s / 18.0 s | [`d3bb01e`](https://github.com/franklinmdev/docmatch/commit/d3bb01e) |
 | `gpt-5.6-luna`, pages at 1600 px | 0.588 | 0.159 | 0.860 of 43 | $0.00344 | 16.7 s / 38.6 s | [`42e69fa`](https://github.com/franklinmdev/docmatch/commit/42e69fa) |
+
+Latency in these rows depends on the machine: they were measured on an AMD Ryzen 7 5800H under WSL2 on Ubuntu 24.04, and another machine will read differently.
 
 The two commands that produced the row, with DocILE's labels in `data/docile`
 and the pinned public copies in `data/ucsf`:
@@ -762,13 +778,14 @@ uv run docmatch failures --run data/runs/gemini --run data/runs/azure --run data
 - **Regional private sets:** real documents with personal data. Never committed. Only aggregate numbers appear in this README.
 - **Corrections from review:** exported from Postgres to the ignored `data/corrections/` and scored against a run in their own eval section, beside how often the reviewer agrees with the DocILE label, never in the fixed subset's F1.
 
-**Getting DocILE.** Request a token at https://docile.rossum.ai/. The form returns it immediately; there is no approval wait. Put it in `.env` as `DOCILE_TOKEN` (see `.env.example`), then download the annotated subset, 1.14 GB, into the gitignored `data/`:
+**Getting DocILE.** Request a token at https://docile.rossum.ai/. The form returns it immediately; there is no approval wait. Export it in your shell as `DOCILE_TOKEN` (a shell does not read `.env`, which is for the engine's own commands; see `.env.example`), then download the annotated subset, 1.14 GB, and unzip it into the gitignored `data/docile`, where every command expects it, with upstream's script:
 
 ```bash
-curl -O "https://docile-dataset-rossum.s3.eu-west-1.amazonaws.com/$DOCILE_TOKEN/annotated-trainval.zip"
+curl -O https://raw.githubusercontent.com/rossumai/docile/main/download_dataset.sh
+bash download_dataset.sh "$DOCILE_TOKEN" annotated-trainval data/docile --unzip
 ```
 
-Upstream's `download_dataset.sh` does the same thing. Note that its `--help` names this subset `labeled-trainval`, which 404s; `annotated-trainval` is the working name.
+The script's `--help` names this subset `labeled-trainval`, which 404s; `annotated-trainval` is the working name. [Reproduce a row](#reproduce-a-row) uses the same two commands.
 
 ## Reproduce a row
 
@@ -805,7 +822,8 @@ Matches the README: every cell equals the synthetic half of benchmark/matching.j
 
 **2. Get DocILE.** Fill in the dataset access request form at
 https://docile.rossum.ai/, which returns a token, and export it as
-`DOCILE_TOKEN` (or keep it in `.env`, see `.env.example`). Then download the annotated
+`DOCILE_TOKEN` in the shell that runs the script (a token kept in `.env`, see
+`.env.example`, does not reach the shell). Then download the annotated
 train and val splits into `data/docile`, which is gitignored, with upstream's
 script:
 
