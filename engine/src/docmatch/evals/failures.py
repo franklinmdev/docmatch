@@ -17,8 +17,10 @@ value and a spurious one pair off as one wrong value, and only what is left
 over stays missing or spurious. A wrong value of a date fieldtype is a
 misread date. Before any of that, a labeled gross amount the reading carries
 under the matching net fieldtype, equal once normalized, is net for gross:
-the value was read and filed in the neighbouring column. A wrong value, a
-misread date or a net for gross is one false negative and one false positive;
+the value was read and filed in the neighbouring column. A labeled net amount
+carried under the gross fieldtype is gross for net, the same mistake the
+other way. A wrong value, a misread date, a net for gross or a gross for net
+is one false negative and one false positive;
 a missing value one false negative; a spurious value one false positive.
 
 Rows and cells
@@ -50,11 +52,14 @@ from docmatch.metrics.fields import FieldScore
 from docmatch.metrics.line_items import LineItemScore
 from docmatch.metrics.normalization import DATE_FIELDTYPES
 
-ValueClass = Literal["net for gross", "misread date", "wrong", "missing", "spurious"]
+ValueClass = Literal[
+    "net for gross", "gross for net", "misread date", "wrong", "missing", "spurious"
+]
 """How one header value or one cell of a wrong row disagrees with its label."""
 
 VALUE_CLASSES: tuple[ValueClass, ...] = (
     "net for gross",
+    "gross for net",
     "misread date",
     "wrong",
     "missing",
@@ -72,7 +77,8 @@ NET_FOR_GROSS: tuple[tuple[str, str], ...] = (
     ("line_item_amount_gross", "line_item_amount_net"),
     ("line_item_unit_price_gross", "line_item_unit_price_net"),
 )
-"""Each gross fieldtype beside the net fieldtype a backend may file it under."""
+"""Each gross fieldtype beside its net fieldtype, the two columns a backend
+may file one amount under."""
 
 
 def false_negatives(kind: str) -> int:
@@ -155,11 +161,8 @@ def classify_values(score: FieldScore) -> Counter[tuple[ValueClass, str]]:
     spurious = {each.fieldtype: list(each.spurious) for each in score.per_fieldtype}
     found: Counter[tuple[ValueClass, str]] = Counter()
     for gross, net in NET_FOR_GROSS:
-        for value in list(missing.get(gross, ())):
-            if value in spurious.get(net, ()):
-                missing[gross].remove(value)
-                spurious[net].remove(value)
-                found["net for gross", gross] += 1
+        found["net for gross", gross] += _filed_beside(missing, spurious, gross, net)
+        found["gross for net", net] += _filed_beside(missing, spurious, net, gross)
     for fieldtype in sorted({*missing, *spurious}):
         unread, unlabeled = (
             len(missing.get(fieldtype, ())),
@@ -170,6 +173,23 @@ def classify_values(score: FieldScore) -> Counter[tuple[ValueClass, str]]:
         found["missing", fieldtype] += unread - swapped
         found["spurious", fieldtype] += unlabeled - swapped
     return +found
+
+
+def _filed_beside(
+    missing: dict[str, list[str]],
+    spurious: dict[str, list[str]],
+    labeled: str,
+    read: str,
+) -> int:
+    """Pair off each value labeled under one fieldtype and read, equal once
+    normalized, under its neighbour; how many, each taken off both lists."""
+    paired = 0
+    for value in list(missing.get(labeled, ())):
+        if value in spurious.get(read, ()):
+            missing[labeled].remove(value)
+            spurious[read].remove(value)
+            paired += 1
+    return paired
 
 
 def _wrong(fieldtype: str) -> ValueClass:

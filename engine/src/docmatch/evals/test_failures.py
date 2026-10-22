@@ -1,9 +1,9 @@
 """Tests for the failure analysis over the committed synthetic fixture's saved
 run and labels: files only, no Postgres and no model.
 
-Two classes the fixture's run never shows, net for gross and a spurious
-cell, are tested on one of its readings with one cell moved, so every class
-is still decided against the fixture's own labels.
+Three classes the fixture's run never shows, net for gross, gross for net
+and a spurious cell, are tested with one cell of a reading or a label moved,
+so every class is still decided against the fixture's own documents.
 """
 
 from pathlib import Path
@@ -115,6 +115,25 @@ def test_a_labeled_gross_read_as_net_is_net_for_gross(synthetic_subset: Path) ->
     assert ("spurious", "amount_total_net") not in found.header
     assert found.cells["net for gross", "line_item_amount_gross"] == 1
     assert ("spurious", "line_item_amount_net") not in found.cells
+
+
+def test_a_labeled_net_read_as_gross_is_gross_for_net(synthetic_subset: Path) -> None:
+    """eval0005's labels with one row's amount relabeled as net, against the
+    saved reading that files the same amount as gross."""
+    reading = saved(synthetic_subset, "eval0005")
+    annotation = DocileDataset(synthetic_subset).annotation("eval0005")
+    labels = labeled_line_items(annotation)
+    relabeled = [dict(each) for each in labels]
+    relabeled[0]["line_item_amount_net"] = relabeled[0].pop("line_item_amount_gross")
+
+    found = classify(
+        score_fields(labeled_fields(annotation), reading.header),
+        score_line_items(tuple(relabeled), reading.rows),
+    )
+
+    assert found.cells["gross for net", "line_item_amount_net"] == 1
+    assert ("spurious", "line_item_amount_gross") not in found.cells
+    assert ("missing", "line_item_amount_net") not in found.cells
 
 
 def test_a_net_value_unlike_the_labeled_gross_is_not_net_for_gross(
