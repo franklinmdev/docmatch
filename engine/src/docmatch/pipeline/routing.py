@@ -1,9 +1,11 @@
 """Routing: the reasons a document goes to review under one routing policy.
 
 One pure function decides it from what is known of the document where it
-stands. The loop runs P4 at `matched`, and for a document whose lease lapsed a
-third time; the pipeline report reruns every policy of the routing ladder over
-a saved loop run, with no model call (#152).
+stands. The loop runs P4 at `matched`. When a lease lapses a third time it runs
+P4 over only the outputs saved so far, with no shortcut in the standing (no
+gate or match yet means no reason from them), and appends pipeline failed
+itself after those reasons. The pipeline report reruns every policy of the
+routing ladder over a saved loop run, with no model call (#152).
 
 The ladder is cumulative, each policy routing everything the one before does
 and more:
