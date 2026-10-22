@@ -170,8 +170,8 @@ def test_reproduce_lists_every_differing_cell_and_exits_nonzero(
                 f"Differs from the synthetic half of {path}, produced at "
                 f"{altered.produced_on[:7]} with seed 20260919, in 2 cells",
                 "  cell                        committed  computed",
-                "  price variance n            1049       1050",
-                "  clean cases with a finding  3          0",
+                "  price variance n                 1049      1050",
+                "  clean cases with a finding          3         0",
                 "",
             ]
         )
