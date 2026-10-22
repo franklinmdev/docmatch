@@ -673,6 +673,88 @@ review with a match hold was approved from the review page after its
 confirmation, and one with a failed gate and a hold rejected; both transitions
 carry the reviewer as actor.
 
+### Failure analysis, error classes
+
+Every false negative and false positive behind the extraction rows, sorted
+into one [error class](CONTEXT.md) each, so a backend's classes add back up to
+its field F1 and line-item F1 counts. Header values and the cells of wrong rows
+are net for gross, gross for net, a misread date, wrong, missing or spurious;
+rows are wrong, missing or spurious, and a missing or spurious row's cells
+count only in its row's class. "Wrong" pairs a missing and a spurious value on
+the same fieldtype in the same header or row, so it approximates a misread: it
+cannot tell a value read as another from one left unread beside an unrelated
+extra. Each cell is a count, then in parentheses the documents with at least
+one error of that class.
+
+| Error class | Gemini | Azure | OpenAI |
+|---|---|---|---|
+| header value: net for gross | 0 (0) | 0 (0) | 5 (5) |
+| header value: gross for net | 0 (0) | 1 (1) | 0 (0) |
+| header value: misread date | 1 (1) | 1 (1) | 7 (7) |
+| header value: wrong | 233 (95) | 294 (97) | 288 (99) |
+| header value: missing | 238 (89) | 245 (90) | 189 (83) |
+| header value: spurious | 147 (74) | 140 (81) | 140 (75) |
+| wrong row | 171 (62) | 168 (59) | 256 (76) |
+| missing row | 56 (30) | 47 (27) | 41 (21) |
+| spurious row | 23 (16) | 38 (17) | 40 (25) |
+| cell of a wrong row: net for gross | 11 (5) | 0 (0) | 177 (24) |
+| cell of a wrong row: gross for net | 77 (15) | 95 (18) | 10 (4) |
+| cell of a wrong row: misread date | 6 (3) | 7 (4) | 6 (3) |
+| cell of a wrong row: wrong | 85 (38) | 90 (34) | 111 (45) |
+| cell of a wrong row: missing | 110 (30) | 141 (33) | 60 (21) |
+| cell of a wrong row: spurious | 87 (27) | 7 (6) | 198 (57) |
+| wrong rows off by one cell | 72 of 171 | 72 of 168 | 118 of 256 |
+
+The top five by class and fieldtype on each backend, header values and cells
+of wrong rows together, with a cause the counts are consistent with. The counts
+show where the errors are, not why, so none of the causes is proved:
+
+| Backend | Class, fieldtype | Count | Cause, consistent with the counts |
+|---|---|---|---|
+| Gemini | wrong, `customer_billing_address` | 79 | Address labels carry the party name the reading leaves out (#54), so a read address rarely equals its label. |
+| Gemini | wrong, `vendor_address` | 64 | Consistent with the same as the billing address, plus a vendor labeled at two addresses where the reading returns one (#55). |
+| Gemini | wrong, `line_item_description` | 63 | Consistent with the description noise #116 measured at about one reading in three. |
+| Gemini | gross for net, `line_item_amount_net` | 48 | Consistent with a row total the labels call net being read under gross. |
+| Gemini | missing, `amount_total_gross` | 39 | The total is left unread: by construction no other value was read under that fieldtype in the same header. |
+| Azure | wrong, `vendor_address` | 91 | Consistent with the Gemini pattern (#54, #55), though #44 checked the Gemini row only; the largest class on this backend. |
+| Azure | wrong, `customer_billing_address` | 87 | Consistent with the Gemini pattern (#54). |
+| Azure | spurious, `vendor_name` | 73 | More vendor names read than labeled. The largest spurious class here, within 140 spurious header values over 81 documents. |
+| Azure | gross for net, `line_item_amount_net` | 61 | Consistent with the Gemini pattern: a row total labeled net read under gross. |
+| Azure | wrong, `line_item_description` | 56 | Consistent with the description noise of #116, as on Gemini. |
+| OpenAI | net for gross, `line_item_amount_gross` | 132 | Consistent with a row total labeled gross being read under net, the column choice the extraction row's paragraph above measures. |
+| OpenAI | wrong, `customer_billing_address` | 85 | Consistent with the Gemini pattern (#54). |
+| OpenAI | wrong, `line_item_description` | 79 | Consistent with the description noise of #116, as on Gemini. |
+| OpenAI | wrong, `vendor_address` | 79 | Consistent with the Gemini pattern (#54, #55). |
+| OpenAI | spurious, `line_item_currency` | 64 | A currency read on rows whose labels carry none; the counts alone do not say why. |
+
+Read across the backends, a wrong address is the largest header class and
+fieldtype on every backend: `customer_billing_address` at 79 on Gemini,
+`vendor_address` at 91 on Azure and `customer_billing_address` at 85 on OpenAI,
+each ahead of the next header entry (64, 87 and 79). The net and gross columns
+hold 88 of Gemini's 376 cell errors, 95 of Azure's 340 and 187 of OpenAI's 562,
+filed one way by Gemini and Azure and the other way by OpenAI. A wrong row is
+the largest row class on every backend, so line-item F1 is lost mostly inside
+rows the reading found, not on rows it never found, and between 0.42 and 0.46
+of wrong rows are off by a single cell.
+
+At P4 the escapes in [Pipeline, end to end](#pipeline-end-to-end) break down
+by hold type and gate fieldtype, a document counting once under each it
+carries. Gemini's 4 injected holds are 2 extra line and 2 price variance, and
+its 1 document with a misread gate value carries both `amount_due` and
+`amount_total_gross`. Azure's 2 are 1 extra line and 1 price variance, with no
+misread value. OpenAI's 1 injected hold is an extra line, and its 4 documents
+with a misread gate value carry 2 on `date_issue`, 1 on `date_due` and 1 on
+`amount_due`. The labels control lets nothing escape.
+
+Produced at [`8835573`](https://github.com/franklinmdev/docmatch/commit/8835573)
+from the saved runs and labels, no model call:
+
+```bash
+uv run docmatch failures --run data/runs/gemini --run data/runs/azure --run data/runs/openai \
+  --loop data/runs/loop/labels --loop data/runs/loop/gemini \
+  --loop data/runs/loop/azure --loop data/runs/loop/openai
+```
+
 ## Data
 
 - **Real invoices:** DocILE, 6,680 real annotated invoices with key-field and line-item labels, plus 100k synthetic and close to 1M unlabeled documents. Access is a request form that returns a download token. The terms are non-commercial research use only, no redistribution, no third-party access, GDPR compliance, and deletion when the permission ends. They restrict the data, not the publication of results, so the numbers in this README are publishable and the documents are not.
@@ -1293,6 +1375,20 @@ a line added asks for a line with its cells, a line removed for none pairing
 with it. Corrections made on a reading identical to the run's own are skipped
 and counted, since they are misses by construction.
 
+### Failure analysis
+
+```bash
+uv run docmatch failures --run data/runs/gemini --loop data/runs/loop/gemini
+```
+
+`failures` prints, for each `--run`, every false negative and false positive
+field F1 and line-item F1 count, sorted into one error class each against the
+labels of `--manifest`, with the eval's own counts printed beside the totals;
+and for each `--loop`, the documents P4 lets escape, by cause, hold type and
+gate fieldtype. It calls no model and writes nothing, and it prints counts by class
+and fieldtype only, never a value read or labeled. Loop runs alone need no
+labels.
+
 ### The baseline run
 
 `docmatch eval` scores a predictions file. `docmatch extract` is what produces
@@ -1455,7 +1551,7 @@ docmatch/
   engine/              the Python engine, a uv workspace member
     pyproject.toml     the docmatch package and its `docmatch` command
     src/docmatch/      extraction, validation, resolution, matching, metrics
-      evals/           the pinned subset, the run that scores it, the corpus survey
+      evals/           the pinned subset, the run that scores it, the corpus survey, the error classes
       matching/        records, pairing, the rules, the case generator, the scorer
       resolution/      the catalog, the query set, the embedder, the Postgres working space, the arms, the run
       pipeline/        the loop's statuses, API, server, replay and labels backends, loop runs and their report

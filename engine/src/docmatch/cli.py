@@ -87,6 +87,16 @@ from docmatch.evals.corrections import (
     read_corrections,
     score_corrections,
 )
+from docmatch.evals.failures import (
+    ROW_CLASSES,
+    VALUE_CLASSES,
+    Errors,
+    ValueClass,
+    classify_subset,
+    false_negatives,
+    false_positives,
+    ranked,
+)
 from docmatch.evals.manifest import Manifest, ManifestError, Reason
 from docmatch.evals.public import PublicCopyError
 from docmatch.evals.run import (
@@ -152,7 +162,7 @@ from docmatch.metrics.line_items import (
 )
 from docmatch.metrics.score import Score, ratio, share_of
 from docmatch.pipeline import corrections, labels, replay, serve
-from docmatch.pipeline.ladder import Rung
+from docmatch.pipeline.ladder import Escapes, Rung, escapes
 from docmatch.pipeline.loop import settled
 from docmatch.pipeline.measure import RUNS, LoopError, measure
 from docmatch.pipeline.report import Report, Spread, report
@@ -699,6 +709,44 @@ def main(argv: Sequence[str] | None = None) -> int:
             "can be given more than once"
         ),
     )
+    failing = subcommands.add_parser(
+        "failures",
+        parents=[dataset],
+        help=(
+            "count each saved run's extraction errors by class, and each loop "
+            "run's escaped documents by cause"
+        ),
+    )
+    failing.add_argument(
+        "--manifest",
+        type=Path,
+        default=manifest.MANIFEST,
+        help=f"the subset the runs cover (default: {manifest.MANIFEST.name})",
+    )
+    failing.add_argument(
+        "--run",
+        type=Path,
+        action="append",
+        default=[],
+        dest="runs",
+        metavar="DIR",
+        help=(
+            "a directory `extract --out` wrote over the whole fixed subset; "
+            "each is classified on its own, and it can be given more than once"
+        ),
+    )
+    failing.add_argument(
+        "--loop",
+        type=Path,
+        action="append",
+        default=[],
+        dest="loops",
+        metavar="DIR",
+        help=(
+            "a directory `loop --out` wrote, whose escaped documents at P4 are "
+            "counted by cause; it can be given more than once"
+        ),
+    )
     exporting = subcommands.add_parser(
         "corrections",
         help="export a loop schema's settled corrections for `eval --corrections`",
@@ -894,6 +942,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--manifest, the noise subset's is "
             f"{regression.NOISE_SUBSET.relative_to(SOURCE.parent.parent.parent)}"
         )
+    if arguments.command == "failures" and not (arguments.runs or arguments.loops):
+        failing.error("give at least one --run or --loop")
     if (
         arguments.command == "noise"
         and arguments.manifest.resolve() == manifest.MANIFEST.resolve()
@@ -953,6 +1003,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
         )
     if arguments.command == "corrections":
         return _corrections(arguments)
+    if arguments.command == "failures":
+        return _failures_command(arguments)
     if arguments.command == "regression":
         return _regression(arguments)
     if arguments.command == "reproduce":
@@ -1456,6 +1508,157 @@ def _counted_cases(run: LoopRun) -> str:
     if not run.without_lines:
         return counted
     return f"{counted}, {len(run.without_lines)} with no labeled lines seed no case"
+
+
+def _failures_command(arguments: argparse.Namespace) -> tuple[str, int]:
+    """Each saved run's errors by class against the labels, then each loop
+    run's escapes by cause. The labels are read only when a run is given, so
+    loop runs alone need no dataset. No model is called and nothing is
+    written; the report is counts."""
+    pinned = manifest.load(arguments.manifest)
+    classified: list[tuple[str, Errors, SubsetScore]] = []
+    if arguments.runs:
+        dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
+        for directory in arguments.runs:
+            saved = read_saved_run(directory, pinned, arguments.manifest)
+            scored = score_subset(
+                dataset,
+                pinned,
+                saved.predictions,
+                currency_symbols=saved.currency_symbols,
+            )
+            classified.append((saved.record.name, classify_subset(scored), scored))
+    loops = [read_loop_run(each) for each in arguments.loops]
+    return render_failures(classified, [(run, escapes(run)) for run in loops]), 0
+
+
+def render_failures(
+    classified: Sequence[tuple[str, Errors, SubsetScore]],
+    escaped: Sequence[tuple[LoopRun, Escapes]],
+) -> str:
+    """Counts by class and fieldtype, and escapes by cause; never a value."""
+    lines: list[str] = []
+    for name, errors, scored in classified:
+        if lines:
+            lines.append("")
+        lines += _error_classes(name, errors, scored)
+    for run, found in escaped:
+        if lines:
+            lines.append("")
+        lines += _escapes(run, found)
+    return "\n".join([*lines, ""])
+
+
+def _error_classes(name: str, errors: Errors, scored: SubsetScore) -> list[str]:
+    header, cells = errors.header_by_class(), errors.cells_by_class()
+    wrong_rows = errors.rows["wrong row"]
+    return [
+        f"Error classes, {name}, over {len(scored.documents)} pinned documents",
+        "",
+        *_class_table(
+            "header value",
+            [
+                (kind, header[kind], errors.header_documents[kind])
+                for kind in VALUE_CLASSES
+            ],
+        ),
+        f"  field F1 counts {scored.fields.false_negatives} false negatives and "
+        f"{scored.fields.false_positives} false positives",
+        "",
+        *_class_table(
+            "row",
+            [
+                (kind, errors.rows[kind], errors.row_documents[kind])
+                for kind in ROW_CLASSES
+            ],
+        ),
+        f"  line-item F1 counts {scored.line_items.false_negatives} false "
+        f"negatives and {scored.line_items.false_positives} false positives",
+        "",
+        *_table(
+            ("cell of a wrong row", "count", "documents"),
+            [
+                *(
+                    (kind, str(cells[kind]), str(errors.cell_documents[kind]))
+                    for kind in VALUE_CLASSES
+                ),
+                ("total", str(sum(cells.values())), ""),
+            ],
+        ),
+        f"  {errors.one_cell_off} of {wrong_rows} wrong rows are off by one cell",
+        "",
+        "Header values by class and fieldtype, most first",
+        *_ranked(errors.header),
+        "",
+        "Cells of wrong rows by class and fieldtype, most first",
+        *_ranked(errors.cells),
+    ]
+
+
+def _class_table(what: str, counted: Sequence[tuple[str, int, int]]) -> list[str]:
+    """Each class with its documents and what it takes from recall and
+    precision, then totals; documents have no total, one can carry several
+    classes."""
+    rows = [
+        (
+            kind,
+            str(count),
+            str(documents),
+            str(false_negatives(kind) * count),
+            str(false_positives(kind) * count),
+        )
+        for kind, count, documents in counted
+    ]
+    return _table(
+        (what, "count", "documents", "false negatives", "false positives"),
+        [
+            *rows,
+            (
+                "total",
+                str(sum(int(row[1]) for row in rows)),
+                "",
+                str(sum(int(row[3]) for row in rows)),
+                str(sum(int(row[4]) for row in rows)),
+            ),
+        ],
+    )
+
+
+def _ranked(counted: Counter[tuple[ValueClass, str]]) -> list[str]:
+    found = ranked(counted)
+    if not found:
+        return ["  none"]
+    return _table(
+        ("class, fieldtype", "count"),
+        [(f"{kind}, {fieldtype}", str(count)) for kind, fieldtype, count in found],
+    )
+
+
+def _escapes(run: LoopRun, found: Escapes) -> list[str]:
+    return [
+        f"Escaped documents at P4, {_backend(run)}",
+        *_rows(
+            ("documents", _counted_cases(run)),
+            ("approved", str(found.approved)),
+            ("escaped", str(found.escaped)),
+            ("injected hold", str(found.injected_hold)),
+            ("misread gate value", str(found.misread_value)),
+        ),
+        "",
+        *_table(
+            ("injected hold type", "documents"),
+            [(kind, str(found.injected[kind])) for kind in sorted(found.injected)]
+            or [("none", "0")],
+        ),
+        "",
+        *_table(
+            ("misread gate fieldtype", "documents"),
+            [(name, str(found.misread[name])) for name in sorted(found.misread)]
+            or [("none", "0")],
+        ),
+        "  a document counts once under each cause, type and fieldtype it carries,",
+        "  so the breakdowns can sum above the escapes",
+    ]
 
 
 def _spread(found: Spread | None) -> tuple[str, str]:

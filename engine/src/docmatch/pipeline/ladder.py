@@ -19,10 +19,11 @@ once in the escape rate and once under each cause, so the causes can sum
 above it (#167).
 """
 
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 
 from docmatch import gate
-from docmatch.matching.matcher import SEVERITY
+from docmatch.matching.matcher import SEVERITY, DiscrepancyType
 from docmatch.metrics.fields import FieldValues, score_fields
 from docmatch.pipeline.routing import LADDER, P4, P5_AT_EACH_EDGE, Policy, route
 from docmatch.pipeline.saved import LoopRun, LoopRunError, SavedCase
@@ -92,7 +93,49 @@ def _rung(cases: tuple[SavedCase, ...], policy: Policy) -> Rung:
 
 
 def _injected_hold(case: SavedCase) -> bool:
-    return any(SEVERITY[each.type] == "hold" for each in case.truth)
+    return bool(_held(case))
+
+
+def _held(case: SavedCase) -> tuple[DiscrepancyType, ...]:
+    """The hold types injected into a case, each once, in the order injected."""
+    return tuple(
+        dict.fromkeys(each.type for each in case.truth if SEVERITY[each.type] == "hold")
+    )
+
+
+@dataclass(frozen=True)
+class Escapes:
+    """The documents P4, the policy the loop ran, let escape, by cause.
+
+    `injected` counts escaped documents per hold type injected into them and
+    `misread` per gate fieldtype read unlike its label; a document counts
+    once under each type and fieldtype it carries, so either breakdown can
+    sum above its cause's total, as the causes can sum above `escaped`.
+    """
+
+    approved: int
+    escaped: int
+    injected_hold: int
+    misread_value: int
+    injected: Counter[DiscrepancyType] = field(default_factory=Counter)
+    misread: Counter[str] = field(default_factory=Counter)
+
+
+def escapes(run: LoopRun) -> Escapes:
+    """The escaped documents at P4 broken down by cause, read from the run's
+    saved cases alone; refused, as the ladder is, when P4 does not give back
+    what the loop wrote."""
+    _check_p4(run)
+    approved = [each for each in run.cases if not route(each.standing, P4)]
+    escaped = [each for each in approved if _held(each) or each.misread]
+    return Escapes(
+        approved=len(approved),
+        escaped=len(escaped),
+        injected_hold=sum(1 for each in escaped if _held(each)),
+        misread_value=sum(1 for each in escaped if each.misread),
+        injected=Counter(kind for each in escaped for kind in _held(each)),
+        misread=Counter(name for each in escaped for name in each.misread),
+    )
 
 
 def _check_p4(run: LoopRun) -> None:
