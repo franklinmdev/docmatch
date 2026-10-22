@@ -27,6 +27,12 @@ comes from. Each `--run` matches a saved run's readings as the invoices of
 the same cases, which is where the end-to-end rows come from. It prints and
 writes nothing.
 
+`docmatch reproduce docile` rebuilds that per-type table and compares it,
+exactly, with the docile half of `benchmark/matching.json`, which is how a
+reader checks the README's table; `docmatch reproduce synthetic` does the same
+over the committed fixture in seconds, which is the smoke check CI runs.
+`--write` writes the computed table as the half instead, on a clean commit.
+
 `docmatch resolve` builds the catalog from the train labels, rebuilds it in
 Postgres, sends every query through every arm and scores the answers, which
 is where the resolution table comes from, and prints the operating threshold
