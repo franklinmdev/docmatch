@@ -40,6 +40,14 @@ _Avoid_: validation (on its own), filter, guardrail
 The tax jurisdiction a benchmark set's documents belong to, declared once by the set and carried by every run of it. It chooses which rules the gate adds and which reporting format an export writes. A set that declares none is neutral, and only the neutral rules apply.
 _Avoid_: locale, country (on its own), market
 
+**Filing annotation**:
+The choices a taxpayer makes about a document when reporting it, which the document itself does not carry: what kind of purchase it is, when and how it was paid, what was retained, and how the tax is credited. It is kept beside a document's labels, is the same whatever reading the report is built from, and is never scored.
+_Avoid_: label (for these values), metadata, classification
+
+**Pre-validation**:
+Running a tax authority's own offline checker over an exported report. A file passes when the checker finds no error in it. Passing is not acceptance by the authority, which runs further checks of its own.
+_Avoid_: validation (on its own), acceptance, submission
+
 **Gate ablation**:
 The comparison of what the gate and confidence each catch among readings whose gated values are wrong, so the gate is judged only on errors it could see.
 _Avoid_: gate eval, gate accuracy
