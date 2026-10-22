@@ -101,6 +101,8 @@ def record(out: Path) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     database_url = resolve_database_url(None)
     loop_out = out / "loop"
+    # A clean state: an earlier run's loop output never reaches this one.
+    shutil.rmtree(loop_out, ignore_errors=True)
     loop_command = [
         "docmatch", "loop", "--backend", "replay", "--run", str(RUN),
         "--data-dir", str(FIXTURE), "--manifest", str(MANIFEST),

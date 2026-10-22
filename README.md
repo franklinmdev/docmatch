@@ -1186,7 +1186,7 @@ design decisions are in `DESIGN.md`.
 
 A recording of the loop on the synthetic fixture is the asset of the
 [`phase-5-demo` release](https://github.com/franklinmdev/docmatch/releases/tag/phase-5-demo).
-It shows the five cases uploaded over the API with the replay backend, a
+It shows the fixture's four cases uploaded over the API with the replay backend, a
 document routed to review with its routing reason, a reviewer correcting the
 amount due the gate failed on and the gate rerunning, the approval, and the
 `docmatch pipeline` report. `scripts/demo.py` makes it again:
@@ -1404,7 +1404,7 @@ docmatch/
   data/                ignored: datasets, generated fixtures, private sets
   benchmark/           the regression gate's aggregate: F1 per backend, committed
   docs/                decision records
-  scripts/             the markdown-location check CI runs
+  scripts/             the markdown-location check CI runs, and the demo recording
   .github/workflows/   CI: ruff, mypy and pytest against a pgvector container on every push; the regression gate on every pull request
 ```
 
