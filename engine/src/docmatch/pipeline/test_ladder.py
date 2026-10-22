@@ -6,7 +6,7 @@ import pytest
 from docmatch.gate import Verdict
 from docmatch.matching.generator import Injected
 from docmatch.matching.matcher import DiscrepancyType, Place
-from docmatch.pipeline.ladder import Rung, ladder, misread
+from docmatch.pipeline.ladder import Rung, escapes, ladder, misread
 from docmatch.pipeline.routing import P0, P1, P2, P3, P4, P5_AT_EACH_EDGE, RoutingReason
 from docmatch.pipeline.saved import LoopRun, LoopRunError, SavedCase
 
@@ -256,3 +256,32 @@ def test_a_gate_value_read_where_nothing_is_labeled_is_misread() -> None:
     unlabeled = {k: v for k, v in LABELED.items() if k != "date_due"}
 
     assert misread(LABELED, unlabeled) == ("date_due",)
+
+
+def test_escapes_at_p4_break_down_by_hold_type_and_misread_fieldtype() -> None:
+    """The loop's own policy: what it approved that should have gone to
+    review, per hold type injected and per gate fieldtype misread."""
+    unit = case("unit", truth=("unit variant",))
+    both = case("both", truth=("unit variant", "tax mismatch"), misread=("date_due",))
+    due = case("due", misread=("date_due", "amount_due"))
+    missing = case("missing", truth=("missing line",))
+
+    found = escapes(run(unit, both, due, missing, PRICE_HELD, CLEAN))
+
+    assert (found.approved, found.escaped) == (5, 3)
+    assert (found.injected_hold, found.misread_value) == (2, 2)
+    assert found.injected == {"unit variant": 2, "tax mismatch": 1}
+    assert found.misread == {"date_due": 2, "amount_due": 1}
+
+
+def test_escapes_agree_with_the_ladders_p4() -> None:
+    p4 = rung(ladder(EVERY_RUNG), "P4")
+    found = escapes(EVERY_RUNG)
+
+    assert (found.approved, found.escaped) == (p4.approved, p4.escaped)
+    assert (found.injected_hold, found.misread_value) == (p4.injected_hold, p4.misread)
+
+
+def test_escapes_refuse_a_run_p4_does_not_give_back() -> None:
+    with pytest.raises(LoopRunError, match="held: the loop reached approved"):
+        escapes(run(case("held", holds=("over-ship",))))

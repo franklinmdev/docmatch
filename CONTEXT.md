@@ -62,6 +62,10 @@ _Avoid_: noise margin, variance
 What reading one document costs at the vendor's list price for the units the vendor reported processing, tokens or pages, including attempts that failed and readings paid for but never saved: the sum of its vendor calls. When a vendor that charges per page accepts an attempt but reports no pages, the pages sent are counted. Free tiers and what was actually billed play no part, so every backend's cost means the same thing.
 _Avoid_: billed cost, spend, price per document
 
+**Error class**:
+The way one disagreement between a reading and its labels on the fixed subset goes wrong, counted in the units field F1 and line-item F1 already count, so a backend's classes add back up to its false negatives and false positives. A header value, or a cell of a wrong row, is net for gross (a labeled gross amount read under the matching net fieldtype, equal once normalized), gross for net (the same the other way), a misread date (a date fieldtype read as another value), wrong (any other fieldtype read as another value), missing (labeled, not read) or spurious (read, not labeled). A row is a wrong row (paired with a labeled row and not exactly right), a missing row (a labeled row nothing pairs with) or a spurious row (a read row no label pairs with); the cells of a missing or spurious row count only in their row's class. Classes are counts by fieldtype and never carry a value.
+_Avoid_: failure mode, error category, error kind
+
 ### Matching
 
 **Seed**:
