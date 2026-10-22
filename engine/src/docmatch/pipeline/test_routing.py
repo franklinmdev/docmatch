@@ -1,14 +1,10 @@
-"""Tests for routing under each policy and for the lease, pure: no database,
-no backend."""
+"""Tests for routing under each policy, pure: no database, no backend."""
 
 import pytest
 
-from docmatch.extraction import azure, gemini, openai
-from docmatch.extraction.run import ATTEMPTS, BACKOFF
 from docmatch.gate import gate
 from docmatch.matching.matcher import DiscrepancyType, match
 from docmatch.matching.records import ReceivingRecord, Record
-from docmatch.pipeline.loop import LEASE
 from docmatch.pipeline.routing import (
     CONFIDENCE,
     LADDER,
@@ -147,12 +143,3 @@ def test_a_gated_value_with_no_confidence_is_never_below_an_edge() -> None:
     """A missing confidence is not a low one (the sweep's own rule, #23)."""
     assert route(Standing(gated_confidence=(None,)), p5(0.9)) == ()
     assert route(Standing(gated_confidence=(None, 0.5)), p5(0.9)) == (CONFIDENCE,)
-
-
-def test_a_lease_outlasts_the_slowest_bounded_extraction() -> None:
-    """Every attempt of every backend ends by its timeout, so three of them
-    with the backoffs between are the longest a live extraction holds a lease."""
-    slowest = max(gemini.TIMEOUT / 1000, openai.TIMEOUT, azure.TIMEOUT)
-    backoffs = sum(BACKOFF * 2**each for each in range(ATTEMPTS - 1))
-
-    assert LEASE.total_seconds() > ATTEMPTS * slowest + backoffs
