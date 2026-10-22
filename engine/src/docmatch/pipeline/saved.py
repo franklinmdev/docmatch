@@ -38,7 +38,7 @@ class LoopRunError(Exception):
 
 
 class SavedTransition(BaseModel):
-    """One status change, as the trace gives it."""
+    """One transition, as the trace gives it."""
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 

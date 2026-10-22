@@ -7,7 +7,7 @@ Four tables, and the documents table is the only queue (ADR 0002):
   worker holds while it moves the document on, how many leases lapsed at
   each status, and the gate, resolution and match rerun on the reading as a
   reviewer's last edit left it, beside the checkpoints the system saved.
-- `transitions`: every status change, append-only. A trigger refuses an
+- `transitions`: every transition, append-only. A trigger refuses an
   update or a delete, so nothing rewrites a document's history (#150).
 - `vendor_calls`: one row per request sent to a backend's vendor, written
   and committed on its own as the request returns, so a reading paid for and
