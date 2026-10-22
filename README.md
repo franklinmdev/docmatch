@@ -671,6 +671,82 @@ review with a match hold was approved from the review page after its
 confirmation, and one with a failed gate and a hold rejected; both transitions
 carry the reviewer as actor.
 
+### Failure analysis, error classes
+
+Every false negative and false positive behind the extraction rows, sorted
+into one [error class](CONTEXT.md) each, so a backend's classes add back up to
+its field F1 and line-item F1 counts. Header values and the cells of wrong rows
+are net for gross, gross for net, a misread date, wrong, missing or spurious;
+rows are wrong, missing or spurious, and a missing or spurious row's cells
+count only in its row's class.
+
+| Error class | Gemini | Azure | OpenAI |
+|---|---|---|---|
+| header value: net for gross | 0 | 0 | 5 |
+| header value: gross for net | 0 | 1 | 0 |
+| header value: misread date | 1 | 1 | 7 |
+| header value: wrong | 233 | 294 | 288 |
+| header value: missing | 238 | 245 | 189 |
+| header value: spurious | 147 | 140 | 140 |
+| wrong row | 171 | 168 | 256 |
+| missing row | 56 | 47 | 41 |
+| spurious row | 23 | 38 | 40 |
+| cell of a wrong row: net for gross | 11 | 0 | 177 |
+| cell of a wrong row: gross for net | 77 | 95 | 10 |
+| cell of a wrong row: misread date | 6 | 7 | 6 |
+| cell of a wrong row: wrong | 85 | 90 | 111 |
+| cell of a wrong row: missing | 110 | 141 | 60 |
+| cell of a wrong row: spurious | 87 | 7 | 198 |
+| wrong rows off by one cell | 72 of 171 | 72 of 168 | 118 of 256 |
+
+The top five by class and fieldtype on each backend, header values and cells
+of wrong rows together, with the pattern in the counts behind each:
+
+| Backend | Class, fieldtype | Count | Cause, from the counts |
+|---|---|---|---|
+| Gemini | wrong, `customer_billing_address` | 79 | Address labels carry the party name the reading leaves out (#54), so a read address rarely equals its label. |
+| Gemini | wrong, `vendor_address` | 64 | The same as the billing address, plus a vendor labeled at two addresses where the reading returns one (#55). |
+| Gemini | wrong, `line_item_description` | 63 | A description read differing from its label, the noise #116 measured at about one reading in three. |
+| Gemini | gross for net, `line_item_amount_net` | 48 | A row total the labels call net is read under gross. |
+| Gemini | missing, `amount_total_gross` | 39 | The total is left unread on 38 documents that label it, with nothing read under it at all. |
+| Azure | wrong, `vendor_address` | 91 | Likely as on Gemini (#54, #55), though #44 checked the Gemini row only; the largest class on this backend. |
+| Azure | wrong, `customer_billing_address` | 87 | Likely as on Gemini (#54). |
+| Azure | spurious, `vendor_name` | 73 | More vendor names read than labeled: 65 of the 76 documents with one spurious also label a vendor name. |
+| Azure | gross for net, `line_item_amount_net` | 61 | As on Gemini: a row total labeled net read under gross. |
+| Azure | wrong, `line_item_description` | 56 | As on Gemini (#116). |
+| OpenAI | net for gross, `line_item_amount_gross` | 132 | A row total labeled gross is read under net, the column choice the extraction row's paragraph above measures. |
+| OpenAI | wrong, `customer_billing_address` | 85 | Likely as on Gemini (#54). |
+| OpenAI | wrong, `line_item_description` | 79 | As on Gemini (#116). |
+| OpenAI | wrong, `vendor_address` | 79 | Likely as on Gemini (#54, #55). |
+| OpenAI | wrong, `customer_billing_name` | 47 | A billing name read unlike its label; the counts alone do not say which way. |
+
+Read across the backends, a wrong address is the largest header class
+everywhere. The net and gross columns hold 88 of Gemini's 376 cell errors, 95
+of Azure's 340 and 187 of OpenAI's 562, filed one way by Gemini and Azure and
+the other way by OpenAI. A wrong row is the largest row class on every
+backend, so line-item F1 is lost mostly inside rows the reading found, not on
+rows it never found, and between 0.42 and 0.46 of wrong rows are off by a
+single cell.
+
+At P4 the escapes in [Pipeline, end to end](#pipeline-end-to-end) break down
+by hold type and gate fieldtype, a document counting once under each it
+carries: Gemini's 4 injected holds are 2 extra line and 2 price variance, and
+its 1 document with a misread gate value carries both `amount_due` and
+`amount_total_gross`; Azure's 2
+are 1 extra line and 1 price variance, with no misread value; OpenAI's 1
+injected hold is an extra line, and its 4 documents with a misread gate value
+carry 2 on `date_issue`, 1 on `date_due` and 1 on `amount_due`. The labels control lets
+nothing escape.
+
+Produced at [`64f5f93`](https://github.com/franklinmdev/docmatch/commit/64f5f93)
+from the saved runs and labels, no model call:
+
+```bash
+uv run docmatch failures --run data/runs/gemini --run data/runs/azure --run data/runs/openai \
+  --loop data/runs/loop/labels --loop data/runs/loop/gemini \
+  --loop data/runs/loop/azure --loop data/runs/loop/openai
+```
+
 ## Data
 
 - **Real invoices:** DocILE, 6,680 real annotated invoices with key-field and line-item labels, plus 100k synthetic and close to 1M unlabeled documents. Access is a request form that returns a download token. The terms are non-commercial research use only, no redistribution, no third-party access, GDPR compliance, and deletion when the permission ends. They restrict the data, not the publication of results, so the numbers in this README are publishable and the documents are not.
@@ -1211,6 +1287,20 @@ a line added asks for a line with its cells, a line removed for none pairing
 with it. Corrections made on a reading identical to the run's own are skipped
 and counted, since they are misses by construction.
 
+### Failure analysis
+
+```bash
+uv run docmatch failures --run data/runs/gemini --loop data/runs/loop/gemini
+```
+
+`failures` prints, for each `--run`, every false negative and false positive
+field F1 and line-item F1 count, sorted into one error class each against the
+labels of `--manifest`, with the eval's own counts printed beside the totals;
+and for each `--loop`, the documents P4 lets escape, by cause, hold type and
+gate fieldtype. It calls no model and writes nothing, and it prints counts by class
+and fieldtype only, never a value read or labeled. Loop runs alone need no
+labels.
+
 ### The baseline run
 
 `docmatch eval` scores a predictions file. `docmatch extract` is what produces
@@ -1373,7 +1463,7 @@ docmatch/
   engine/              the Python engine, a uv workspace member
     pyproject.toml     the docmatch package and its `docmatch` command
     src/docmatch/      extraction, validation, resolution, matching, metrics
-      evals/           the pinned subset, the run that scores it, the corpus survey
+      evals/           the pinned subset, the run that scores it, the corpus survey, the error classes
       matching/        records, pairing, the rules, the case generator, the scorer
       resolution/      the catalog, the query set, the embedder, the Postgres working space, the arms, the run
       pipeline/        the loop's statuses, API, server, replay and labels backends, loop runs and their report
