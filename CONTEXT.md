@@ -18,6 +18,10 @@ _Avoid_: original, source PDF
 The check that a public copy has the same pages as DocILE's copy, so its labels apply to it. A document that fails admission is a reject and never enters the fixed subset.
 _Avoid_: filtering, validation
 
+**Label coverage**:
+The fieldtypes a benchmark set's labels were written for, declared once by the set. A score counts only those fieldtypes, on both sides, so a value the labels never looked for is neither a miss nor a false positive. A set that declares none is covered for every fieldtype.
+_Avoid_: schema, label set, scored fields
+
 ### Extraction
 
 **Derived value**:
