@@ -13,7 +13,7 @@ A document reconciliation engine: extract invoices with vision language models, 
 3. **Evals before features.** Every change to a model, prompt, threshold, or rule runs the eval on the fixed subset. A regression blocks merge.
 4. **Models structure text; code decides.** Arithmetic, tolerances, matching, and approval are deterministic. Confidence never gates acceptance on its own.
 5. **No time estimates in any document.** Phases and exit criteria, never dates, weeks, or hours.
-6. **Never commit datasets, document contents, or personal data.** `data/` is ignored. Only loaders, generators, and aggregate numbers are committed. DocILE is licensed for non-commercial research use only, with no redistribution and no third-party access.
+6. **Never commit datasets, document contents, or personal data.** `data/` is ignored. Only loaders, generators, and aggregate numbers are committed. DocILE is licensed for non-commercial research use only, with no redistribution and no third-party access. Comprobantes (Dominican fiscal receipts and invoices) issued to or by the owner go only to the Gemini, Azure and OpenAI extraction backends, with `store=false` where the API has it; never to a subagent, the conversation, or a screenshot. Nobody else's comprobantes are used. A new backend receives them only after its terms are read on its own ticket. Public e-CF samples follow DocILE's terms: local use, never redistributed.
 7. **Smallest change that moves a number.** Prefer deleting a component over adding one.
 8. **Docs before code.** Before writing code against a library, API, or service, read its current documentation and record the version you read. Nothing from memory.
 
