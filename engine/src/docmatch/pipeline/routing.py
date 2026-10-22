@@ -134,14 +134,10 @@ def route(known: Standing, policy: Policy) -> tuple[Reason, ...]:
 def standing(
     checked: GateResult | None,
     result: MatchResult | None,
-    *,
-    shortcut: Shortcut | None = None,
-    gated_confidence: tuple[float | None, ...] = (),
 ) -> Standing:
     """What the saved gate and match results say; an output not yet saved says
     nothing."""
     return Standing(
-        shortcut=shortcut,
         gate=None if checked is None else checked.verdict,
         holds=()
         if result is None
@@ -153,7 +149,6 @@ def standing(
                 for finding in result.findings
             )
         ),
-        gated_confidence=gated_confidence,
     )
 
 
