@@ -723,7 +723,7 @@ Matches the README: every cell equals the synthetic half of benchmark/matching.j
 
 **2. Get DocILE.** Fill in the dataset access request form at
 https://docile.rossum.ai/, which returns a token, and export it as
-`DOCILE_TOKEN`. Then download the annotated
+`DOCILE_TOKEN` (or keep it in `.env`, see `.env.example`). Then download the annotated
 train and val splits into `data/docile`, which is gitignored, with upstream's
 script:
 

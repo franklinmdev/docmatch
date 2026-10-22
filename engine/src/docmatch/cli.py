@@ -30,7 +30,7 @@ writes nothing.
 `docmatch reproduce docile` rebuilds that per-type table and compares it,
 exactly, with the docile half of `benchmark/matching.json`, which is how a
 reader checks the README's table; `docmatch reproduce synthetic` does the same
-over the committed fixture in seconds, which is the smoke check CI runs.
+over the committed fixture, which is the smoke check CI runs.
 `--write` writes the computed table as the half instead, on a clean commit.
 
 `docmatch resolve` builds the catalog from the train labels, rebuilds it in
