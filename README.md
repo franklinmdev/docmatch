@@ -33,7 +33,7 @@ flowchart LR
   G -->|corrections| H[("Corrections eval<br/>apart from the F1")]
 ```
 
-Every status change and every vendor call is recorded in Postgres with its times and cost, and every part of the loop has an eval that runs in CI.
+Every transition and every vendor call is recorded in Postgres with its times and cost, and every part of the loop has an eval that runs in CI.
 
 ## Phases
 
@@ -88,7 +88,7 @@ Measurement before modeling.
 - Explicit status state machine in Postgres: received, extracted, validated, resolved, matched, needs_review, approved, rejected.
 - Postgres-backed worker with idempotent handlers under at-least-once delivery.
 - HTTP API in front of the engine.
-- Traces in Postgres: every status change with when it was taken up and committed, and every vendor call with its units and list-price cost.
+- Traces in Postgres: every transition with when it was taken up and committed, and every vendor call with its units and list-price cost.
 - Review inbox: document viewer, extracted fields with confidence, discrepancy list, approve or correct. Corrections are exported and scored in their own eval section, never in the fixed subset's F1.
 - A written decision on whether a graph orchestration library earns its place for pause-and-resume, or why plain code is enough: [ADR 0002](docs/adr/0002-plain-code-orchestration.md), plain code.
 
@@ -1178,7 +1178,7 @@ An upload is the invoice PDF and its case, the purchase order and receiving
 record as JSON text. A real AP desk would find the purchase order in its ERP;
 here the upload carries it. The same content uploaded again returns the same
 document. Each document moves from received to approved or to review, one
-status at a time, and its trace lists every status change with when it was
+status at a time, and its trace lists every transition with when it was
 taken up and committed, and every vendor call with its units and cost. The
 review queue lists the documents at one status with their routing reasons,
 each page of the uploaded PDF comes back as a PNG, and a decision moves a
@@ -1436,7 +1436,7 @@ A list price is not a cost per document, and for the vision models it is not eve
 | Storage and retrieval | Postgres, `pgvector`, `pg_trgm` | One ACID store for records, vectors, and fuzzy text. Trigram similarity fits short SKU strings; it is not BM25 and is not called that here. |
 | Queue | Postgres-backed worker | No second datastore for a single-node system. |
 | API | FastAPI | Thin, typed, boring. |
-| Tracing | Postgres: transitions and vendor calls | Every status change with when it was taken up and committed, every vendor call with its units and list-price cost, in the store the loop already writes; a loop run exports them for the report. |
+| Tracing | Postgres: transitions and vendor calls | Every transition with when it was taken up and committed, every vendor call with its units and list-price cost, in the store the loop already writes; a loop run exports them for the report. |
 | Evals | pytest plus a metrics module, `scipy` for the row assignment | Ground-truth extraction needs field-level and assignment metrics, not judge models. Pairing predicted line items to labeled ones is the rectangular assignment problem, which is a solved one. |
 | Review UI | Next.js, TypeScript | One page, timeboxed. |
 

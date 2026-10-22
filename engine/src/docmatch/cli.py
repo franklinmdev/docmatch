@@ -2165,7 +2165,7 @@ def _sweep(sweep: resolution_sweep.Sweep, what: str) -> list[str]:
     ]
 
 
-def _operating(operating: resolution.Operating) -> list[str]:
+def _operating(operating: resolution.OperatingThreshold) -> list[str]:
     """The operating threshold the loop runs at beside the procedure's value
     on the development slice, the pairing-floor pattern (#151)."""
     procedure = operating.procedure
