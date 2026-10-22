@@ -14,7 +14,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from docmatch.extraction import azure, gemini, openai
 from docmatch.extraction.conftest import write_pdf
+from docmatch.extraction.run import ATTEMPTS, BACKOFF
 from docmatch.pipeline import api, loop, replay
 from docmatch.pipeline.conftest import (
     CATALOG,
@@ -29,6 +31,7 @@ from docmatch.pipeline.conftest import (
 from docmatch.pipeline.labels import Labels
 from docmatch.pipeline.loop import (
     LAPSES,
+    LEASE,
     Claim,
     Refused,
     Resolve,
@@ -672,3 +675,12 @@ def test_a_worker_that_raises_lets_its_lease_go_at_once(
     )
     view = client.get(f"/documents/{document}").json()
     assert view["routing_reasons"] == ["pipeline failed at extracted"]
+
+
+def test_a_lease_outlasts_the_slowest_bounded_extraction() -> None:
+    """Every attempt of every backend ends by its timeout, so three of them
+    with the backoffs between are the longest a live extraction holds a lease."""
+    slowest = max(gemini.TIMEOUT / 1000, openai.TIMEOUT, azure.TIMEOUT)
+    backoffs = sum(BACKOFF * 2**each for each in range(ATTEMPTS - 1))
+
+    assert LEASE.total_seconds() > ATTEMPTS * slowest + backoffs
