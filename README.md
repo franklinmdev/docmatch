@@ -393,7 +393,9 @@ three end-to-end rows below in one report; without `--run` it prints all but
 the end-to-end rows. What it builds, and from what, is under
 [Matching](#matching); every case is rebuilt from one pinned seed, so
 rerunning the command at that commit reproduces this table, and the end-to-end
-rows also need the saved runs the extraction rows produced. The pairing
+rows also need the saved runs the extraction rows produced. `docmatch
+reproduce docile` rebuilds this table alone and checks it cell by cell; see
+[Reproduce a row](#reproduce-a-row). The pairing
 floors, 0.5 on codes and 0.4 on descriptions, are the values the floor
 procedure measures on train over 10,000 cross-document pairs each.
 
@@ -685,6 +687,86 @@ curl -O "https://docile-dataset-rossum.s3.eu-west-1.amazonaws.com/$DOCILE_TOKEN/
 ```
 
 Upstream's `download_dataset.sh` does the same thing. Note that its `--help` names this subset `labeled-trainval`, which 404s; `annotated-trainval` is the working name.
+
+## Reproduce a row
+
+The matching per-type table under [Matching, injected
+discrepancies](#matching-injected-discrepancies) is the row a reader can
+regenerate from a clean checkout. One command rebuilds it from the DocILE
+labels and compares every cell, exactly, with the copy committed in
+`benchmark/matching.json`. It needs no database, no model, no API key and no
+vendor call, and costs nothing to run.
+
+Only this table reproduces from a clean checkout: the extraction and
+end-to-end rows also need the saved runs the extraction backends produced,
+which are vendor output and stay on the machine that made them.
+
+**Prerequisites.** [uv](https://docs.astral.sh/uv/), which installs Python
+3.12 or later for the engine on its own. About 3 GB free disk while DocILE
+downloads (a 1.14 GB zip that unzips to 1.6 GB), 1.6 GB after.
+
+**1. Install and run the smoke check.** From a clean checkout:
+
+```bash
+uv sync
+uv run docmatch reproduce synthetic
+```
+
+This rebuilds the table over the committed synthetic fixture,
+`engine/tests/evals/synthetic`, so it proves the install works
+before anything is downloaded. CI runs the same command on every push. It
+ends with
+
+```text
+Matches the README: every cell equals the synthetic half of benchmark/matching.json, produced at ed897e3 with seed 20260919
+```
+
+**2. Get DocILE.** Fill in the dataset access request form at
+https://docile.rossum.ai/, which returns a token, and export it as
+`DOCILE_TOKEN` (or keep it in `.env`, see `.env.example`). Then download the annotated
+train and val splits into `data/docile`, which is gitignored, with upstream's
+script:
+
+```bash
+curl -O https://raw.githubusercontent.com/rossumai/docile/main/download_dataset.sh
+bash download_dataset.sh "$DOCILE_TOKEN" annotated-trainval data/docile --unzip
+```
+
+The script's `--help` names this dataset `labeled-trainval`, which 404s;
+`annotated-trainval` is the name upstream's README gives and the one that
+downloads. The terms are under [Data](#data): research use only, no
+redistribution.
+
+**3. Reproduce the row.**
+
+```bash
+uv run docmatch reproduce docile
+```
+
+It reads `data/docile` (or `--data-dir`, or `$DOCMATCH_DATA_DIR`), rebuilds
+every case from the labels under the seed pinned in code, and prints the
+per-type table. When every cell agrees it prints
+
+```text
+Per-type table, over cases from train and val
+  type            precision  recall     n  documents
+  price variance      0.984   0.991  1165       4956
+  short-ship          0.978   0.998   819       2500
+  over-ship           0.998   0.990   811       2463
+  extra line          0.977   0.977  1089       4750
+  missing line        1.000   1.000  1930       5325
+  unit variant        1.000   1.000   576        334
+  tax mismatch        1.000   1.000   546        253
+  clean-case false-positive rate  0.007 of 1000 cases
+
+Matches the README: every cell equals the docile half of benchmark/matching.json, produced at ed897e3 with seed 20260919
+```
+
+and exits 0. Any cell that differs, at full precision, is listed with the
+committed value and the computed one, and the command exits 1, so the check
+can be scripted. A half is written by the same command,
+`uv run docmatch reproduce docile --write`, which refuses uncommitted engine
+code so the commit it records is the code the cells came from.
 
 ## Running the engine
 
@@ -1380,7 +1462,7 @@ docmatch/
     tests/evals/       the synthetic corpus CI runs the eval, the match, the resolve and the loop on
   apps/review/         Next.js review page, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
-  benchmark/           the regression gate's aggregate: F1 per backend, committed
+  benchmark/           committed aggregates: the regression gate's F1 per backend, the matching per-type tables `reproduce` compares with
   docs/                decision records
   scripts/             the markdown-location check CI runs
   .github/workflows/   CI: ruff, mypy and pytest against a pgvector container on every push; the regression gate on every pull request
