@@ -1182,6 +1182,28 @@ decide bar counts the corrections. `DOCMATCH_API_URL` points it elsewhere than
 `http://127.0.0.1:8000`. `npm run lint` and `npm run typecheck` check it. The
 design decisions are in `DESIGN.md`.
 
+### The demo
+
+A recording of the loop on the synthetic fixture is the asset of the
+[`phase-5-demo` release](https://github.com/franklinmdev/docmatch/releases/tag/phase-5-demo).
+It shows the five cases uploaded over the API with the replay backend, a
+document routed to review with its routing reason, a reviewer correcting the
+amount due the gate failed on and the gate rerunning, the approval, and the
+`docmatch pipeline` report. `scripts/demo.py` makes it again:
+
+```bash
+uv run python scripts/demo.py
+```
+
+It needs Postgres, npm, ffmpeg and
+[agent-browser](https://github.com/vercel-labs/agent-browser) on `PATH`, and no
+API key: replay answers from the committed saved run and the only pages it can
+show are the fixture's synthetic PDFs, checked by digest first. It picks free
+ports, builds and serves the review page against its own server, records the
+terminal and the page in one browser session, writes
+`out/demo/docmatch-demo.mp4` (ignored), and stops everything it started,
+dropping the loop's schemas.
+
 ### Corrections
 
 ```bash
