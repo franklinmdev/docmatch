@@ -197,7 +197,7 @@ def three(**rows: Row) -> Aggregate:
 NOISE = {b: Noise(field_f1=0.02, line_item_f1=0.03) for b in EXTRACTION_NOISE}
 
 
-def test_an_unchanged_aggregate_on_a_pr_touching_neither_list_passes() -> None:
+def test_an_unchanged_aggregate_on_a_change_touching_neither_list_passes() -> None:
     verdict = check(three(), three(), [f"{ROOT}/matching/matcher.py"], LISTING)
     assert verdict.passed
     assert not verdict.stale

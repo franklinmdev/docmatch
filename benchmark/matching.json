@@ -1,0 +1,104 @@
+{
+  "docile": {
+    "per_type": {
+      "price variance": {
+        "precision": 0.9838160136286201,
+        "recall": 0.9914163090128756,
+        "n": 1165,
+        "documents": 4956
+      },
+      "short-ship": {
+        "precision": 0.9784431137724551,
+        "recall": 0.9975579975579976,
+        "n": 819,
+        "documents": 2500
+      },
+      "over-ship": {
+        "precision": 0.9975155279503105,
+        "recall": 0.9901356350184957,
+        "n": 811,
+        "documents": 2463
+      },
+      "extra line": {
+        "precision": 0.9770431588613406,
+        "recall": 0.9770431588613406,
+        "n": 1089,
+        "documents": 4750
+      },
+      "missing line": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "n": 1930,
+        "documents": 5325
+      },
+      "unit variant": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "n": 576,
+        "documents": 334
+      },
+      "tax mismatch": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "n": 546,
+        "documents": 253
+      }
+    },
+    "clean_case_false_positive_rate": 0.007,
+    "clean_cases": 1000,
+    "clean_false_positives": 7,
+    "seed": 20260919,
+    "produced_on": "ed897e3fb1de9b82b1c93d35a248918b36dca616"
+  },
+  "synthetic": {
+    "per_type": {
+      "price variance": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "n": 1050,
+        "documents": 6
+      },
+      "short-ship": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "n": 931,
+        "documents": 5
+      },
+      "over-ship": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "n": 980,
+        "documents": 5
+      },
+      "extra line": {
+        "precision": 1.0,
+        "recall": 0.9980099502487563,
+        "n": 1005,
+        "documents": 6
+      },
+      "missing line": {
+        "precision": 1.0,
+        "recall": 0.9987714987714987,
+        "n": 1628,
+        "documents": 6
+      },
+      "unit variant": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "n": 798,
+        "documents": 2
+      },
+      "tax mismatch": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "n": 590,
+        "documents": 1
+      }
+    },
+    "clean_case_false_positive_rate": 0.0,
+    "clean_cases": 1000,
+    "clean_false_positives": 0,
+    "seed": 20260919,
+    "produced_on": "ed897e3fb1de9b82b1c93d35a248918b36dca616"
+  }
+}

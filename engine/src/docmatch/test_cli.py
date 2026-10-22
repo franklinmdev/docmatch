@@ -2357,7 +2357,7 @@ def test_resolve_renders_the_report_from_a_built_result() -> None:
                     Point(100, 0.99401, 1152),
                 ),
             ),
-            resolution.Operating(1 / 61 + 1 / 66, 1 / 61 + 1 / 62, 1152),
+            resolution.OperatingThreshold(1 / 61 + 1 / 66, 1 / 61 + 1 / 62, 1152),
             ServerVersions(
                 "16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)", "0.6.0", "1.6", "100"
             ),

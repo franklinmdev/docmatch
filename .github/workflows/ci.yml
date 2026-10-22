@@ -103,6 +103,14 @@ jobs:
           --manifest engine/tests/evals/synthetic/subset.json
           --run engine/tests/evals/synthetic
 
+      # The smoke half of reproducing a row: the per-type table rebuilt from
+      # the same synthetic labels and compared, exactly, with the synthetic
+      # half of benchmark/matching.json, so the command a reader runs first
+      # cannot rot unnoticed. It exits nonzero on any differing cell. The
+      # docile half needs the real labels and is compared locally.
+      - name: Reproduce
+        run: uv run docmatch reproduce synthetic
+
       # The embedder the Resolve step loads, cached by its pinned revision so
       # the weights download once and a bump of the pin misses on purpose.
       # The key is read from the code, so it never drifts from it. Only the

@@ -27,6 +27,12 @@ comes from. Each `--run` matches a saved run's readings as the invoices of
 the same cases, which is where the end-to-end rows come from. It prints and
 writes nothing.
 
+`docmatch reproduce docile` rebuilds that per-type table and compares it,
+exactly, with the docile half of `benchmark/matching.json`, which is how a
+reader checks the README's table; `docmatch reproduce synthetic` does the same
+over the committed fixture, which is the smoke check CI runs.
+`--write` writes the computed table as the half instead, on a clean commit.
+
 `docmatch resolve` builds the catalog from the train labels, rebuilds it in
 Postgres, sends every query through every arm and scores the answers, which
 is where the resolution table comes from, and prints the operating threshold
@@ -67,7 +73,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import get_args
 
-from docmatch import regression
+from docmatch import regression, reproduce
 from docmatch.docile.annotation import Annotation, FieldExtraction
 from docmatch.docile.dataset import DatasetNotFoundError, DocileDataset, DocileError
 from docmatch.evals import corpus, manifest, public
@@ -119,9 +125,7 @@ from docmatch.extraction.run import (
 from docmatch.matching import floors
 from docmatch.matching.generator import (
     BANDED_TYPES,
-    INJECTED_TYPES,
     GeneratorError,
-    documents_carrying,
     generate,
 )
 from docmatch.matching.matcher import DiscrepancyType
@@ -156,6 +160,7 @@ from docmatch.pipeline.routing import P0
 from docmatch.pipeline.saved import LOOP_FILE, LoopRun, LoopRunError, read_loop_run
 from docmatch.pipeline.store import open_schema
 from docmatch.regression import RegressionError
+from docmatch.reproduce import ReproduceError
 from docmatch.resolution import run as resolution
 from docmatch.resolution import sweep as resolution_sweep
 from docmatch.resolution.catalog import (
@@ -540,6 +545,37 @@ def main(argv: Sequence[str] | None = None) -> int:
             "end-to-end row, and it can be given more than once"
         ),
     )
+    reproducing = subcommands.add_parser(
+        "reproduce",
+        parents=[dataset],
+        help=(
+            "regenerate the matching per-type table and compare it, exactly, "
+            "with the committed one"
+        ),
+    )
+    reproducing.add_argument(
+        "half",
+        choices=reproduce.HALVES,
+        help=(
+            "docile for the README's table over the downloaded labels, "
+            "synthetic for the smoke check over the committed fixture "
+            "(its default data directory)"
+        ),
+    )
+    reproducing.add_argument(
+        "--tables",
+        type=Path,
+        default=reproduce.TABLES,
+        help=f"the committed per-type tables (default: {reproduce.TABLES})",
+    )
+    reproducing.add_argument(
+        "--write",
+        action="store_true",
+        help=(
+            "write the computed table as this half, on the current commit, "
+            "instead of comparing; the engine code must be committed"
+        ),
+    )
     resolving = subcommands.add_parser(
         "resolve",
         parents=[dataset],
@@ -894,6 +930,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         LoopRunError,
         CorrectionsError,
         RegressionError,
+        ReproduceError,
     ) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
@@ -918,6 +955,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
         return _corrections(arguments)
     if arguments.command == "regression":
         return _regression(arguments)
+    if arguments.command == "reproduce":
+        return _reproduce(arguments)
     dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
     if arguments.command == "serve":
         return _serve(arguments, dataset)
@@ -1626,7 +1665,7 @@ def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, 
         render_match(
             arguments.manifest,
             pairing_floors,
-            Scored(pool, score_matched(generate(pool.seeds))),
+            Scored(pool, reproduce.table_of(pool)),
             Scored(control_pool, score_matched(cases)),
             [EndToEnd(run, score_read(cases, _readings(run))) for run in runs],
         ),
@@ -1707,9 +1746,7 @@ def render_match(
         ),
         *_floor_costs(rows),
         "",
-        f"Per-type table, over cases from {' and '.join(SPLITS)}",
-        *_per_type(per_type),
-        *_rows(("clean-case false-positive rate", _clean_rate(per_type.table))),
+        *_per_type_table(per_type),
         "",
         "Diagnostic table, over the same cases",
         *_diagnostic(per_type.table),
@@ -1772,20 +1809,30 @@ def _end_to_end(where: tuple[str, str], scored: Scored) -> list[str]:
     ]
 
 
+def _per_type_table(scored: Scored) -> list[str]:
+    """The per-type table under its heading, with the clean-case rate: the
+    block the README's table is copied from and `reproduce` compares."""
+    return [
+        f"Per-type table, over cases from {' and '.join(SPLITS)}",
+        *_per_type(scored),
+        *_rows(("clean-case false-positive rate", _clean_rate(scored.table))),
+    ]
+
+
 def _per_type(scored: Scored, indicative: Sequence[DiscrepancyType] = ()) -> list[str]:
     """Precision, recall and n per injected type, with the documents carrying it."""
-    rows = [each for each in scored.table.per_type if each.type in INJECTED_TYPES]
+    cells = reproduce.per_type_cells(scored.pool, scored.table)
     return _table(
         ("type", "precision", "recall", "n", "documents"),
         [
             (
-                f"{each.type}, indicative" if each.type in indicative else each.type,
+                f"{type_}, indicative" if type_ in indicative else type_,
                 f"{each.precision:.3f}",
                 f"{each.recall:.3f}",
                 str(each.n),
-                str(documents_carrying(scored.pool.seeds, each.type)),
+                str(each.documents),
             )
-            for each in rows
+            for type_, each in cells.items()
         ],
     )
 
@@ -1837,6 +1884,72 @@ def _diagnostic(table: Table) -> list[str]:
 
 def _clean_rate(table: Table) -> str:
     return f"{table.clean_false_positive_rate:.3f} of {table.clean_cases} cases"
+
+
+def _reproduce(arguments: argparse.Namespace) -> tuple[str, int]:
+    """The per-type table over one half's labels against the committed half;
+    exit 1 on any cell that differs. With `--write`, the table becomes the
+    half, on the current commit, which must hold the engine code."""
+    half: reproduce.HalfName = arguments.half
+    path: Path = arguments.tables
+    given = arguments.data_dir
+    if given is None and half == "synthetic":
+        given = reproduce.FIXTURE
+    dataset = DocileDataset(resolve_data_dir(given))
+    if arguments.write:
+        repo = regression.root(SOURCE)
+        uncommitted = regression.dirty_paths(repo, reproduce.engine_path)
+        if uncommitted:
+            raise ReproduceError(
+                "the engine code has uncommitted changes, so no commit is where "
+                f"this table came from: {', '.join(uncommitted)}"
+            )
+        pool, table = reproduce.measure(dataset)
+        written = reproduce.half_of(pool, table, regression.commit_of(repo))
+        reproduce.write_half(path, half, written)
+        return render_reproduce(
+            Scored(pool, table), _produced(f"Wrote the {half} half to {path}", written)
+        ), 0
+    tables = reproduce.read_tables(path)
+    if half not in tables:
+        raise ReproduceError(
+            f"{path} has no {half} half; write it with "
+            f"`docmatch reproduce {half} --write`"
+        )
+    committed = tables[half]
+    pool, table = reproduce.measure(dataset)
+    differences = reproduce.compare(
+        committed, reproduce.half_of(pool, table, committed.produced_on)
+    )
+    if not differences:
+        verdict = f"Matches the README: every cell equals the {half} half of {path}"
+        return render_reproduce(Scored(pool, table), _produced(verdict, committed)), 0
+    verdict = _produced(f"Differs from the {half} half of {path}", committed)
+    return render_reproduce(
+        Scored(pool, table),
+        f"{verdict}, in {len(differences)} cells",
+        *_table(
+            ("cell", "committed", "computed"),
+            [
+                (each.cell, _cell(each.committed), _cell(each.computed))
+                for each in differences
+            ],
+        ),
+    ), 1
+
+
+def render_reproduce(scored: Scored, *verdict: str) -> str:
+    """The per-type table, then what became of it."""
+    return "\n".join([*_per_type_table(scored), "", *verdict, ""])
+
+
+def _produced(verdict: str, half: reproduce.Half) -> str:
+    return f"{verdict}, produced at {half.produced_on[:7]} with seed {half.seed}"
+
+
+def _cell(value: reproduce.Value) -> str:
+    """A cell at full precision: the comparison is exact, so the print is too."""
+    return repr(value) if isinstance(value, float) else str(value)
 
 
 def _resolve(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
@@ -2052,7 +2165,7 @@ def _sweep(sweep: resolution_sweep.Sweep, what: str) -> list[str]:
     ]
 
 
-def _operating(operating: resolution.Operating) -> list[str]:
+def _operating(operating: resolution.OperatingThreshold) -> list[str]:
     """The operating threshold the loop runs at beside the procedure's value
     on the development slice, the pairing-floor pattern (#151)."""
     procedure = operating.procedure
