@@ -215,6 +215,8 @@ class Demand:
 
 
 def demanded(changed: Iterable[str]) -> Demand:
+    """What a change to these paths owes: which backends re-extract, and
+    whether scoring is re-run."""
     paths = tuple(changed)
     return Demand(
         re_extract=frozenset(
@@ -280,6 +282,7 @@ AGGREGATE_FORMAT = TypeAdapter(Aggregate)
 
 
 def read_aggregate(text: str) -> Aggregate:
+    """The committed aggregate in `text`; a malformed one is a RegressionError."""
     try:
         return AGGREGATE_FORMAT.validate_json(text)
     except ValidationError as error:
@@ -416,6 +419,7 @@ class Verdict:
 
     @property
     def passed(self) -> bool:
+        """Fresh, and either no regression or one accepted with a reason."""
         return not self.stale and (not self.regressions or self.accepted)
 
 
@@ -574,10 +578,12 @@ def root(where: Path) -> Path:
 
 
 def commit_of(repo: Path, revision: str = "HEAD") -> str:
+    """The full commit hash the revision names in the repository."""
     return _git(repo, "rev-parse", "--verify", f"{revision}^{{commit}}").strip()
 
 
 def merge_base(repo: Path, one: str, other: str) -> str:
+    """The commit two revisions last share."""
     return _git(repo, "merge-base", one, other).strip()
 
 

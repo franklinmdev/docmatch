@@ -114,6 +114,7 @@ def test_resolution_never_routes_a_line_with_no_entry(
         client, pdf(tmp_path, "eval0005"), case_text(ordered("eval0005"))
     )
 
+    # Resolves every line out of catalog with a score of zero.
     def nowhere(_: str) -> Resolved:
         return Resolved(sku=None, score=0.0)
 
@@ -137,6 +138,8 @@ def test_the_match_result_is_the_same_with_and_without_resolution(
     invoice = pdf(tmp_path, "eval0005")
     case = case_text(ordered("eval0005", billed_above=True))
 
+    # The hybrid answered nothing: no SKU and no score, unlike the zero score
+    # of the resolver in the test above.
     def nowhere(_: str) -> Resolved:
         return Resolved(sku=None, score=None)
 
