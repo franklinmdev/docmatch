@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS documents (
     taken_at timestamptz,
     lapses jsonb NOT NULL DEFAULT '{}'
 );
+-- Kept apart from the CREATE so a schema made before edits existed gains it.
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS rerun jsonb;
 CREATE TABLE IF NOT EXISTS transitions (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
