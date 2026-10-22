@@ -2,7 +2,7 @@
 
 **Document reconciliation engine.** docmatch extracts invoices and receipts with vision language models, validates them with deterministic gates, matches them against purchase orders and receiving records, routes exceptions to human review, and measures every change against a labeled benchmark in CI.
 
-> **Status:** phases 0 to 4 are done: their numbers are in the Benchmarks section with the commits that produced them, three extraction rows, the calibration table, the gate ablation, the matching table and its end-to-end rows, the entity resolution table with the verdict on the reranker, and the pipeline end to end with its routing ladder; the CI regression gate guards F1 on every pull request. Phase 5, packaging, is next. The remaining tables fill in as phases complete, and a phase is not done until its number is here.
+> **Status:** phases 0 to 5 are done: a reader can reproduce the matching per-type table from a clean checkout with `docmatch reproduce`, which compares every cell with the copy produced at [`ed897e3`](https://github.com/franklinmdev/docmatch/commit/ed897e3), and a clean clone was checked end to end. Phases 0 to 4's numbers are in the Benchmarks section with the commits that produced them, three extraction rows, the calibration table, the gate ablation, the matching table and its end-to-end rows, the entity resolution table with the verdict on the reranker, and the pipeline end to end with its routing ladder; the CI regression gate guards F1 on every pull request. Phase 5's number is this README: the [results summary](#results-at-a-glance), [Reproduce a row](#reproduce-a-row), the [failure analysis](#failure-analysis-error-classes) and [the demo](#the-demo).
 
 ## Results at a glance
 
@@ -778,13 +778,14 @@ uv run docmatch failures --run data/runs/gemini --run data/runs/azure --run data
 - **Regional private sets:** real documents with personal data. Never committed. Only aggregate numbers appear in this README.
 - **Corrections from review:** exported from Postgres to the ignored `data/corrections/` and scored against a run in their own eval section, beside how often the reviewer agrees with the DocILE label, never in the fixed subset's F1.
 
-**Getting DocILE.** Request a token at https://docile.rossum.ai/. The form returns it immediately; there is no approval wait. Put it in `.env` as `DOCILE_TOKEN` (see `.env.example`), then download the annotated subset, 1.14 GB, into the gitignored `data/`:
+**Getting DocILE.** Request a token at https://docile.rossum.ai/. The form returns it immediately; there is no approval wait. Export it in your shell as `DOCILE_TOKEN` (a shell does not read `.env`, which is for the engine's own commands; see `.env.example`), then download the annotated subset, 1.14 GB, and unzip it into the gitignored `data/docile`, where every command expects it, with upstream's script:
 
 ```bash
-curl -O "https://docile-dataset-rossum.s3.eu-west-1.amazonaws.com/$DOCILE_TOKEN/annotated-trainval.zip"
+curl -O https://raw.githubusercontent.com/rossumai/docile/main/download_dataset.sh
+bash download_dataset.sh "$DOCILE_TOKEN" annotated-trainval data/docile --unzip
 ```
 
-Upstream's `download_dataset.sh` does the same thing. Note that its `--help` names this subset `labeled-trainval`, which 404s; `annotated-trainval` is the working name.
+The script's `--help` names this subset `labeled-trainval`, which 404s; `annotated-trainval` is the working name. [Reproduce a row](#reproduce-a-row) uses the same two commands.
 
 ## Reproduce a row
 
