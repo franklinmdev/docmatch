@@ -1516,19 +1516,34 @@ def _error_classes(name: str, errors: Errors, scored: SubsetScore) -> list[str]:
     return [
         f"Error classes, {name}, over {len(scored.documents)} pinned documents",
         "",
-        *_class_table("header value", [(kind, header[kind]) for kind in VALUE_CLASSES]),
+        *_class_table(
+            "header value",
+            [
+                (kind, header[kind], errors.header_documents[kind])
+                for kind in VALUE_CLASSES
+            ],
+        ),
         f"  field F1 counts {scored.fields.false_negatives} false negatives and "
         f"{scored.fields.false_positives} false positives",
         "",
-        *_class_table("row", [(kind, errors.rows[kind]) for kind in ROW_CLASSES]),
+        *_class_table(
+            "row",
+            [
+                (kind, errors.rows[kind], errors.row_documents[kind])
+                for kind in ROW_CLASSES
+            ],
+        ),
         f"  line-item F1 counts {scored.line_items.false_negatives} false "
         f"negatives and {scored.line_items.false_positives} false positives",
         "",
         *_table(
-            ("cell of a wrong row", "count"),
+            ("cell of a wrong row", "count", "documents"),
             [
-                *((kind, str(cells[kind])) for kind in VALUE_CLASSES),
-                ("total", str(sum(cells.values()))),
+                *(
+                    (kind, str(cells[kind]), str(errors.cell_documents[kind]))
+                    for kind in VALUE_CLASSES
+                ),
+                ("total", str(sum(cells.values())), ""),
             ],
         ),
         f"  {errors.one_cell_off} of {wrong_rows} wrong rows are off by one cell",
@@ -1541,26 +1556,30 @@ def _error_classes(name: str, errors: Errors, scored: SubsetScore) -> list[str]:
     ]
 
 
-def _class_table(what: str, counted: Sequence[tuple[str, int]]) -> list[str]:
-    """Each class with what it takes from recall and precision, then totals."""
+def _class_table(what: str, counted: Sequence[tuple[str, int, int]]) -> list[str]:
+    """Each class with its documents and what it takes from recall and
+    precision, then totals; documents have no total, one can carry several
+    classes."""
     rows = [
         (
             kind,
             str(count),
+            str(documents),
             str(false_negatives(kind) * count),
             str(false_positives(kind) * count),
         )
-        for kind, count in counted
+        for kind, count, documents in counted
     ]
     return _table(
-        (what, "count", "false negatives", "false positives"),
+        (what, "count", "documents", "false negatives", "false positives"),
         [
             *rows,
             (
                 "total",
                 str(sum(int(row[1]) for row in rows)),
-                str(sum(int(row[2]) for row in rows)),
+                "",
                 str(sum(int(row[3]) for row in rows)),
+                str(sum(int(row[4]) for row in rows)),
             ),
         ],
     )

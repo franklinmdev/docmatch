@@ -48,6 +48,8 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from docmatch.evals.run import DocumentScore, SubsetScore
+from docmatch.extraction.derived import DERIVED_FIELDTYPES
+from docmatch.extraction.schema import CELL_FIELDTYPES, HEADER_FIELDTYPES
 from docmatch.metrics.fields import FieldScore
 from docmatch.metrics.line_items import LineItemScore
 from docmatch.metrics.normalization import DATE_FIELDTYPES
@@ -81,6 +83,21 @@ NET_FOR_GROSS: tuple[tuple[str, str], ...] = (
 may file one amount under."""
 
 
+KNOWN_FIELDTYPES: frozenset[str] = frozenset(
+    (*HEADER_FIELDTYPES, *CELL_FIELDTYPES, *DERIVED_FIELDTYPES)
+)
+"""The fieldtypes the schema asks for and the one code derives. A saved
+reading's keys are arbitrary strings, so only these are ever printed."""
+
+OTHER_FIELDTYPE = "other fieldtype"
+"""The one bucket every key outside the known set is counted under."""
+
+
+def printable(fieldtype: str) -> str:
+    """The fieldtype itself when the schema knows it, else the fixed bucket."""
+    return fieldtype if fieldtype in KNOWN_FIELDTYPES else OTHER_FIELDTYPE
+
+
 def false_negatives(kind: str) -> int:
     """What one error of this class takes from recall."""
     return 0 if kind in ("spurious", "spurious row") else 1
@@ -97,13 +114,17 @@ class Errors:
 
     `header` and `cells` are keyed by class and fieldtype, `rows` by class.
     `cells` covers wrong rows only, and `one_cell_off` counts the wrong rows
-    whose cell classes add up to a single error.
+    whose cell classes add up to a single error. The three `_documents`
+    counters give, per class, the documents with at least one error of it.
     """
 
     header: Counter[tuple[ValueClass, str]] = field(default_factory=Counter)
     rows: Counter[RowClass] = field(default_factory=Counter)
     cells: Counter[tuple[ValueClass, str]] = field(default_factory=Counter)
     one_cell_off: int = 0
+    header_documents: Counter[ValueClass] = field(default_factory=Counter)
+    row_documents: Counter[RowClass] = field(default_factory=Counter)
+    cell_documents: Counter[ValueClass] = field(default_factory=Counter)
 
     def __add__(self, other: "Errors") -> "Errors":
         return Errors(
@@ -111,6 +132,9 @@ class Errors:
             rows=self.rows + other.rows,
             cells=self.cells + other.cells,
             one_cell_off=self.one_cell_off + other.one_cell_off,
+            header_documents=self.header_documents + other.header_documents,
+            row_documents=self.row_documents + other.row_documents,
+            cell_documents=self.cell_documents + other.cell_documents,
         )
 
     def header_by_class(self) -> Counter[ValueClass]:
@@ -125,6 +149,11 @@ def _by_class(counted: Counter[tuple[ValueClass, str]]) -> Counter[ValueClass]:
     for (kind, _), count in counted.items():
         totals[kind] += count
     return totals
+
+
+def _present[K](counted: Counter[K]) -> Counter[K]:
+    """One document's classes that occur at all, each once."""
+    return Counter({kind: 1 for kind, count in counted.items() if count > 0})
 
 
 def classify(fields: FieldScore, line_items: LineItemScore) -> Errors:
@@ -147,11 +176,15 @@ def classify(fields: FieldScore, line_items: LineItemScore) -> Errors:
             "spurious row": sum(1 for row in line_items.rows if row.labeled is None),
         }
     )
+    header = classify_values(fields)
     return Errors(
-        header=classify_values(fields),
+        header=header,
         rows=+rows,
         cells=cells,
         one_cell_off=one_cell_off,
+        header_documents=_present(_by_class(header)),
+        row_documents=_present(+rows),
+        cell_documents=_present(_by_class(cells)),
     )
 
 
@@ -169,9 +202,10 @@ def classify_values(score: FieldScore) -> Counter[tuple[ValueClass, str]]:
             len(spurious.get(fieldtype, ())),
         )
         swapped = min(unread, unlabeled)
-        found[_wrong(fieldtype), fieldtype] += swapped
-        found["missing", fieldtype] += unread - swapped
-        found["spurious", fieldtype] += unlabeled - swapped
+        shown = printable(fieldtype)
+        found[_wrong(fieldtype), shown] += swapped
+        found["missing", shown] += unread - swapped
+        found["spurious", shown] += unlabeled - swapped
     return +found
 
 

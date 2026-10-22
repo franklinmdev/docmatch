@@ -6,6 +6,7 @@ and a spurious cell, are tested with one cell of a reading or a label moved,
 so every class is still decided against the fixture's own documents.
 """
 
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from docmatch.evals.failures import (
     classify,
     classify_document,
     classify_subset,
+    false_negatives,
     ranked,
     totals,
 )
@@ -235,3 +237,47 @@ def test_ranks_by_count_then_class_then_fieldtype(run: SubsetScore) -> None:
         ("missing", "amount_total_gross", 2),
         ("wrong", "document_id", 1),
     ]
+
+
+def test_documents_per_class_count_each_document_once(run: SubsetScore) -> None:
+    found = classify_subset(run)
+
+    assert found.header_documents == {
+        "missing": 2,
+        "spurious": 2,
+        "wrong": 1,
+        "misread date": 2,
+    }
+    assert found.row_documents == {"wrong row": 2, "missing row": 1, "spurious row": 1}
+    assert found.cell_documents == {"wrong": 1, "missing": 1}
+
+
+def test_cell_classes_add_back_up_to_the_evals_cell_counts_of_wrong_rows(
+    run: SubsetScore,
+) -> None:
+    """The eval's per-cell counts (`CellAccuracy`) cover every row, and the
+    cell classes only the cells of wrong rows, so they cannot be equal over a
+    whole table: a missing row's cells are labeled-and-unread to the eval and
+    belong to the row class here. What holds is the relation over the wrong
+    rows alone: per fieldtype the labeled cells not read right are exactly
+    the cell classes' false negatives, and the unlabeled cells read are the
+    false positives in total. Per fieldtype the false positives can differ,
+    because a net for gross cell is spurious on the net fieldtype to the eval
+    and counted on the gross fieldtype here."""
+    found = classify_subset(run)
+    not_right: Counter[str] = Counter()  # labeled cells not read right
+    unlabeled = 0
+    for each in run.documents:
+        for row in each.line_items.rows:
+            if row.labeled is None or row.predicted is None or row.is_correct:
+                continue
+            for cell in row.cells.per_fieldtype:
+                not_right[cell.fieldtype] += len(cell.missing)
+                unlabeled += len(cell.spurious)
+
+    negatives: Counter[str] = Counter()
+    for (kind, fieldtype), count in found.cells.items():
+        negatives[fieldtype] += false_negatives(kind) * count
+
+    assert +negatives == +not_right
+    assert totals(found.cells_by_class().items())[1] == unlabeled

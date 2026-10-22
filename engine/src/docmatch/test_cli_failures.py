@@ -7,6 +7,7 @@ in one place.
 
 import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -34,31 +35,31 @@ EXPECTED_FAILURES_OUTPUT = "\n".join(
     [
         "Error classes, gemini synthetic-001, over 5 pinned documents",
         "",
-        "  header value   count  false negatives  false positives",
-        "  net for gross      0                0                0",
-        "  gross for net      0                0                0",
-        "  misread date       2                2                2",
-        "  wrong              1                1                1",
-        "  missing            5                5                0",
-        "  spurious           2                0                2",
-        "  total             10                8                5",
+        "  header value   count  documents  false negatives  false positives",
+        "  net for gross      0          0                0                0",
+        "  gross for net      0          0                0                0",
+        "  misread date       2          2                2                2",
+        "  wrong              1          1                1                1",
+        "  missing            5          2                5                0",
+        "  spurious           2          2                0                2",
+        "  total             10                           8                5",
         "  field F1 counts 8 false negatives and 5 false positives",
         "",
-        "  row           count  false negatives  false positives",
-        "  wrong row         2                2                2",
-        "  missing row       1                1                0",
-        "  spurious row      1                0                1",
-        "  total             4                3                3",
+        "  row           count  documents  false negatives  false positives",
+        "  wrong row         2          2                2                2",
+        "  missing row       1          1                1                0",
+        "  spurious row      1          1                0                1",
+        "  total             4                           3                3",
         "  line-item F1 counts 3 false negatives and 3 false positives",
         "",
-        "  cell of a wrong row  count",
-        "  net for gross            0",
-        "  gross for net            0",
-        "  misread date             0",
-        "  wrong                    1",
-        "  missing                  1",
-        "  spurious                 0",
-        "  total                    2",
+        "  cell of a wrong row  count  documents",
+        "  net for gross            0          0",
+        "  gross for net            0          0",
+        "  misread date             0          0",
+        "  wrong                    1          1",
+        "  missing                  1          1",
+        "  spurious                 0          0",
+        "  total                    2           ",
         "  2 of 2 wrong rows are off by one cell",
         "",
         "Header values by class and fieldtype, most first",
@@ -128,7 +129,7 @@ ALLOWED_WORDS = {
         """error classes gemini synthetic over pinned documents header value
         count false negatives positives total field counts and row line item
         cell of a wrong rows are off by one class fieldtype values most first
-        cells""",
+        cells documents""",
     ),
 }
 
@@ -248,3 +249,25 @@ def test_failures_refuses_a_run_over_another_subset(
 
     assert exit_code == 1
     assert "is not the pinned subset" in capsys.readouterr().err
+
+
+def test_failures_leaves_an_unknown_fieldtype_out_of_the_report(
+    synthetic_subset: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A saved reading's keys are arbitrary strings, so one the schema does not
+    know is counted under one fixed bucket and its text never printed."""
+    stray = "secret_key_from_a_reading"
+    predictions = json.loads((synthetic_subset / "predictions.json").read_text("utf-8"))
+    reading = predictions["eval0004"]
+    reading["fields"][stray] = "x"
+    reading["line_items"][0][stray + "_cell"] = "y"
+    shutil.copytree(synthetic_subset, tmp_path / "data")
+    (tmp_path / "data" / "predictions.json").write_text(
+        json.dumps(predictions), encoding="utf-8"
+    )
+
+    main(failures(tmp_path / "data", "--run", str(tmp_path / "data")))
+    out = capsys.readouterr().out
+
+    assert "secret" not in out
+    assert "spurious, other fieldtype" in out
