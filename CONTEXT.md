@@ -33,8 +33,12 @@ How well confidence predicts correctness: of the values a backend read at a give
 _Avoid_: accuracy (on its own), reliability
 
 **Gate**:
-The deterministic rules a reading must not break: its totals agree and its dates are in order. A reading passes when at least one rule could be checked and none failed, fails when any rule failed, and is not checked when no rule could be. A reading that fails is kept and scored as is.
+The deterministic rules a reading must not break: its totals agree and its dates are in order, plus the rules of its region. A rule belongs to the gate only when the labels pass it. A reading passes when at least one rule could be checked and none failed, fails when any rule failed, and is not checked when no rule could be. A reading that fails is kept and scored as is.
 _Avoid_: validation (on its own), filter, guardrail
+
+**Region**:
+The tax jurisdiction a benchmark set's documents belong to, declared once by the set and carried by every run of it. It chooses which rules the gate adds and which reporting format an export writes. A set that declares none is neutral, and only the neutral rules apply.
+_Avoid_: locale, country (on its own), market
 
 **Gate ablation**:
 The comparison of what the gate and confidence each catch among readings whose gated values are wrong, so the gate is judged only on errors it could see.
