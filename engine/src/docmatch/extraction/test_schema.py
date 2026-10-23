@@ -3,8 +3,11 @@
 from docmatch.extraction.schema import (
     CELL_FIELDTYPES,
     HEADER_FIELDTYPES,
+    REGIONAL_FIELDTYPES,
+    Comprobante,
     Invoice,
     LineItem,
+    asked,
 )
 
 KILE = {
@@ -71,6 +74,17 @@ LIR = {
 """The 19 LIR fieldtypes, likewise."""
 
 
+REGIONAL = {
+    "amount_tip",
+    "amount_tax_selective",
+    "amount_tax_other",
+    "document_id_modified",
+    "amount_retention_itbis",
+    "amount_retention_isr",
+}
+"""The six fieldtypes a comprobante or the 606 carries and DocILE lacks (#225)."""
+
+
 def test_asks_for_every_fieldtype_the_labels_use() -> None:
     """A fieldtype the schema omits cannot be predicted, so it scores as a miss.
 
@@ -78,8 +92,27 @@ def test_asks_for_every_fieldtype_the_labels_use() -> None:
     here means a schema that drifts from the labels fails a test instead of
     quietly losing recall on whatever it dropped.
     """
-    assert set(HEADER_FIELDTYPES) == KILE
+    assert set(HEADER_FIELDTYPES) == KILE | REGIONAL
     assert set(CELL_FIELDTYPES) == LIR
+
+
+def test_names_the_regional_fieldtypes_it_asks_for_beyond_docile() -> None:
+    assert set(REGIONAL_FIELDTYPES) == REGIONAL
+
+
+def test_a_docile_invoice_asks_for_none_of_the_regional_fieldtypes() -> None:
+    """DocILE's request stays what it was before regions, so its numbers do."""
+    assert set(Invoice.model_json_schema()["properties"]) == KILE | {"line_items"}
+
+
+def test_a_comprobante_asks_for_docile_s_fieldtypes_and_the_six() -> None:
+    asks = set(Comprobante.model_json_schema()["properties"])
+    assert asks == KILE | REGIONAL | {"line_items"}
+
+
+def test_the_region_picks_what_is_asked_for() -> None:
+    assert asked(None) is Invoice
+    assert asked("do") is Comprobante
 
 
 def test_a_header_field_carries_every_value_and_a_cell_carries_one() -> None:
@@ -131,3 +164,17 @@ def test_a_reading_of_nothing_is_a_prediction_of_nothing() -> None:
 
     assert prediction.fields == {}
     assert prediction.line_items == ()
+
+
+def test_a_reading_of_a_regional_fieldtype_reaches_the_prediction() -> None:
+    reading = Comprobante(
+        amount_tip=["10%: 250.00"],
+        document_id_modified=["B0100000417"],
+        amount_retention_isr=["100.00"],
+    )
+
+    assert reading.prediction().fields == {
+        "amount_tip": ["10%: 250.00"],
+        "document_id_modified": ["B0100000417"],
+        "amount_retention_isr": ["100.00"],
+    }

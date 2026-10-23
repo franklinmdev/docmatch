@@ -27,7 +27,10 @@ from docmatch.evals.run import read_predictions, score_subset
 from docmatch.extraction import gemini
 from docmatch.extraction.conftest import write_pdf
 from docmatch.extraction.extractor import Confidence, Usage
+from docmatch.extraction.gemini import GeminiExtractor
 from docmatch.extraction.run import DocumentRun, Run
+from docmatch.extraction.schema import REGIONAL_FIELDTYPES
+from docmatch.extraction.test_gemini import FakeInteractions, answer
 from docmatch.extraction.test_run import READING, FakeExtractor, a_subset
 from docmatch.metrics.fields import Prediction
 from docmatch.metrics.line_items import labeled_line_items
@@ -3161,6 +3164,76 @@ def test_extract_reads_a_regional_set_from_its_own_directory_and_records_its_reg
     capsys.readouterr()
     assert main(evaluate_regional_run(out)) == 0
     assert "Regional set" in capsys.readouterr().out
+
+
+def test_extract_asks_for_a_comprobante_on_a_dominican_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The six fieldtypes DocILE lacks are asked for on a set of region `do`
+    and nowhere else, so DocILE's request is unchanged (#225)."""
+    interactions = FakeInteractions(answers=[answer('{"amount_tip": ["70.00"]}')])
+    monkeypatch.setattr(
+        gemini,
+        "extractor",
+        lambda model, long_edge: GeminiExtractor(interactions=interactions),
+    )
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(tmp_path / "run"),
+            "--manifest",
+            str(REGIONAL / "do" / "manifest.json"),
+            "--data-dir",
+            str(tmp_path / "nothing"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert interactions.calls
+    for call in interactions.calls:
+        asked = call["response_format"]["schema"]["properties"]
+        assert set(REGIONAL_FIELDTYPES) <= set(asked)
+    predictions = read_predictions(tmp_path / "run" / "predictions.json")
+    assert all(
+        each.fields == {"amount_tip": ["70.00"]} for each in predictions.values()
+    )
+
+
+def test_extract_refuses_a_region_with_no_schema_before_any_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    pinned = json.loads((REGIONAL / "do" / "manifest.json").read_text())
+    pinned["region"] = "pt"
+    shutil.copytree(REGIONAL / "do", tmp_path / "pt")
+    (tmp_path / "pt" / "manifest.json").write_text(json.dumps(pinned))
+    interactions = FakeInteractions(answers=[answer("{}")])
+    monkeypatch.setattr(
+        gemini,
+        "extractor",
+        lambda model, long_edge: GeminiExtractor(interactions=interactions),
+    )
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(tmp_path / "run"),
+            "--manifest",
+            str(tmp_path / "pt" / "manifest.json"),
+            "--data-dir",
+            str(tmp_path / "nothing"),
+        ]
+    )
+
+    assert exit_code == 1
+    assert capsys.readouterr().err == (
+        "docmatch: no schema is written down for region pt\n"
+    )
+    assert interactions.calls == []
 
 
 def test_extract_refuses_a_regional_image_whose_digest_differs_before_any_request(

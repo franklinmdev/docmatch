@@ -2,7 +2,7 @@
 
 import base64
 import io
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +19,7 @@ from docmatch.extraction.conftest import write_pdf
 from docmatch.extraction.extractor import Document, ExtractionError
 from docmatch.extraction.gemini import INSTRUCTION
 from docmatch.extraction.openai import KEY_VARIABLE, TIMEOUT, OpenAIExtractor
+from docmatch.extraction.schema import REGIONAL_FIELDTYPES, Comprobante
 
 
 def a_document(tmp_path: Path, *, pages: int = 1) -> Document:
@@ -374,3 +375,51 @@ def test_a_copy_that_cannot_be_rendered_is_not_worth_retrying(
 
     assert not raised.value.retryable
     assert calls.calls == []
+
+
+def regional(*answers: object) -> tuple[OpenAIExtractor, FakeResponses]:
+    """A backend reading a Dominican set, asked for a comprobante."""
+    reading, calls = extractor(*answers)
+    return replace(reading, asks=Comprobante), calls
+
+
+def test_a_docile_reading_is_not_asked_for_the_regional_fieldtypes(
+    document: Document,
+) -> None:
+    """DocILE's request stays what it was before regions (#225)."""
+    reading, calls = extractor(answer("{}"))
+
+    reading.extract(document)
+
+    (call,) = calls.calls
+    assert set(REGIONAL_FIELDTYPES).isdisjoint(
+        call["text"]["format"]["schema"]["properties"]
+    )
+
+
+def test_a_docile_reading_refuses_a_regional_fieldtype(document: Document) -> None:
+    reading, _ = extractor(*[answer('{"amount_tip": ["250.00"]}')] * 3)
+
+    with pytest.raises(ExtractionError):
+        reading.extract(document)
+
+
+def test_reads_the_regional_fieldtypes_it_is_asked_for(document: Document) -> None:
+    reading, calls = regional(
+        answer(
+            '{"amount_tax_selective": ["12.00"], "amount_tax_other": ["3.00"],'
+            ' "amount_retention_isr": ["100.00"]}'
+        )
+    )
+
+    extracted = reading.extract(document)
+
+    (call,) = calls.calls
+    assert set(REGIONAL_FIELDTYPES) <= set(
+        call["text"]["format"]["schema"]["properties"]
+    )
+    assert extracted.prediction.fields == {
+        "amount_tax_selective": ["12.00"],
+        "amount_tax_other": ["3.00"],
+        "amount_retention_isr": ["100.00"],
+    }

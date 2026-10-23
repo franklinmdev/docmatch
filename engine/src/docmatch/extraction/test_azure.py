@@ -13,6 +13,7 @@ from docmatch.extraction import azure
 from docmatch.extraction.azure import AzureExtractor
 from docmatch.extraction.conftest import write_pdf
 from docmatch.extraction.extractor import Confidence, Document, ExtractionError, Usage
+from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 from docmatch.metrics.fields import Prediction
 
 
@@ -465,3 +466,18 @@ def test_the_client_reads_with_the_pinned_api_version_and_no_sdk_retries(
 
     assert client._config.api_version == "2024-11-30"
     assert client._config.retry_policy.total_retries == 0
+
+
+def test_maps_none_of_the_regional_fieldtypes(document: Document) -> None:
+    """The prebuilt-invoice model (2024-11-30) has no field for any of the six.
+
+    Its schema page lists no tip, selective or other tax, earlier invoice
+    reference or withholding, so the six stay absent from an Azure reading
+    rather than being filled from a field that means something else.
+    """
+    mapped = {
+        *azure.HEADER.values(),
+        *(v for row in azure.HEADER_ROWS.values() for v in row.values()),
+    }
+
+    assert mapped.isdisjoint(REGIONAL_FIELDTYPES)

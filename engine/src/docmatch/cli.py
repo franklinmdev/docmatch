@@ -69,7 +69,7 @@ import os
 import sys
 from collections import Counter
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import get_args
@@ -128,6 +128,8 @@ from docmatch.evals.run import (
 )
 from docmatch.extraction import azure, backends, gemini, pages
 from docmatch.extraction.extractor import ExtractionError, Extractor
+from docmatch.extraction.gemini import GeminiExtractor
+from docmatch.extraction.openai import OpenAIExtractor
 from docmatch.extraction.run import (
     ATTEMPTS,
     COST_CAP,
@@ -140,7 +142,7 @@ from docmatch.extraction.run import (
     write_predictions,
     write_record,
 )
-from docmatch.extraction.schema import CELL_FIELDTYPES
+from docmatch.extraction.schema import CELL_FIELDTYPES, Invoice, asked
 from docmatch.matching import floors
 from docmatch.matching.generator import (
     BANDED_TYPES,
@@ -1784,6 +1786,12 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     backend = backends.extractor(
         arguments.backend, arguments.model, long_edge=arguments.long_edge
     )
+    if pinned.region is not None:
+        try:
+            asks = asked(pinned.region)
+        except ValueError as error:
+            raise RegionalError(str(error)) from error
+        backend = _asking(backend, asks)
     reading = (
         extract_subset(
             backend,
@@ -1885,6 +1893,18 @@ def _write(extracted: Run, out: Path) -> None:
         write_currency_symbols(extracted, out / CURRENCY_SYMBOLS_FILE)
     except OSError as error:
         raise ExtractionError(f"cannot write the run to {out}: {error}") from error
+
+
+def _asking(backend: Extractor, asks: type[Invoice]) -> Extractor:
+    """The backend asked to fill in `asks` rather than DocILE's invoice (#225).
+
+    Azure's prebuilt model reads with a fixed schema of its own, so it is left
+    as it is. Done here rather than in `backends`, which every row reads: a
+    change there would owe Azure a re-extraction that cannot move it (#237).
+    """
+    if isinstance(backend, GeminiExtractor | OpenAIExtractor):
+        return replace(backend, asks=asks)
+    return backend
 
 
 def _record_region(path: Path, region: str) -> None:
