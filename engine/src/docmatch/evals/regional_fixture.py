@@ -55,8 +55,8 @@ COVERAGE = (
     "amount_total_gross",
     *REGIONAL_FIELDTYPES,
 )
-"""The fieldtypes the paper set covers: recibox's six, net, the buyer's number and
-the six DocILE lacks (#213)."""
+"""The fieldtypes the paper set covers: the six every comprobante prints, net, the
+buyer's number and the six DocILE lacks (#213)."""
 
 SCALE = 3
 """How many pixels each pixel of the bitmap font becomes."""
@@ -155,12 +155,12 @@ COMPROBANTES = (
 
 
 PRINTED = (
-    ("document_id_modified", "NCF modificado: "),
-    ("amount_tax_selective", "ISC:           "),
-    ("amount_tax_other", "Otros imp.:    "),
-    ("amount_tip", "Propina legal: "),
-    ("amount_retention_itbis", "Ret. ITBIS:   "),
-    ("amount_retention_isr", "Ret. ISR:      "),
+    ("document_id_modified", "NCF modificado:"),
+    ("amount_tax_selective", "ISC:"),
+    ("amount_tax_other", "Otros imp.:"),
+    ("amount_tip", "Propina legal:"),
+    ("amount_retention_itbis", "Ret. ITBIS:"),
+    ("amount_retention_isr", "Ret. ISR:"),
 )
 """Each regional fieldtype and the caption the drawn comprobante prints it under."""
 
@@ -181,7 +181,9 @@ def _lines(comprobante: Comprobante) -> list[str]:
         ]
     else:
         lines.append("Consumidor final")
-    printed = [f"{caption}{labels[each]}" for each, caption in PRINTED if labels[each]]
+    printed = [
+        f"{caption:<16}{labels[each]}" for each, caption in PRINTED if labels[each]
+    ]
     return [
         *lines,
         "",

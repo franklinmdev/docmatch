@@ -3,6 +3,7 @@
 from docmatch.extraction.schema import (
     CELL_FIELDTYPES,
     HEADER_FIELDTYPES,
+    REGIONAL_FIELDTYPES,
     Invoice,
     LineItem,
 )
@@ -91,6 +92,10 @@ def test_asks_for_every_fieldtype_the_labels_use() -> None:
     """
     assert set(HEADER_FIELDTYPES) == KILE | REGIONAL
     assert set(CELL_FIELDTYPES) == LIR
+
+
+def test_names_the_regional_fieldtypes_it_asks_for_beyond_docile() -> None:
+    assert set(REGIONAL_FIELDTYPES) == REGIONAL
 
 
 def test_a_header_field_carries_every_value_and_a_cell_carries_one() -> None:
