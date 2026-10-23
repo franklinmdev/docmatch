@@ -143,6 +143,7 @@ from docmatch.extraction.run import (
     write_record,
 )
 from docmatch.extraction.schema import CELL_FIELDTYPES, Invoice, asked
+from docmatch.gate import RuleAdmission
 from docmatch.matching import floors
 from docmatch.matching.generator import (
     BANDED_TYPES,
@@ -2756,6 +2757,7 @@ def render_eval(
         *_calibration(run.calibration),
         "",
         *_gate(run.gate),
+        *_admission(run.admission),
         "",
         *_ablation(run.ablation, run.gate.checked, run.sweep),
         *([] if corrected is None else ["", *_corrected(*corrected)]),
@@ -2935,6 +2937,27 @@ def _gate(totals: GateTotals) -> list[str]:
         "",
         "Unreadable",
         *_rows(*((rule, str(count)) for rule, count in totals.unreadable.items())),
+    ]
+
+
+def _admission(admission: tuple[RuleAdmission, ...]) -> list[str]:
+    """Each regional rule against the set's labels: admitted to the gate, or
+    left out because a label breaks it. Counts only, never a label's text."""
+    if not admission:
+        return []
+    return [
+        "",
+        "Regional rules, admitted when no label breaks them",
+        *_rows(
+            *(
+                (
+                    each.rule.name,
+                    f"{'admitted' if each.admitted else 'not admitted'}, "
+                    f"{each.labeled} labeled, {each.broken} broken",
+                )
+                for each in admission
+            )
+        ),
     ]
 
 

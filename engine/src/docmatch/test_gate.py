@@ -1,14 +1,17 @@
-"""Tests for the gate: the two rules a reading must not break, and its verdict.
+"""Tests for the gate: the rules a reading must not break, and its verdict.
 
 What the gate is worth against the labels is pinned in `evals/test_run.py`,
 over the synthetic corpus; these pin what each rule decides on a reading.
 """
 
+import socket
 from collections.abc import Mapping, Sequence
 
 import pytest
+from stdnum.do import ncf as stdnum_ncf
+from stdnum.do import rnc as stdnum_rnc
 
-from docmatch.gate import GateResult, RuleCheck, gate
+from docmatch.gate import GateResult, RuleCheck, admit, gate, rules_of
 
 
 def reading(**fields: str | Sequence[str]) -> Mapping[str, tuple[str, ...]]:
@@ -158,3 +161,160 @@ def test_names_the_values_every_checked_rule_used_and_no_others() -> None:
     )
 
     assert result.used == (("date_issue", "03/04/26"), ("date_due", "04/03/26"))
+
+
+# Valid made-up numbers: python-stdnum 2.2 accepts each.
+RNC = "130990018"
+CEDULA = "00113918205"
+DO = rules_of("do")
+
+
+def test_a_neutral_run_has_no_regional_rules() -> None:
+    assert rules_of(None) == ()
+    assert gate(reading(vendor_tax_id="130990010")).checks == gate(reading()).checks
+
+
+@pytest.mark.parametrize("number", [RNC, "1-30-99001-8", CEDULA, "001-1391820-5"])
+def test_an_rnc_field_passes_a_valid_rnc_or_cedula(number: str) -> None:
+    result = gate(reading(vendor_tax_id=number), DO)
+
+    assert check(result, "vendor RNC").outcome == "passed"
+
+
+@pytest.mark.parametrize(
+    "number",
+    [
+        "130990019",  # RNC check digit off by one
+        "00113918204",  # cedula Luhn off by one
+        "13099001A",  # a letter fails stdnum's compact
+        "12345",  # neither length
+    ],
+)
+def test_an_rnc_field_fails_a_number_that_is_neither(number: str) -> None:
+    result = gate(reading(customer_tax_id=number), DO)
+
+    assert check(result, "customer RNC").outcome == "failed"
+    assert result.verdict == "failed"
+
+
+def test_an_rnc_stdnum_whitelists_passes_though_its_checksum_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The list holds real taxpayers' numbers, so the test whitelists a made-up
+    one with a bad check digit rather than quote an entry."""
+    monkeypatch.setattr(stdnum_rnc, "whitelist", {*stdnum_rnc.whitelist, "130990019"})
+
+    result = gate(reading(vendor_tax_id="130990019"), DO)
+
+    assert check(result, "vendor RNC").outcome == "passed"
+
+
+@pytest.mark.parametrize(
+    "number", ["B0100000417", "E310000000052", "A020010210100000005", "b01 00000417"]
+)
+def test_an_ncf_field_passes_an_ncf_or_e_ncf_of_a_known_type(number: str) -> None:
+    assert check(gate(reading(document_id=number), DO), "NCF").outcome == "passed"
+
+
+@pytest.mark.parametrize(
+    "number",
+    ["B9900000417", "E990000000052", "Z0100000417", "B010000041", "E31000000005A"],
+)
+def test_an_ncf_field_fails_a_wrong_shape_or_type_code(number: str) -> None:
+    assert check(gate(reading(document_id=number), DO), "NCF").outcome == "failed"
+
+
+def test_the_modified_ncf_is_checked_as_an_ncf_apart_from_the_comprobantes_own() -> (
+    None
+):
+    result = gate(reading(document_id="B0400000009", document_id_modified="B77"), DO)
+
+    assert check(result, "NCF").outcome == "passed"
+    assert check(result, "modified NCF").outcome == "failed"
+
+
+def test_an_absent_value_leaves_its_regional_rule_not_checked() -> None:
+    result = gate(reading(date_issue="03/04/26"), DO)
+
+    assert [
+        each.outcome
+        for each in result.checks
+        if each.rule in {"vendor RNC", "customer RNC", "NCF", "modified NCF"}
+    ] == ["absent"] * 4
+    assert result.verdict == "not checked"
+
+
+def test_the_regional_rules_never_reach_the_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refuse(*_: object, **__: object) -> None:
+        raise AssertionError("a regional rule opened a connection")
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    for module in (stdnum_rnc, stdnum_ncf):
+        monkeypatch.setattr(module, "check_dgii", refuse)
+
+    result = gate(
+        reading(
+            vendor_tax_id=RNC,
+            customer_tax_id=CEDULA,
+            document_id="B0400000009",
+            document_id_modified="B0100000417",
+        ),
+        DO,
+    )
+
+    assert result.verdict == "passed"
+
+
+def test_every_value_of_a_listed_field_must_pass() -> None:
+    result = gate(reading(vendor_tax_id=[RNC, "130990019"]), DO)
+
+    assert check(result, "vendor RNC").outcome == "failed"
+
+
+def test_a_regional_rule_names_the_values_it_used() -> None:
+    result = gate(reading(vendor_tax_id=RNC, vendor_name="Acme"), DO)
+
+    assert result.used == (("vendor_tax_id", RNC),)
+
+
+def test_one_verdict_covers_neutral_and_regional_rules() -> None:
+    result = gate(
+        reading(date_issue="03/04/26", date_due="04/03/26", vendor_tax_id="130990019"),
+        DO,
+    )
+
+    assert check(result, "dates sane").outcome == "passed"
+    assert result.verdict == "failed"
+
+
+def test_a_rule_is_admitted_when_no_label_breaks_it() -> None:
+    labels = [reading(vendor_tax_id=RNC, document_id="B0100000417"), reading()]
+
+    admission = {each.rule.name: each for each in admit("do", labels)}
+
+    assert admission["vendor RNC"].admitted
+    assert (admission["vendor RNC"].labeled, admission["vendor RNC"].broken) == (1, 0)
+    assert admission["customer RNC"].labeled == 0
+
+
+def test_a_rule_a_label_breaks_is_not_admitted() -> None:
+    labels = [reading(vendor_tax_id=RNC), reading(vendor_tax_id="130990019")]
+
+    admission = {each.rule.name: each for each in admit("do", labels)}
+
+    assert not admission["vendor RNC"].admitted
+    assert (admission["vendor RNC"].labeled, admission["vendor RNC"].broken) == (2, 1)
+
+
+def test_a_neutral_region_admits_nothing() -> None:
+    assert admit(None, [reading(vendor_tax_id="x")]) == ()
+
+
+def test_a_rule_on_a_fieldtype_the_labels_do_not_cover_is_not_considered() -> None:
+    covered = ("vendor_tax_id", "document_id")
+
+    names = [each.rule.name for each in admit("do", [reading()], covered)]
+
+    assert names == ["vendor RNC", "NCF"]

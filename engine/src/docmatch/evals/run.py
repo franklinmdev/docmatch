@@ -80,7 +80,15 @@ from docmatch.evals.manifest import Manifest, ManifestError
 from docmatch.evals.manifest import load as load_manifest
 from docmatch.extraction.derived import DERIVED_FIELDTYPES, derived_header
 from docmatch.extraction.extractor import Confidence
-from docmatch.gate import RULES, GateResult, RuleName, gate
+from docmatch.gate import (
+    RULES,
+    GateResult,
+    RegionalRule,
+    RuleAdmission,
+    RuleName,
+    admit,
+    gate,
+)
 from docmatch.metrics.fields import (
     FieldScore,
     FieldValues,
@@ -371,6 +379,9 @@ class SubsetScore:
     """Predicted, and not in the manifest, so not in either number."""
     has_confidence: bool
     """Whether the run saved any confidence, without which there is no signal."""
+    admission: tuple[RuleAdmission, ...] = ()
+    """Each rule the set's region adds, against the set's own labels; empty for
+    a neutral set."""
 
     @property
     def fields(self) -> MicroAverage:
@@ -576,6 +587,12 @@ def score_subset(
     labels = _Docile(dataset) if isinstance(dataset, DocileDataset) else dataset
     symbols = currency_symbols or {}
     saved = confidence or {}
+    admission = admit(
+        manifest.region,
+        (labels.header(each) for each in manifest.document_ids),
+        manifest.coverage,
+    )
+    admitted = tuple(each.rule for each in admission if each.admitted)
     documents = tuple(
         _score_document(
             labels,
@@ -584,6 +601,7 @@ def score_subset(
             symbols.get(document_id, {}),
             saved.get(document_id, NO_CONFIDENCE),
             manifest.coverage,
+            admitted,
         )
         for document_id in manifest.document_ids
     )
@@ -595,6 +613,7 @@ def score_subset(
             document_id for document_id in predictions if document_id not in pinned
         ),
         has_confidence=bool(saved),
+        admission=admission,
     )
 
 
@@ -605,13 +624,14 @@ def _score_document(
     currency_symbols: Mapping[str, Sequence[str]],
     confidence: Confidence,
     coverage: tuple[str, ...] | None,
+    regional: tuple[RegionalRule, ...],
 ) -> DocumentScore:
     labeled = labels.header(document_id)
     labeled_rows = labels.rows(document_id)
     predicted = prediction is not None
     prediction = NOTHING if prediction is None else prediction
     reading = derived_header(prediction, currency_symbols)
-    gated = gate(reading)
+    gated = gate(reading, regional)
     covered, confidence = _covered(prediction, confidence, coverage)
     fields = score_fields(labeled, _only(reading, coverage))
     as_read = score_fields(labeled, covered.header)
