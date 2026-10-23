@@ -71,8 +71,34 @@ jobs:
           -c "CREATE EXTENSION IF NOT EXISTS vector"
           -c "CREATE EXTENSION IF NOT EXISTS pg_trgm"
 
+      # DGII's e-CF XSDs v1.0 of 16/10/2025, which the fixture's made-up
+      # e-CFs are validated against. They are not committed (DGII states no
+      # terms for redistributing them), so they are downloaded once and
+      # cached; the test checks each against its pinned sha256. DGII refuses
+      # curl's default user agent (#217), hence a browser's.
+      - name: Cache the e-CF XSDs
+        id: xsds
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/dgii-ecf-xsd
+          key: dgii-ecf-xsd-v1.0-2025-10-16
+
+      - name: Download the e-CF XSDs
+        if: steps.xsds.outputs.cache-hit != 'true'
+        run: |
+          base="https://dgii.gov.do/cicloContribuyente/facturacion/comprobantesFiscalesElectronicosE-CF/Documentacin%20sobre%20eCF/Documentaci%C3%B3n%20T%C3%A9cnica%20(XSD)"
+          mkdir -p ${{ runner.temp }}/dgii-ecf-xsd
+          for kind in 31 32 41 43; do
+            curl --fail --silent --show-error --location \
+              --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36" \
+              --output ${{ runner.temp }}/dgii-ecf-xsd/e${kind}.xsd \
+              "${base}/e-CF%20${kind}%20v.1.0.xsd"
+          done
+
       - name: Test
         run: uv run pytest
+        env:
+          DOCMATCH_ECF_XSDS: ${{ runner.temp }}/dgii-ecf-xsd
 
       # The eval on the committed synthetic subset: six documents in DocILE's
       # shape with predictions to match, so the whole path from manifest to
@@ -100,6 +126,15 @@ jobs:
           uv run docmatch eval
           --manifest engine/tests/evals/regional/do/manifest.json
           --predictions engine/tests/evals/regional/run/predictions.json
+
+      # The e-CF set's report: four made-up e-CFs, one of each type the
+      # parser reads, with their hand-written labels and the parser's saved
+      # run. Its F1 is parsing, not reading a page, and the report says so.
+      - name: Regional e-CF
+        run: >-
+          uv run docmatch eval
+          --manifest engine/tests/evals/regional/ecf/manifest.json
+          --predictions engine/tests/evals/regional/ecf-run/predictions.json
 
       # The matching report on the same synthetic subset: cases generated
       # from its labels at the real sizes, matched and scored, then matched
