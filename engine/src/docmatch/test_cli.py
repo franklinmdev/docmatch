@@ -3201,6 +3201,41 @@ def test_extract_asks_for_a_comprobante_on_a_dominican_set(
     )
 
 
+def test_extract_refuses_a_region_with_no_schema_before_any_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    pinned = json.loads((REGIONAL / "do" / "manifest.json").read_text())
+    pinned["region"] = "pt"
+    shutil.copytree(REGIONAL / "do", tmp_path / "pt")
+    (tmp_path / "pt" / "manifest.json").write_text(json.dumps(pinned))
+    interactions = FakeInteractions(answers=[answer("{}")])
+    monkeypatch.setattr(
+        gemini,
+        "extractor",
+        lambda model, long_edge: GeminiExtractor(interactions=interactions),
+    )
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(tmp_path / "run"),
+            "--manifest",
+            str(tmp_path / "pt" / "manifest.json"),
+            "--data-dir",
+            str(tmp_path / "nothing"),
+        ]
+    )
+
+    assert exit_code == 1
+    assert capsys.readouterr().err == (
+        "docmatch: no schema is written down for region pt\n"
+    )
+    assert interactions.calls == []
+
+
 def test_extract_refuses_a_regional_image_whose_digest_differs_before_any_request(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -1787,7 +1787,11 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
         arguments.backend, arguments.model, long_edge=arguments.long_edge
     )
     if pinned.region is not None:
-        backend = _asking(backend, asked(pinned.region))
+        try:
+            asks = asked(pinned.region)
+        except ValueError as error:
+            raise RegionalError(str(error)) from error
+        backend = _asking(backend, asks)
     reading = (
         extract_subset(
             backend,
