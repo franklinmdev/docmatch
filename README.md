@@ -1192,7 +1192,7 @@ A document with no reading, or one missing its NCF, RNC or date, fails its
 month, which gets no file; one with no readable date fails a `no month` row. A
 retention not printed is written as zero until #230 computes it at the rate in
 force. The report prints counts and reasons only, never a number or a name
-from a comprobante. CI's `Export 606` step exports the made-up set's saved
+from a comprobante. CI's `Regional` step exports the made-up set's saved
 run.
 
 ### Matching

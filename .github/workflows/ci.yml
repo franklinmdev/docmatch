@@ -120,12 +120,18 @@ jobs:
       # their labels.csv and a saved run of made-up readings, scored over the
       # fieldtypes the set covers only. A real set is the owner's, never
       # committed, and is scored locally with the same command. It only prints;
-      # pytest pins what it prints.
+      # pytest pins what it prints. Then the same run's 606, from its readings
+      # and from its labels, one file per month on each side, written to a
+      # scratch directory; pre-validating the files is a later step.
       - name: Regional
-        run: >-
-          uv run docmatch eval
-          --manifest engine/tests/evals/regional/do/manifest.json
-          --predictions engine/tests/evals/regional/run/predictions.json
+        run: |
+          uv run docmatch eval \
+            --manifest engine/tests/evals/regional/do/manifest.json \
+            --predictions engine/tests/evals/regional/run/predictions.json
+          uv run docmatch export 606 \
+            --manifest engine/tests/evals/regional/do/manifest.json \
+            --run engine/tests/evals/regional/run \
+            --out ${{ runner.temp }}/606
 
       # The e-CF set's report: four made-up e-CFs, one of each type the
       # parser reads, with their hand-written labels and the parser's saved
@@ -135,16 +141,6 @@ jobs:
           uv run docmatch eval
           --manifest engine/tests/evals/regional/ecf/manifest.json
           --predictions engine/tests/evals/regional/ecf-run/predictions.json
-
-      # The made-up set's 606, from its saved run and from its labels: one
-      # file per month on each side, written to a scratch directory. It only
-      # prints; pre-validating the files is #229's step.
-      - name: Export 606
-        run: >-
-          uv run docmatch export 606
-          --manifest engine/tests/evals/regional/do/manifest.json
-          --run engine/tests/evals/regional/run
-          --out ${{ runner.temp }}/606
 
       # The matching report on the same synthetic subset: cases generated
       # from its labels at the real sizes, matched and scored, then matched
