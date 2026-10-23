@@ -94,6 +94,7 @@ from docmatch.metrics.fields import (
     FieldValues,
     Prediction,
     PredictionError,
+    WrittenValues,
     first_problem,
     labeled_fields,
     score_fields,
@@ -104,7 +105,12 @@ from docmatch.metrics.line_items import (
     labeled_line_items,
     score_line_items,
 )
-from docmatch.metrics.normalization import normalize
+from docmatch.metrics.normalization import (
+    DATE_FIELDTYPES,
+    iso_date,
+    normalize,
+    reads_day_first,
+)
 from docmatch.metrics.score import MicroAverage, Score, micro_average, ratio
 
 PREDICTIONS_FILE = "predictions.json"
@@ -602,6 +608,7 @@ def score_subset(
             saved.get(document_id, NO_CONFIDENCE),
             manifest.coverage,
             admitted,
+            reads_day_first(manifest.region),
         )
         for document_id in manifest.document_ids
     )
@@ -625,11 +632,19 @@ def _score_document(
     confidence: Confidence,
     coverage: tuple[str, ...] | None,
     regional: tuple[RegionalRule, ...],
+    day_first: bool,
 ) -> DocumentScore:
     labeled = labels.header(document_id)
     labeled_rows = labels.rows(document_id)
     predicted = prediction is not None
     prediction = NOTHING if prediction is None else prediction
+    if day_first:
+        labeled = _iso_dates(labeled)
+        labeled_rows = tuple(_iso_dates(row) for row in labeled_rows)
+        prediction = Prediction(
+            fields=_iso_written(prediction.fields),
+            line_items=tuple(_iso_written(row) for row in prediction.line_items),
+        )
     reading = derived_header(prediction, currency_symbols)
     gated = gate(reading, regional)
     covered, confidence = _covered(prediction, confidence, coverage)
@@ -648,6 +663,31 @@ def _score_document(
         cells=judge_cells(covered.line_items, confidence, line_items),
         gated_confidence=gated_confidence(prediction.fields, confidence, gated),
     )
+
+
+def _iso_dates(values: FieldValues) -> FieldValues:
+    """A day-first set's values with every date that reads as `YYYY-MM-DD`, so
+    the gate, the scorer and the judges, all month first, read it as one day."""
+    return {
+        key: tuple(iso_date(each, day_first=True) for each in texts)
+        if key in DATE_FIELDTYPES
+        else texts
+        for key, texts in values.items()
+    }
+
+
+def _iso_written(values: WrittenValues) -> WrittenValues:
+    """`_iso_dates` over a reading as written: one text, a list, or null."""
+    return {
+        key: _iso_value(written) if key in DATE_FIELDTYPES else written
+        for key, written in values.items()
+    }
+
+
+def _iso_value(written: str | list[str] | None) -> str | list[str] | None:
+    if isinstance(written, list):
+        return [iso_date(each, day_first=True) for each in written]
+    return written if written is None else iso_date(written, day_first=True)
 
 
 def _only(values: FieldValues, coverage: tuple[str, ...] | None) -> FieldValues:
