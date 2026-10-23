@@ -27,8 +27,10 @@ from docmatch.evals.run import read_predictions, score_subset
 from docmatch.extraction import gemini
 from docmatch.extraction.conftest import write_pdf
 from docmatch.extraction.extractor import Confidence, Usage
+from docmatch.extraction.gemini import GeminiExtractor
 from docmatch.extraction.run import DocumentRun, Run
-from docmatch.extraction.schema import Comprobante, Invoice
+from docmatch.extraction.schema import REGIONAL_FIELDTYPES
+from docmatch.extraction.test_gemini import FakeInteractions, answer
 from docmatch.extraction.test_run import READING, FakeExtractor, a_subset
 from docmatch.metrics.fields import Prediction
 from docmatch.metrics.line_items import labeled_line_items
@@ -1504,7 +1506,7 @@ def test_extract_checks_it_can_write_before_it_spends(
 ) -> None:
     """An --out that cannot be made is worth catching before the first document."""
     fake = FakeExtractor(answers=[READING])
-    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge, asks: fake)
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     blocked = tmp_path / "file"
     blocked.write_text("not a directory", encoding="utf-8")
 
@@ -1569,7 +1571,7 @@ def test_extract_keeps_the_documents_read_before_it_was_interrupted(
     so their score is over what was read and their cost is on record.
     """
     fake = FakeExtractor(answers=[READING, KeyboardInterrupt()])
-    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge, asks: fake)
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
 
     exit_code = main(extracting(pinned_copies, out))
@@ -1593,7 +1595,7 @@ def test_extract_records_the_commit_it_was_extracted_on(
     """The commit of the checkout the code ran from, whatever the working
     directory, so the regression gate can tell a fresh row (#153)."""
     fake = FakeExtractor(answers=[READING])
-    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge, asks: fake)
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     monkeypatch.chdir(tmp_path)
     out = tmp_path / "run"
 
@@ -1610,7 +1612,7 @@ def test_extract_keeps_the_documents_read_before_an_unexpected_failure(
 ) -> None:
     """A failure nothing below expected still ends loudly, with the run on disk."""
     fake = FakeExtractor(answers=[READING, RuntimeError("nothing expected this")])
-    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge, asks: fake)
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
 
     with pytest.raises(RuntimeError):
@@ -1628,7 +1630,7 @@ def test_extract_refuses_an_out_with_a_file_name_taken_by_a_directory(
 ) -> None:
     """Found before the first document, not when the write fails after the last."""
     fake = FakeExtractor(answers=[READING])
-    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge, asks: fake)
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
     (out / "predictions.json").mkdir(parents=True)
 
@@ -1647,7 +1649,7 @@ def test_extract_reports_a_missing_dataset_once(
 ) -> None:
     """One wrong --data-dir is one message, not a hundred documents with no labels."""
     fake = FakeExtractor(answers=[READING])
-    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge, asks: fake)
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
 
     exit_code = main(extracting(pinned_copies, out, data_dir=tmp_path / "docilee"))
@@ -1692,7 +1694,7 @@ def test_extract_refuses_to_start_on_a_missing_public_copy(
 ) -> None:
     """Named once, before a request is sent or the run directory is made."""
     fake = FakeExtractor(answers=[READING])
-    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge, asks: fake)
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
     arguments = extracting(pinned_copies, out)
     public.path(tmp_path / "ucsf", "syn0002").unlink()
@@ -1713,7 +1715,7 @@ def test_extract_refuses_to_start_on_a_changed_public_copy(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     fake = FakeExtractor(answers=[READING])
-    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge, asks: fake)
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
     arguments = extracting(pinned_copies, out)
     write_pdf(public.path(tmp_path / "ucsf", "syn0001"), pages=4)
@@ -2973,35 +2975,29 @@ EXPECTED_REGIONAL_OUTPUT = "\n".join(
         "  manifest        {manifest}",
         "  region          do",
         "  split           paper",
-        "  documents       4",
-        "  labeled values  37",
-        "  predicted       4",
+        "  documents       3",
+        "  labeled values  23",
+        "  predicted       3",
         "  not predicted   0",
         "  not pinned      0",
         "",
         # A value nobody labeled is neither right nor wrong, so the reading
         # of vendor_email on do0001.png is in neither count.
-        "Field score, over the 14 covered fieldtypes only",
-        "  precision  0.972",
-        "  recall     0.946",
-        "  F1         0.959",
-        "  35 matched, 2 missing, 1 spurious",
+        "Field score, over the 8 covered fieldtypes only",
+        "  precision  0.955",
+        "  recall     0.913",
+        "  F1         0.933",
+        "  21 matched, 2 missing, 1 spurious",
         "",
-        "Fields (14)",
-        "  amount_retention_isr    1.000  1 matched, 0 missing",
-        "  amount_retention_itbis  1.000  1 matched, 0 missing",
-        "  amount_tax_other        1.000  1 matched, 0 missing",
-        "  amount_tax_selective    1.000  1 matched, 0 missing",
-        "  amount_tip              1.000  1 matched, 0 missing",
-        "  amount_total_gross      1.000  4 matched, 0 missing",
-        "  amount_total_net        1.000  4 matched, 0 missing",
-        "  amount_total_tax        0.857  3 matched, 1 missing",
-        "  customer_tax_id         1.000  3 matched, 0 missing",
-        "  date_issue              1.000  4 matched, 0 missing",
-        "  document_id             0.750  3 matched, 1 missing, 1 spurious",
-        "  document_id_modified    1.000  1 matched, 0 missing",
-        "  vendor_name             1.000  4 matched, 0 missing",
-        "  vendor_tax_id           1.000  4 matched, 0 missing",
+        "Fields (8)",
+        "  amount_total_gross  1.000  3 matched, 0 missing",
+        "  amount_total_net    1.000  3 matched, 0 missing",
+        "  amount_total_tax    0.800  2 matched, 1 missing",
+        "  customer_tax_id     1.000  2 matched, 0 missing",
+        "  date_issue          1.000  3 matched, 0 missing",
+        "  document_id         0.667  2 matched, 1 missing, 1 spurious",
+        "  vendor_name         1.000  3 matched, 0 missing",
+        "  vendor_tax_id       1.000  3 matched, 0 missing",
         "",
         # Code derives only fieldtypes the set does not cover.
         "Derived values (0)",
@@ -3019,7 +3015,7 @@ EXPECTED_REGIONAL_OUTPUT = "\n".join(
         "Gate",
         "  passed       0",
         "  failed       0",
-        "  not checked  4",
+        "  not checked  3",
         "  pass rate    1.000 of 0 checked",
         "",
         "Unreadable",
@@ -3100,7 +3096,7 @@ def test_eval_refuses_labels_edited_after_they_were_pinned(
         (tmp_path / each.name).write_bytes(each.read_bytes())
     labels = tmp_path / "labels.csv"
     labels.write_text(
-        labels.read_text(encoding="utf-8").replace("790.00", "791.00"), encoding="utf-8"
+        labels.read_text(encoding="utf-8").replace("720.00", "721.00"), encoding="utf-8"
     )
 
     exit_code = main(
@@ -3135,16 +3131,9 @@ def test_extract_reads_a_regional_set_from_its_own_directory_and_records_its_reg
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """No DocILE dataset and no public copies: the set is its manifest's
-    directory, the run says which region it read (#222), and the backend is
-    asked for a comprobante (#225)."""
+    directory, and the run says which region it read (#222)."""
     fake = FakeExtractor(answers=[READING])
-    asked: list[type[Invoice]] = []
-
-    def built(model: str, long_edge: int, asks: type[Invoice]) -> FakeExtractor:
-        asked.append(asks)
-        return fake
-
-    monkeypatch.setattr(gemini, "extractor", built)
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
 
     exit_code = main(
@@ -3160,12 +3149,10 @@ def test_extract_reads_a_regional_set_from_its_own_directory_and_records_its_reg
     )
 
     assert exit_code == 0
-    assert asked == [Comprobante]
     assert [each.document_id for each in fake.attempts] == [
         "do0001.png",
         "do0002.png",
         "do0003.png",
-        "do0004.png",
     ]
     assert json.loads((out / "run.json").read_text())["region"] == "do"
     assert load(out / "manifest.json").region == "do"
@@ -3173,11 +3160,45 @@ def test_extract_reads_a_regional_set_from_its_own_directory_and_records_its_reg
         "do0001.png",
         "do0002.png",
         "do0003.png",
-        "do0004.png",
     ]
     capsys.readouterr()
     assert main(evaluate_regional_run(out)) == 0
     assert "Regional set" in capsys.readouterr().out
+
+
+def test_extract_asks_for_a_comprobante_on_a_dominican_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The six fieldtypes DocILE lacks are asked for on a set of region `do`
+    and nowhere else, so DocILE's request is unchanged (#225)."""
+    interactions = FakeInteractions(answers=[answer('{"amount_tip": ["70.00"]}')])
+    monkeypatch.setattr(
+        gemini,
+        "extractor",
+        lambda model, long_edge: GeminiExtractor(interactions=interactions),
+    )
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(tmp_path / "run"),
+            "--manifest",
+            str(REGIONAL / "do" / "manifest.json"),
+            "--data-dir",
+            str(tmp_path / "nothing"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert interactions.calls
+    for call in interactions.calls:
+        asked = call["response_format"]["schema"]["properties"]
+        assert set(REGIONAL_FIELDTYPES) <= set(asked)
+    predictions = read_predictions(tmp_path / "run" / "predictions.json")
+    assert all(
+        each.fields == {"amount_tip": ["70.00"]} for each in predictions.values()
+    )
 
 
 def test_extract_refuses_a_regional_image_whose_digest_differs_before_any_request(
@@ -3187,7 +3208,7 @@ def test_extract_refuses_a_regional_image_whose_digest_differs_before_any_reques
 ) -> None:
     """A changed file never reaches a vendor, not even the files before it."""
     fake = FakeExtractor(answers=[READING])
-    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge, asks: fake)
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     regional = tmp_path / "do"
     shutil.copytree(REGIONAL / "do", regional)
     (regional / "do0002.png").write_bytes(b"not the pinned image")
@@ -3224,16 +3245,9 @@ def test_extract_on_a_neutral_set_records_no_region(
     tmp_path: Path, pinned_copies: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = FakeExtractor(answers=[READING])
-    asked: list[type[Invoice]] = []
-
-    def built(model: str, long_edge: int, asks: type[Invoice]) -> FakeExtractor:
-        asked.append(asks)
-        return fake
-
-    monkeypatch.setattr(gemini, "extractor", built)
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
 
     assert main(extracting(pinned_copies, out)) == 0
 
     assert "region" not in json.loads((out / "run.json").read_text())
-    assert asked == [Invoice]

@@ -119,9 +119,7 @@ def client() -> openai.OpenAI:
     return openai.OpenAI(api_key=key, timeout=TIMEOUT, max_retries=0)
 
 
-def extractor(
-    model: str = MODEL, long_edge: int = LONG_EDGE, asks: type[Invoice] = Invoice
-) -> "OpenAIExtractor":
+def extractor(model: str = MODEL, long_edge: int = LONG_EDGE) -> "OpenAIExtractor":
     """A backend reading with the key in the environment.
 
     A model with no price written down is refused here, before a run has a
@@ -129,7 +127,7 @@ def extractor(
     """
     price_of(model)
     return OpenAIExtractor(
-        responses=client().responses, model=model, long_edge=long_edge, asks=asks
+        responses=client().responses, model=model, long_edge=long_edge
     )
 
 

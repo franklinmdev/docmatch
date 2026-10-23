@@ -182,9 +182,7 @@ def client() -> genai.Client:
     )
 
 
-def extractor(
-    model: str = MODEL, long_edge: int = LONG_EDGE, asks: type[Invoice] = Invoice
-) -> "GeminiExtractor":
+def extractor(model: str = MODEL, long_edge: int = LONG_EDGE) -> "GeminiExtractor":
     """A backend reading with the key in the environment, and its client kept.
 
     A model with no price written down is refused here, before a run has a
@@ -193,11 +191,7 @@ def extractor(
     price_of(model)
     keep = client()
     return GeminiExtractor(
-        interactions=keep.interactions,
-        model=model,
-        long_edge=long_edge,
-        asks=asks,
-        owner=keep,
+        interactions=keep.interactions, model=model, long_edge=long_edge, owner=keep
     )
 
 
