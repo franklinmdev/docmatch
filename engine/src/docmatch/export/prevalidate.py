@@ -53,6 +53,10 @@ HASH_REFUSED = 64
 TIMEOUT_SECONDS = 300
 """Longest one file's run may take; the harness gives the form 120 s."""
 
+BUILD_TIMEOUT_SECONDS = 1800
+"""Longest the image build may take: a cold build installs Mono's packages
+from archive.debian.org, far slower than one file's run."""
+
 SIDES = (("reading", "Reading"), ("control", "Labels control"))
 
 
@@ -311,7 +315,11 @@ def container_runner(binary: Path) -> Runner:
         )
     ).hexdigest()
     image = f"docmatch-prevalidator:{context[:12]}"
-    _docker(["build", "--quiet", "--tag", image, str(CONTAINER)], "build the image")
+    _docker(
+        ["build", "--quiet", "--tag", image, str(CONTAINER)],
+        "build the image",
+        timeout=BUILD_TIMEOUT_SECONDS,
+    )
 
     def run(path: Path, reporter: str, period: str) -> str:
         done = _docker(
@@ -348,22 +356,23 @@ def container_runner(binary: Path) -> Runner:
 
 
 def _docker(
-    arguments: list[str], doing: str, check: bool = True
+    arguments: list[str],
+    doing: str,
+    check: bool = True,
+    timeout: int = TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
     try:
         done = subprocess.run(
             ["docker", *arguments],
             capture_output=True,
             text=True,
-            timeout=TIMEOUT_SECONDS,
+            timeout=timeout,
             check=False,
         )
     except FileNotFoundError as error:
         raise PrevalidateError("docker is not installed or not on PATH") from error
     except subprocess.TimeoutExpired as error:
-        raise PrevalidateError(
-            f"docker took over {TIMEOUT_SECONDS} s to {doing}"
-        ) from error
+        raise PrevalidateError(f"docker took over {timeout} s to {doing}") from error
     if check and done.returncode != 0:
         raise PrevalidateError(
             f"docker could not {doing}: {done.stderr.strip()[-400:]}"

@@ -109,3 +109,12 @@ def test_a_count_the_box_does_not_bear_out_is_refused() -> None:
 def test_output_with_no_verdict_block_is_refused() -> None:
     with pytest.raises(PrevalidateError, match="no 'status' line"):
         read_verdict("Unhandled Exception:\n")
+
+
+def test_ci_downloads_and_caches_the_binary_this_command_pins() -> None:
+    """The pin lives in the code and in CI's cache key and check; a bump of
+    one without the other would leave CI caching a binary the command
+    refuses, or checking a hash the command no longer runs."""
+    workflow = Path(__file__).parents[4] / ".github" / "workflows" / "ci.yml"
+
+    assert workflow.read_text().count(BINARY_SHA256) == 2

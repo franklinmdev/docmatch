@@ -28,6 +28,7 @@ using System.Windows.Forms;
 
 static class Harness
 {
+    // Named Label on purpose: see the header. Renaming it brings the crash back.
     sealed class Label : ProgressBar { }
 
     const BindingFlags Any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
