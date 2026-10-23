@@ -102,9 +102,16 @@ class FakeResponses:
     calls: list[dict[str, Any]] = field(default_factory=list)
 
     def create(
-        self, *, model: str, input: list[dict[str, Any]], text: dict[str, Any]
+        self,
+        *,
+        model: str,
+        input: list[dict[str, Any]],
+        text: dict[str, Any],
+        store: bool | None = None,
     ) -> Response:
-        self.calls.append({"model": model, "input": input, "text": text})
+        self.calls.append(
+            {"model": model, "input": input, "text": text, "store": store}
+        )
         given = self.answers[min(len(self.calls), len(self.answers)) - 1]
         if isinstance(given, Exception):
             raise given
@@ -115,6 +122,16 @@ class FakeResponses:
 def extractor(*answers: object) -> tuple[OpenAIExtractor, FakeResponses]:
     responses = FakeResponses(answers=list(answers))
     return OpenAIExtractor(responses=responses), responses
+
+
+def test_asks_the_vendor_not_to_store_the_response(document: Document) -> None:
+    """Responses are stored by default (#212)."""
+    reading, calls = extractor(answer("{}"), answer("{}"))
+
+    reading.extract(document)
+    reading.extract(document)
+
+    assert [call["store"] for call in calls.calls] == [False, False]
 
 
 def test_reads_a_document_into_a_prediction(document: Document) -> None:

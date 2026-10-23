@@ -84,9 +84,15 @@ class FakeInteractions:
         model: str,
         input: list[dict[str, Any]],
         response_format: dict[str, Any],
+        store: bool | None = None,
     ) -> object:
         self.calls.append(
-            {"model": model, "input": input, "response_format": response_format}
+            {
+                "model": model,
+                "input": input,
+                "response_format": response_format,
+                "store": store,
+            }
         )
         given = self.answers[min(len(self.calls), len(self.answers)) - 1]
         if isinstance(given, Exception):
@@ -149,6 +155,16 @@ def test_asks_for_the_schema_by_name(document: Document) -> None:
     (call,) = calls.calls
     assert call["response_format"]["mime_type"] == "application/json"
     assert "vendor_name" in call["response_format"]["schema"]["properties"]
+
+
+def test_asks_the_vendor_not_to_store_the_request(document: Document) -> None:
+    """The API stores interactions by default (55 days on the paid tier, #212)."""
+    reading, calls = extractor(answer("{}"), answer("{}"))
+
+    reading.extract(document)
+    reading.extract(document)
+
+    assert [call["store"] for call in calls.calls] == [False, False]
 
 
 def test_puts_the_instruction_before_the_pages_and_numbers_them(
