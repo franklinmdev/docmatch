@@ -9,8 +9,8 @@
       "tree": "1efcafecedabb732cbb7082cd37d06ef1e6de601b7020db97c6035967488552e"
     },
     "scored_on": {
-      "commit": "cc1bcdd1493f88711238769ccdbb15997a02e0f5",
-      "tree": "57291df915050005051247277c89539d5d9aa611f0271bf531351dcc26260632"
+      "commit": "3df5a54b924854e0bff5cec02b307f4d6d111393",
+      "tree": "9342efea6e12f3916f0a6a25631c35e40eb09c27a39ba4334d5ba13ec690ae25"
     }
   },
   "azure": {
@@ -23,8 +23,8 @@
       "tree": "1b4ea65374c2ac458aa31f466223530ffaca0a910ec455b5cfcb443d3a3bce73"
     },
     "scored_on": {
-      "commit": "cc1bcdd1493f88711238769ccdbb15997a02e0f5",
-      "tree": "57291df915050005051247277c89539d5d9aa611f0271bf531351dcc26260632"
+      "commit": "3df5a54b924854e0bff5cec02b307f4d6d111393",
+      "tree": "9342efea6e12f3916f0a6a25631c35e40eb09c27a39ba4334d5ba13ec690ae25"
     }
   },
   "openai": {
@@ -37,8 +37,8 @@
       "tree": "3d3b361d73a291fe22ab9fbe7814f93ce569abf0aacbc3f5fe6431f4e1ecd3c7"
     },
     "scored_on": {
-      "commit": "cc1bcdd1493f88711238769ccdbb15997a02e0f5",
-      "tree": "57291df915050005051247277c89539d5d9aa611f0271bf531351dcc26260632"
+      "commit": "3df5a54b924854e0bff5cec02b307f4d6d111393",
+      "tree": "9342efea6e12f3916f0a6a25631c35e40eb09c27a39ba4334d5ba13ec690ae25"
     }
   }
 }

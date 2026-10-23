@@ -307,12 +307,33 @@ def reads_date(text: str) -> bool:
     return read_date(text) is not None
 
 
-def read_date(text: str) -> date | None:
+DAY_FIRST_REGIONS = frozenset({"do"})
+"""Regions whose documents print three-number dates day first (#244).
+
+A Dominican comprobante prints `DD/MM/YYYY`; every other set, DocILE's
+included, is read month first, so a set's region is the one place the order
+is decided, for the gate, the scorer and the 606 export alike.
+"""
+
+
+def reads_day_first(region: str | None) -> bool:
+    """Whether a set of this region writes its three-number dates day first."""
+    return region in DAY_FIRST_REGIONS
+
+
+def read_date(text: str, *, day_first: bool = False) -> date | None:
     """The calendar day a value spells, or nothing if it does not spell one.
 
     Public for the reason `read_number` is: the gate orders dates as days.
     """
-    return _read_date(prepared_date(text))
+    return _read_date(prepared_date(text), day_first)
+
+
+def iso_date(text: str, *, day_first: bool) -> str:
+    """A date as `YYYY-MM-DD`, read in the given order, or the text unchanged
+    when it does not spell one day, so the month-first rules read it alike."""
+    day = read_date(text, day_first=day_first)
+    return day.isoformat() if day is not None else text
 
 
 def prepared_date(text: str) -> str:
@@ -324,7 +345,7 @@ def prepared_date(text: str) -> str:
     return _ORDINAL.sub("", unicodedata.normalize("NFKC", text).upper())
 
 
-def _read_date(text: str) -> date | None:
+def _read_date(text: str, day_first: bool) -> date | None:
     month: int | None = None
     for word in re.findall(r"[A-Z]+", text):
         named = names_a_month(word)
@@ -341,6 +362,8 @@ def _read_date(text: str) -> date | None:
         return None
     elif len(str(numbers[0])) == 4:
         year, month, day = numbers  # an ISO date, the one unambiguous ordering
+    elif day_first:
+        day, month, year = numbers  # a region in `DAY_FIRST_REGIONS`
     else:
         month, day, year = numbers  # month first, as this corpus writes them
     try:

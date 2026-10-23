@@ -8,9 +8,18 @@ contains. None of them is a DocILE label: the dataset may not be redistributed,
 so no label text is committed.
 """
 
+from datetime import date
+
 import pytest
 
-from docmatch.metrics.normalization import normalize, reads, reads_number, rule
+from docmatch.metrics.normalization import (
+    normalize,
+    read_date,
+    reads,
+    reads_day_first,
+    reads_number,
+    rule,
+)
 
 
 def agree(fieldtype: str, left: str, right: str) -> bool:
@@ -194,3 +203,16 @@ def test_a_modified_ncf_keeps_its_zeros() -> None:
     assert normalize("document_id_modified", "B0100000001") != normalize(
         "document_id_modified", "B100000001"
     )
+
+
+def test_a_date_reads_day_first_only_when_asked() -> None:
+    assert read_date("02/04/2026") == date(2026, 2, 4)
+    assert read_date("02/04/2026", day_first=True) == date(2026, 4, 2)
+    assert read_date("14/03/2026") is None
+    assert read_date("14/03/2026", day_first=True) == date(2026, 3, 14)
+    assert read_date("2026-04-02", day_first=True) == date(2026, 4, 2)
+
+
+def test_only_a_dominican_set_reads_day_first() -> None:
+    assert reads_day_first("do")
+    assert not reads_day_first(None)

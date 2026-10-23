@@ -10,9 +10,10 @@ from decimal import Decimal
 
 import pytest
 
-from docmatch.export.dgii606 import NO_MONTH, Failure, export_606, read_day
+from docmatch.export.dgii606 import NO_MONTH, REGION, Failure, export_606
 from docmatch.export.filing import ALL, Filing, Share
 from docmatch.metrics.fields import FieldValues
+from docmatch.metrics.normalization import read_date, reads_day_first
 
 REPORTER = "130990026"
 SUPPLIER = "130990018"
@@ -332,11 +333,13 @@ def test_a_share_equal_to_the_itbis_is_written() -> None:
 
 
 def test_a_comprobante_date_reads_day_first() -> None:
-    """Dominican comprobantes print DD/MM/YYYY, so 02/04/2026 is April."""
-    assert read_day("02/04/2026") == date(2026, 4, 2)
-    assert read_day("2026-04-02") == date(2026, 4, 2)
-    assert read_day("02/04/26") == date(2026, 4, 2)
-    assert read_day("31/02/2026") is None
+    """Dominican comprobantes print DD/MM/YYYY, so 02/04/2026 is April: the
+    export reads its region's order, the rule the gate and the scorer read."""
+    day_first = reads_day_first(REGION)
+    assert read_date("02/04/2026", day_first=day_first) == date(2026, 4, 2)
+    assert read_date("2026-04-02", day_first=day_first) == date(2026, 4, 2)
+    assert read_date("02/04/26", day_first=day_first) == date(2026, 4, 2)
+    assert read_date("31/02/2026", day_first=day_first) is None
 
 
 def test_the_header_names_the_reporter_the_month_and_the_rows() -> None:

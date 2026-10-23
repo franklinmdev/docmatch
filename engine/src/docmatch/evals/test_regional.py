@@ -16,6 +16,7 @@ from docmatch.extraction.ecf import ECFExtractor
 from docmatch.extraction.ecf import read as ecf_read
 from docmatch.extraction.extractor import Confidence, Document, Extraction
 from docmatch.extraction.test_run import FakeExtractor
+from docmatch.gate import gate
 from docmatch.metrics.fields import Prediction
 
 COVERAGE = ("vendor_tax_id", "document_id", "amount_total_gross")
@@ -462,3 +463,66 @@ def test_a_neutral_set_scores_with_no_regional_rule(tmp_path: Path) -> None:
         "dates sane",
         "totals agree",
     }
+
+
+def test_a_dominican_date_reads_day_first_in_the_gate(tmp_path: Path) -> None:
+    """5 March then 4 April is sane day first; month first it is 3 May then 4 April."""
+    dated = READING.model_copy(
+        update={
+            "fields": {
+                **READING.fields,
+                "date_issue": "05/03/2026",
+                "date_due": "04/04/2026",
+            }
+        }
+    )
+
+    [checks, _] = (each.gate.checks for each in scored(tmp_path, dated).documents)
+
+    assert [each.outcome for each in checks if each.rule == "dates sane"] == ["passed"]
+    assert gate({"date_issue": ["05/03/2026"], "date_due": ["04/04/2026"]}).checks[
+        0
+    ].outcome == ("failed")
+
+
+def test_a_dominican_date_with_a_day_above_twelve_is_compared_as_a_day(
+    tmp_path: Path,
+) -> None:
+    labels = (
+        "filename,vendor_tax_id,document_id,amount_total_gross,date_issue\n"
+        "do0001.png,130000001,B0100000001,1180.00,14/03/2026\n"
+        "do0002.png,130000018,,590.00,\n"
+    )
+    manifest = a_set(tmp_path, labels, coverage=(*COVERAGE, "date_issue"))
+    dated = READING.model_copy(
+        update={"fields": {**READING.fields, "date_issue": "14/3/2026"}}
+    )
+
+    run = score_subset(read_labels(manifest, tmp_path), manifest, {"do0001.png": dated})
+
+    assert run.fields.true_positives == 4
+
+
+def test_a_set_with_no_region_reads_its_dates_month_first(tmp_path: Path) -> None:
+    """The same text as the Dominican case, scored on a set with no region."""
+    dated = READING.model_copy(
+        update={
+            "fields": {
+                **READING.fields,
+                "date_issue": "05/03/2026",
+                "date_due": "04/04/2026",
+            }
+        }
+    )
+    manifest = a_set(tmp_path, region=None)
+
+    [checks, _] = (
+        each.gate.checks
+        for each in score_subset(
+            read_labels(manifest, tmp_path),
+            manifest,
+            {"do0001.png": dated, "do0002.png": Prediction()},
+        ).documents
+    )
+
+    assert [each.outcome for each in checks if each.rule == "dates sane"] == ["failed"]
