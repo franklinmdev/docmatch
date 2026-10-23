@@ -7,6 +7,7 @@ over the synthetic corpus; these pin what each rule decides on a reading.
 from collections.abc import Mapping, Sequence
 
 import pytest
+from stdnum.do import rnc as stdnum_rnc
 
 from docmatch.gate import GateResult, RuleCheck, admit, gate, rules_of
 
@@ -194,10 +195,16 @@ def test_an_rnc_field_fails_a_number_that_is_neither(number: str) -> None:
     assert result.verdict == "failed"
 
 
-def test_an_rnc_stdnum_whitelists_passes_though_its_checksum_fails() -> None:
-    assert check(
-        gate(reading(vendor_tax_id="101581601"), DO), "vendor RNC"
-    ).outcome == ("passed")
+def test_an_rnc_stdnum_whitelists_passes_though_its_checksum_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The list holds real taxpayers' numbers, so the test whitelists a made-up
+    one with a bad check digit rather than quote an entry."""
+    monkeypatch.setattr(stdnum_rnc, "whitelist", {*stdnum_rnc.whitelist, "130990019"})
+
+    result = gate(reading(vendor_tax_id="130990019"), DO)
+
+    assert check(result, "vendor RNC").outcome == "passed"
 
 
 @pytest.mark.parametrize(

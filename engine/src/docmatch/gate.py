@@ -181,7 +181,8 @@ def admit(
     labeled: Iterable[FieldValues],
     coverage: Collection[str] | None = None,
 ) -> tuple[RuleAdmission, ...]:
-    """Each of a region's rules against a set's labels, one entry per document.
+    """Each of a region's rules against a set's labels, one entry per rule, counted
+    in documents.
 
     A rule on a fieldtype the labels do not cover is left out: nobody labeled
     it, so nothing says the rule holds.
