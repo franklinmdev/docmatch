@@ -1,0 +1,62 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ECF>
+  <Encabezado>
+    <Version>1.0</Version>
+    <IdDoc>
+      <TipoeCF>41</TipoeCF>
+      <eNCF>E410000000001</eNCF>
+      <FechaVencimientoSecuencia>31-12-2027</FechaVencimientoSecuencia>
+      <TipoPago>1</TipoPago>
+    </IdDoc>
+    <Emisor>
+      <RNCEmisor>130990085</RNCEmisor>
+      <RazonSocialEmisor>Constructora Ficticia del Sur SRL</RazonSocialEmisor>
+      <DireccionEmisor>Calle Inventada 1</DireccionEmisor>
+      <FechaEmision>12-06-2026</FechaEmision>
+    </Emisor>
+    <Comprador>
+      <RNCComprador>00099000028</RNCComprador>
+      <RazonSocialComprador>Juan Ejemplo</RazonSocialComprador>
+    </Comprador>
+    <Totales>
+      <MontoGravadoTotal>5000.00</MontoGravadoTotal>
+      <MontoGravadoI1>5000.00</MontoGravadoI1>
+      <ITBIS1>18</ITBIS1>
+      <TotalITBIS>900.00</TotalITBIS>
+      <TotalITBIS1>900.00</TotalITBIS1>
+      <MontoTotal>5900.00</MontoTotal>
+    </Totales>
+  </Encabezado>
+  <DetallesItems>
+    <Item>
+      <NumeroLinea>1</NumeroLinea>
+      <IndicadorFacturacion>1</IndicadorFacturacion>
+      <Retencion>
+        <IndicadorAgenteRetencionoPercepcion>1</IndicadorAgenteRetencionoPercepcion>
+        <MontoITBISRetenido>450.00</MontoITBISRetenido>
+        <MontoISRRetenido>250.00</MontoISRRetenido>
+      </Retencion>
+      <NombreItem>Pintura de fachada</NombreItem>
+      <IndicadorBienoServicio>2</IndicadorBienoServicio>
+      <CantidadItem>1</CantidadItem>
+      <PrecioUnitarioItem>2500.00</PrecioUnitarioItem>
+      <MontoItem>2500.00</MontoItem>
+    </Item>
+    <Item>
+      <NumeroLinea>2</NumeroLinea>
+      <IndicadorFacturacion>1</IndicadorFacturacion>
+      <Retencion>
+        <IndicadorAgenteRetencionoPercepcion>1</IndicadorAgenteRetencionoPercepcion>
+        <MontoITBISRetenido>450.00</MontoITBISRetenido>
+        <MontoISRRetenido>250.00</MontoISRRetenido>
+      </Retencion>
+      <NombreItem>Reparacion de techo</NombreItem>
+      <IndicadorBienoServicio>2</IndicadorBienoServicio>
+      <CantidadItem>1</CantidadItem>
+      <PrecioUnitarioItem>2500.00</PrecioUnitarioItem>
+      <MontoItem>2500.00</MontoItem>
+    </Item>
+  </DetallesItems>
+  <FechaHoraFirma>10-06-2026 10:00:00</FechaHoraFirma>
+  <Signature xmlns="http://www.w3.org/2000/09/xmldsig#" />
+</ECF>

@@ -15,7 +15,7 @@ value. Line items are not labeled on a regional set yet.
 Reading a set
 -------------
 
-Every backend reads a PDF, and a regional set is images, a phone photo or a
+A vision backend reads a PDF, and a paper set is images, a phone photo or a
 scan of each comprobante, so each pinned image is verified against its
 digest, all of them before any request, and then wrapped in a one-page PDF
 for the backend to read, the way it reads a DocILE public copy. The wrapping
@@ -24,7 +24,9 @@ uses pypdfium2 5.13 (its `PdfImage.load_jpeg` and `set_bitmap`, read
 unless its EXIF turns it, which a PDF would not honour, and anything else
 goes in as a bitmap pdfium compresses losslessly. The page measures the
 image's pixels as points, one PDF per image in a scratch directory that is
-gone when the set has been read.
+gone when the set has been read. An e-CF set is XML, verified the same way
+and handed to the backend as its own file, since only the e-CF parser reads
+it (#227).
 
 The labels file is read with the standard library's `csv` module (Python 3.12
 documentation, read 2026-10-23): opened with `newline=""` as the module asks,
@@ -168,6 +170,12 @@ def _check_documents(
         )
 
 
+def is_xml(filename: str) -> bool:
+    """Whether the document is an e-CF's XML, which is parsed rather than
+    looked at and so is handed to the backend as it is."""
+    return filename.lower().endswith(".xml")
+
+
 ORIENTATION = 0x0112
 """The EXIF tag saying how a photo is turned."""
 
@@ -218,11 +226,13 @@ def _read(
 ) -> Iterator[DocumentRun]:
     with tempfile.TemporaryDirectory(prefix="docmatch-regional-") as scratch:
         for filename in manifest.document_ids:
-            pdf = Path(scratch) / f"{filename}.pdf"
-            _as_pdf(directory / filename, pdf)
+            path = directory / filename
+            if not is_xml(filename):
+                path = Path(scratch) / f"{filename}.pdf"
+                _as_pdf(directory / filename, path)
             yield read_document(
                 extractor,
-                Document(document_id=filename, path=pdf, pages=1),
+                Document(document_id=filename, path=path, pages=1),
                 attempts=attempts,
                 cost_cap=cost_cap,
                 wait=wait,

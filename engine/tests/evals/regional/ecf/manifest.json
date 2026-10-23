@@ -1,0 +1,39 @@
+{
+  "split": "ecf",
+  "seed": 0,
+  "source": "synthetic",
+  "size": 4,
+  "document_ids": [
+    "ecf0001.xml",
+    "ecf0002.xml",
+    "ecf0003.xml",
+    "ecf0004.xml"
+  ],
+  "rejected": {},
+  "digests": {
+    "ecf0001.xml": "9813506f096859d8def4b965bdf46d3289a957b7a433340faf427a317507263e",
+    "ecf0002.xml": "8d86b949bf60d52b323ad1c7949059226e9f9625dcc9fdd554331c876f273839",
+    "ecf0003.xml": "ddbbe5230b030593ecdb46b8ececdad61cb8c18c170b6e0ac379e0e75c7bd6e2",
+    "ecf0004.xml": "604eec73ff442673996ecfc4bb362bae98faa5103ec1f1ad939952f87fc98777"
+  },
+  "region": "do",
+  "coverage": [
+    "vendor_name",
+    "vendor_tax_id",
+    "customer_tax_id",
+    "document_id",
+    "date_issue",
+    "amount_total_net",
+    "amount_total_tax",
+    "amount_total_gross",
+    "amount_tip",
+    "amount_tax_selective",
+    "amount_tax_other",
+    "document_id_modified",
+    "amount_retention_itbis",
+    "amount_retention_isr"
+  ],
+  "files": {
+    "labels.csv": "e79d639edc6c80fe0ec67e77d0bf2dabd0fda9ad1d4007564fecf837cfcb4ed8"
+  }
+}

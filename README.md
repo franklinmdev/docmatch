@@ -1141,6 +1141,30 @@ sends each to the backend as a one-page PDF, and records the region in
 another region, and prints field F1 over the covered fieldtypes only. A
 regional set writes no aggregate and takes no corrections.
 
+An e-CF set is e-CF XML rather than paper, in its own directory,
+`data/regional/do-ecf/`, with the same manifest and `labels.csv` (no `paper`
+column). Its labels are read from each XML by the e-CF parser when the set is
+pinned, so its F1 is parsing and lands at 1.000 by construction: it guards the
+parser, and the report says so. Public e-CF samples are used locally and never
+redistributed, the terms DocILE's data keeps, which is a licensing rule and
+apart from the privacy of the owner's own comprobantes.
+
+```bash
+uv run python -m docmatch.evals.ecf data/regional/do-ecf
+uv run docmatch extract --backend ecf --manifest data/regional/do-ecf/manifest.json \
+  --out data/runs/regional/do-ecf
+uv run docmatch eval --manifest data/regional/do-ecf/manifest.json \
+  --predictions data/runs/regional/do-ecf/predictions.json
+```
+
+The first command pins every `*.xml` in the directory. The `ecf` backend reads
+types E31, E32, E41 and E43 against DGII's XSDs v1.0 of 16/10/2025, costs
+nothing and calls no vendor; it reads the header only, never the line items,
+and never verifies the signature. A vision backend refuses an e-CF set and the
+parser refuses a set of images. The committed made-up e-CFs in
+`engine/tests/evals/regional/ecf/` validate against the XSDs in CI, which
+downloads them, and CI's `Regional e-CF` step scores the parser's saved run.
+
 ### Matching
 
 ```bash
@@ -1634,7 +1658,7 @@ docmatch/
       resolution/      the catalog, the query set, the embedder, the Postgres working space, the arms, the run
       pipeline/        the loop's statuses, API, server, replay and labels backends, loop runs and their report
     tests/evals/       the synthetic corpus CI runs the eval, the match, the resolve and the loop on
-      regional/        a made-up Dominican set, its labels and a saved run, for the regional eval
+      regional/        made-up Dominican sets, paper and e-CF, their labels and saved runs, for the regional eval
   apps/review/         Next.js review page, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
   benchmark/           committed aggregates: the regression gate's F1 per backend, the matching per-type tables `reproduce` compares with

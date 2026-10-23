@@ -88,6 +88,7 @@ from docmatch.evals.corrections import (
     read_corrections,
     score_corrections,
 )
+from docmatch.evals.ecf import SPLIT as ECF_SPLIT
 from docmatch.evals.failures import (
     ROW_CLASSES,
     VALUE_CLASSES,
@@ -103,6 +104,7 @@ from docmatch.evals.public import PublicCopyError
 from docmatch.evals.regional import (
     RegionalError,
     RegionalLabels,
+    is_xml,
     read_labels,
     read_set,
 )
@@ -126,7 +128,7 @@ from docmatch.evals.run import (
     read_saved_run,
     score_subset,
 )
-from docmatch.extraction import azure, backends, gemini, pages
+from docmatch.extraction import azure, backends, ecf, gemini, pages
 from docmatch.extraction.extractor import ExtractionError, Extractor
 from docmatch.extraction.gemini import GeminiExtractor
 from docmatch.extraction.openai import OpenAIExtractor
@@ -814,7 +816,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     extract.add_argument(
         "--backend",
-        choices=backends.BACKENDS,
+        choices=(*backends.BACKENDS, ecf.BACKEND),
         default=backends.BACKENDS[0],
         help=f"the vendor to read with (default: {backends.BACKENDS[0]})",
     )
@@ -1784,10 +1786,19 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     # that cannot start leaves nothing behind; the directory before the first
     # document, because an --out that cannot be written is worth a hundred
     # documents of spend.
-    backend = backends.extractor(
-        arguments.backend, arguments.model, long_edge=arguments.long_edge
-    )
-    if pinned.region is not None:
+    _check_kind(arguments.backend, pinned)
+    # Built here, not in `backends`, which every vendor row imports (#237).
+    if arguments.backend == ecf.BACKEND:
+        if arguments.model is not None:
+            raise RegionalError(
+                "the ecf backend parses with no model, so --model is not taken"
+            )
+        backend: Extractor = ecf.ECFExtractor()
+    else:
+        backend = backends.extractor(
+            arguments.backend, arguments.model, long_edge=arguments.long_edge
+        )
+    if pinned.region is not None and arguments.backend != ecf.BACKEND:
         try:
             asks = asked(pinned.region)
         except ValueError as error:
@@ -1846,6 +1857,21 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
         render_extract(arguments.out, extracted),
         0 if extracted.predicted else 1,
     )
+
+
+def _check_kind(backend: str, pinned: Manifest) -> None:
+    """Refuse a backend the set's documents are not for, before anything is
+    read or paid for: the e-CF parser reads only an e-CF's XML, and a vision
+    backend would be paid to look at XML as if it were a page (#227)."""
+    for filename in pinned.document_ids:
+        if backend == ecf.BACKEND and not is_xml(filename):
+            raise RegionalError(
+                f"the ecf backend reads only e-CF XML, and {filename} is not"
+            )
+        if backend != ecf.BACKEND and is_xml(filename):
+            raise RegionalError(
+                f"{filename} is an e-CF, which only the ecf backend reads"
+            )
 
 
 def _extracted_on(backend: str) -> tuple[str | None, bool]:
@@ -2801,7 +2827,14 @@ def _set(path: Path, run: SubsetScore) -> list[str]:
 def _regional(path: Path, run: SubsetScore) -> list[str]:
     """The regional set a run was scored over, with how many values its
     labels hold, since a hand-labeled set is small and its F1 moves in
-    steps of one value."""
+    steps of one value. An e-CF set's labels are read from its XML by the
+    parser that reads its predictions, so its F1 says the parser still reads
+    what it read when the set was pinned, never how well a page is read."""
+    parsing = (
+        (("F1 measures", "parsing an e-CF's XML, not reading a page"),)
+        if run.manifest.split == ECF_SPLIT
+        else ()
+    )
     return [
         "Regional set",
         *_rows(
@@ -2816,6 +2849,7 @@ def _regional(path: Path, run: SubsetScore) -> list[str]:
             ("predicted", str(len(run.documents) - len(run.not_predicted))),
             ("not predicted", str(len(run.not_predicted))),
             ("not pinned", str(len(run.unpinned))),
+            *parsing,
         ),
     ]
 

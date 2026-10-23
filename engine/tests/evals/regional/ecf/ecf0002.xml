@@ -1,0 +1,41 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ECF>
+  <Encabezado>
+    <Version>1.0</Version>
+    <IdDoc>
+      <TipoeCF>32</TipoeCF>
+      <eNCF>E320000000001</eNCF>
+      <IndicadorMontoGravado>0</IndicadorMontoGravado>
+      <TipoIngresos>01</TipoIngresos>
+      <TipoPago>1</TipoPago>
+    </IdDoc>
+    <Emisor>
+      <RNCEmisor>130990077</RNCEmisor>
+      <RazonSocialEmisor>Supermercado Inventado SRL</RazonSocialEmisor>
+      <DireccionEmisor>Calle Inventada 1</DireccionEmisor>
+      <FechaEmision>11-06-2026</FechaEmision>
+    </Emisor>
+    <Comprador />
+    <Totales>
+      <MontoGravadoTotal>1000.00</MontoGravadoTotal>
+      <MontoGravadoI1>1000.00</MontoGravadoI1>
+      <ITBIS1>18</ITBIS1>
+      <TotalITBIS>180.00</TotalITBIS>
+      <TotalITBIS1>180.00</TotalITBIS1>
+      <MontoTotal>1180.00</MontoTotal>
+    </Totales>
+  </Encabezado>
+  <DetallesItems>
+    <Item>
+      <NumeroLinea>1</NumeroLinea>
+      <IndicadorFacturacion>1</IndicadorFacturacion>
+      <NombreItem>Arroz selecto</NombreItem>
+      <IndicadorBienoServicio>1</IndicadorBienoServicio>
+      <CantidadItem>10</CantidadItem>
+      <PrecioUnitarioItem>100.00</PrecioUnitarioItem>
+      <MontoItem>1000.00</MontoItem>
+    </Item>
+  </DetallesItems>
+  <FechaHoraFirma>10-06-2026 10:00:00</FechaHoraFirma>
+  <Signature xmlns="http://www.w3.org/2000/09/xmldsig#" />
+</ECF>

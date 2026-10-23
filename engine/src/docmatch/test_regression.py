@@ -157,9 +157,17 @@ def test_the_modules_each_backend_reads_are_its_imports() -> None:
                 todo.extend(imports(module))
         return seen
 
-    assert {b: {f"{ROOT}/extraction/{m}.py" for m in reads(b)} for b in BACKENDS} == {
+    readers = (*BACKENDS, "ecf")
+    assert {b: {f"{ROOT}/extraction/{m}.py" for m in reads(b)} for b in readers} == {
         b: set(modules) for b, modules in READS.items()
     }
+
+
+def test_the_e_cf_parser_demands_no_vendor_row_re_extracted() -> None:
+    """The parser has no row in the aggregate, and no vendor backend imports
+    it, so a change to it owes nothing but its own free run (#227)."""
+    assert demanded([f"{ROOT}/extraction/ecf.py"]).re_extract == frozenset()
+    assert extraction_path(f"{ROOT}/extraction/ecf.py", "ecf")
 
 
 def test_a_backends_module_demands_only_its_row() -> None:
