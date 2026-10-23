@@ -234,13 +234,14 @@ def test_a_reading_without_a_date_goes_to_the_no_month_row() -> None:
     assert month.period == NO_MONTH
     assert month.failures == (
         Failure("a.png", ("no date",)),
-        Failure("b.png", ("no NCF", "date 2026-13-40 unreadable")),
+        Failure("b.png", ("no NCF", "date unreadable")),
     )
 
 
 def test_an_identifier_of_neither_length_or_an_unreadable_amount_fails() -> None:
     """Tipo Id is told from the length alone, 9 an RNC and 11 a cedula, and an
-    amount the file cannot hold is never written as zero."""
+    amount the file cannot hold is never written as zero. No reason quotes
+    the value, so a report of the owner's comprobantes shows none."""
     readings = {
         "a.png": comprobante(vendor_tax_id="13099001"),
         "b.png": comprobante(document_id="B0100000418", amount_total_tax="ITBIS"),
@@ -250,8 +251,8 @@ def test_an_identifier_of_neither_length_or_an_unreadable_amount_fails() -> None
     [march] = export_606(REPORTER, readings, {}, filing).reading.failed
 
     assert march.failures == (
-        Failure("a.png", ("RNC 13099001 is neither 9 nor 11 digits",)),
-        Failure("b.png", ("amount_total_tax ITBIS unreadable",)),
+        Failure("a.png", ("RNC neither 9 nor 11 digits",)),
+        Failure("b.png", ("amount_total_tax unreadable",)),
     )
 
 

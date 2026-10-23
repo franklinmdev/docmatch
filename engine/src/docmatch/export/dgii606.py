@@ -52,17 +52,23 @@ comprobantes print it, unless it starts with a four-digit year; the scorer's
 month-first reading is DocILE's and would put 02/04/2026 in February.
 """
 
+import json
 import re
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
+from pathlib import Path
 
 from stdnum.do import ncf, rnc
 
 from docmatch.export.filing import ALL, Filing, Share
 from docmatch.metrics.fields import FieldValues
 from docmatch.metrics.normalization import read_number
+
+REGION = "do"
+"""The region whose sets a 606 is filed for."""
 
 NO_MONTH = "no month"
 """The row of documents whose date is missing or unreadable."""
@@ -209,19 +215,19 @@ def _line(
         identifier = rnc.compact(identifier)
         tipo_id = TIPO_ID.get(len(identifier)) if identifier.isdigit() else None
         if tipo_id is None:
-            reasons.append(f"RNC {identifier} is neither 9 nor 11 digits")
+            reasons.append("RNC neither 9 nor 11 digits")
     date_text = _value(values, "date_issue")
     day = None if date_text is None else read_day(date_text)
     if date_text is None:
         reasons.append("no date")
     elif day is None:
-        reasons.append(f"date {date_text} unreadable")
+        reasons.append("date unreadable")
     amounts: dict[str, Decimal] = {}
     for fieldtype in AMOUNTS:
         text = _value(values, fieldtype)
         amount = ZERO if text is None else read_number(text)
         if amount is None:
-            reasons.append(f"{fieldtype} {text} unreadable")
+            reasons.append(f"{fieldtype} unreadable")
         else:
             amounts[fieldtype] = amount
     period = NO_MONTH if day is None else f"{day:%Y%m}"
@@ -331,3 +337,94 @@ def read_day(text: str) -> date | None:
         return date(int(year), int(month), int(day))
     except ValueError:
         return None
+
+
+EXPORT_FILE = "export.json"
+"""What `export_606` wrote, month by month, for `prevalidate 606` (#229)."""
+
+SIDES = (("reading", "Reading"), ("control", "Labels control"))
+"""Each side's directory under the export, and its heading in the report."""
+
+
+class ExportError(Exception):
+    """An export that cannot be written where it was asked to go."""
+
+
+def write_export(exported: Export, out: Path, manifest: Path, run: Path) -> None:
+    """Write both sides' files under `out` and list every month in
+    `export.json`; `out` must be new or empty, so no file of an earlier
+    export is ever read as this one's."""
+    if out.exists() and (not out.is_dir() or any(out.iterdir())):
+        raise ExportError(f"{out} is not empty; give a new directory to export into")
+    listed: dict[str, object] = {
+        "manifest": str(manifest),
+        "run": str(run),
+        "not_reported": list(exported.not_reported),
+    }
+    for directory, _ in SIDES:
+        side: Side = getattr(exported, directory)
+        (out / directory).mkdir(parents=True)
+        for name, content in side.files().items():
+            (out / directory / name).write_bytes(content.encode("ascii"))
+        listed[directory] = [
+            {
+                "period": month.period,
+                "file": None
+                if month.is_failed
+                else f"{directory}/{filename(side.reporter, month.period)}",
+                "rows": len(month.lines),
+                "failures": [
+                    {"filename": each.filename, "reasons": list(each.reasons)}
+                    for each in month.failures
+                ],
+            }
+            for month in side.months
+        ]
+    (out / EXPORT_FILE).write_text(json.dumps(listed, indent=2) + "\n")
+
+
+def render_export(exported: Export, out: Path, manifest: Path, run: Path) -> str:
+    """The export as counts, periods and reasons: never a number, a name or a
+    filename from a comprobante, so the owner's report can be shown."""
+    documents = sum(
+        len(month.lines) + len(month.failures) for month in exported.reading.months
+    )
+    lines = [
+        "606 export",
+        f"  manifest      {manifest}",
+        f"  run           {run}",
+        f"  out           {out}",
+        f"  documents     {documents + len(exported.not_reported)}",
+        f"  not reported  {len(exported.not_reported)}",
+        "",
+    ]
+    for directory, heading in SIDES:
+        side: Side = getattr(exported, directory)
+        written = len(side.months) - len(side.failed)
+        lines.append(
+            f"{heading}, {written} of {len(side.months)} monthly files written"
+        )
+        width = max(len(month.period) for month in side.months) if side.months else 0
+        for month in side.months:
+            lines.append(f"  {month.period:<{width}}  {_month(month)}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _month(month: Month) -> str:
+    if not month.is_failed:
+        return f"{len(month.lines)} {'row' if len(month.lines) == 1 else 'rows'}"
+    reasons = Counter(reason for each in month.failures for reason in each.reasons)
+    tally = ", ".join(
+        reason if count == 1 else f"{reason} {count}"
+        for reason, count in reasons.items()
+    )
+    total = len(month.lines) + len(month.failures)
+    failed = len(month.failures)
+    documents = "document" if total == 1 else "documents"
+    share = (
+        f"{failed} {documents}"
+        if failed == total
+        else f"{failed} of {total} {documents}"
+    )
+    return f"failed, {share}: {tally}"
