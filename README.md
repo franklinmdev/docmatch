@@ -1189,11 +1189,13 @@ date and method, ITBIS to proportionality and to cost, ISR retention type.
 `filing.csv` is never scored, so the two sides differ only in what was read.
 
 A document with no reading, or one missing its NCF, RNC or date, fails its
-month, which gets no file; one with no readable date fails a `no month` row. A
-retention not printed is written as zero until #230 computes it at the rate in
-force. The report prints counts and reasons only, never a number or a name
-from a comprobante. CI's `Regional` step exports the made-up set's saved
-run.
+month, which gets no file; one with no readable date, or no reading, fails a
+`no month` row. So does an RNC, cedula or NCF python-stdnum does not validate,
+a negative amount, and a split, retention or ITBIS share beyond what was read:
+nothing is written negative. A retention not printed is written as zero until
+#230 computes it at the rate in force. The report prints counts and reasons
+only, never a number or a name from a comprobante. CI's `Regional` step
+exports the made-up set's saved run.
 
 ### Matching
 
