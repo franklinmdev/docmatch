@@ -82,6 +82,9 @@ from docmatch.metrics.normalization import read_date, read_number, reads_day_fir
 REGION = "do"
 """The region whose sets a 606 is filed for."""
 
+DAY_FIRST = reads_day_first(REGION)
+"""How its comprobantes print a date, decided where the gate and scorer read it."""
+
 NOT_REPORTED = "annotated not reported"
 """Why a document is in neither side's files."""
 
@@ -242,11 +245,7 @@ def _line(
             reasons.append("RNC or cedula invalid")
     modified = _ncf(values, "document_id_modified", "modified NCF", reasons)
     date_text = _value(values, "date_issue")
-    day = (
-        None
-        if date_text is None
-        else read_date(date_text, day_first=reads_day_first(REGION))
-    )
+    day = None if date_text is None else read_date(date_text, day_first=DAY_FIRST)
     if date_text is None:
         reasons.append("no date")
     elif day is None:

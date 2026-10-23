@@ -666,8 +666,8 @@ def _score_document(
 
 
 def _iso_dates(values: FieldValues) -> FieldValues:
-    """A day-first set's values with every date that reads as `YYYY-MM-DD`, so
-    the gate, the scorer and the judges, all month first, read it as one day."""
+    """A day-first set's values with every date that reads rewritten as
+    `YYYY-MM-DD`, the one order the gate, the scorer and the judges share."""
     return {
         key: tuple(iso_date(each, day_first=True) for each in texts)
         if key in DATE_FIELDTYPES

@@ -363,7 +363,7 @@ def _read_date(text: str, day_first: bool) -> date | None:
     elif len(str(numbers[0])) == 4:
         year, month, day = numbers  # an ISO date, the one unambiguous ordering
     elif day_first:
-        day, month, year = numbers  # as a Dominican comprobante prints them
+        day, month, year = numbers  # a region in `DAY_FIRST_REGIONS`
     else:
         month, day, year = numbers  # month first, as this corpus writes them
     try:

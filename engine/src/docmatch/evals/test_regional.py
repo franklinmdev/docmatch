@@ -501,3 +501,28 @@ def test_a_dominican_date_with_a_day_above_twelve_is_compared_as_a_day(
     run = score_subset(read_labels(manifest, tmp_path), manifest, {"do0001.png": dated})
 
     assert run.fields.true_positives == 4
+
+
+def test_a_set_with_no_region_reads_its_dates_month_first(tmp_path: Path) -> None:
+    """The same text as the Dominican case, scored on a set with no region."""
+    dated = READING.model_copy(
+        update={
+            "fields": {
+                **READING.fields,
+                "date_issue": "05/03/2026",
+                "date_due": "04/04/2026",
+            }
+        }
+    )
+    manifest = a_set(tmp_path, region=None)
+
+    [checks, _] = (
+        each.gate.checks
+        for each in score_subset(
+            read_labels(manifest, tmp_path),
+            manifest,
+            {"do0001.png": dated, "do0002.png": Prediction()},
+        ).documents
+    )
+
+    assert [each.outcome for each in checks if each.rule == "dates sane"] == ["failed"]
