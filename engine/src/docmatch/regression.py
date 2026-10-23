@@ -209,8 +209,8 @@ def extraction_path(path: str, backend: str) -> bool:
     """Whether a change to this file demands this backend's row re-extracted."""
     if not _within(path, EXTRACTION) or path == DERIVED or _is_test(path):
         return False
-    read = any(path in modules for modules in READS.values())
-    return not read or path in READS[backend]
+    read_by_some = any(path in modules for modules in READS.values())
+    return not read_by_some or path in READS[backend]
 
 
 def scoring_path(path: str) -> bool:

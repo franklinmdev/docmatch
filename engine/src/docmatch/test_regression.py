@@ -131,13 +131,22 @@ def test_the_modules_each_backend_reads_are_its_imports() -> None:
 
     def imports(module: str) -> set[str]:
         tree = ast.parse((package / "extraction" / f"{module}.py").read_text())
-        found = set()
+        named: set[str] = set()
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                prefix = "docmatch.extraction."
-                if node.module.startswith(prefix):
-                    found.add(node.module.removeprefix(prefix))
-        return found
+            if isinstance(node, ast.Import):
+                named.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                assert node.level == 0, f"{module}.py imports relatively"
+                base = node.module or ""
+                named.add(base)
+                named.update(f"{base}.{alias.name}" for alias in node.names)
+        prefix = "docmatch.extraction."
+        return {
+            name.removeprefix(prefix)
+            for name in named
+            if name.startswith(prefix)
+            and (package / "extraction" / f"{name.removeprefix(prefix)}.py").exists()
+        }
 
     def reads(backend: str) -> set[str]:
         seen, todo = set(), [backend]

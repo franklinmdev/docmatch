@@ -1061,7 +1061,7 @@ checks it is fresh for what the pull request touches:
   a module a backend reads, its own or one it imports from the package, owes
   that backend's row a re-extraction (OpenAI reads Gemini's module, Azure
   reads neither the schema nor the page renderer), any other file every
-  row's, on a commit whose extraction files equal the pull request's.
+  row's, on a commit whose files for that backend equal the pull request's.
 - **Scoring paths**, `metrics/`, `evals/`, `extraction/derived.py`, `gate.py`
   and `docile/`: every row re-scored on a commit whose scoring files equal the
   pull request's.
