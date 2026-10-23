@@ -10,11 +10,11 @@ from docmatch.evals.regional import read_labels
 from docmatch.evals.regional_fixture import (
     COMPROBANTES,
     COVERAGE,
-    REGIONAL_FIELDTYPES,
     write_run,
     write_set,
 )
 from docmatch.evals.run import read_run_record
+from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 
 FIXTURE = Path(__file__).parents[3] / "tests" / "evals" / "regional"
 

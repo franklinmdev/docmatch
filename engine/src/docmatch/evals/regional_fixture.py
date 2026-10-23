@@ -40,18 +40,10 @@ from docmatch.evals.manifest import Manifest, write
 from docmatch.evals.public import digest
 from docmatch.evals.regional import FILENAME, LABELS_FILE, PAPER
 from docmatch.evals.run import MANIFEST_FILE, PREDICTIONS_FILE, RECORD_FILE
+from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 
 FIXTURE = Path(__file__).parents[3] / "tests" / "evals" / "regional"
 REGION = "do"
-REGIONAL_FIELDTYPES = (
-    "amount_tip",
-    "amount_tax_selective",
-    "amount_tax_other",
-    "document_id_modified",
-    "amount_retention_itbis",
-    "amount_retention_isr",
-)
-"""The six fieldtypes a comprobante or the 606 carries and DocILE lacks (#225)."""
 COVERAGE = (
     "vendor_name",
     "vendor_tax_id",
