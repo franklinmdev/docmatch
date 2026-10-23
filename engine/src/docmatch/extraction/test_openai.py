@@ -19,6 +19,7 @@ from docmatch.extraction.conftest import write_pdf
 from docmatch.extraction.extractor import Document, ExtractionError
 from docmatch.extraction.gemini import INSTRUCTION
 from docmatch.extraction.openai import KEY_VARIABLE, TIMEOUT, OpenAIExtractor
+from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 
 
 def a_document(tmp_path: Path, *, pages: int = 1) -> Document:
@@ -374,3 +375,24 @@ def test_a_copy_that_cannot_be_rendered_is_not_worth_retrying(
 
     assert not raised.value.retryable
     assert calls.calls == []
+
+
+def test_reads_the_regional_fieldtypes_it_is_asked_for(document: Document) -> None:
+    reading, calls = extractor(
+        answer(
+            '{"amount_tax_selective": ["12.00"], "amount_tax_other": ["3.00"],'
+            ' "amount_retention_isr": ["100.00"]}'
+        )
+    )
+
+    extracted = reading.extract(document)
+
+    (call,) = calls.calls
+    assert set(REGIONAL_FIELDTYPES) <= set(
+        call["text"]["format"]["schema"]["properties"]
+    )
+    assert extracted.prediction.fields == {
+        "amount_tax_selective": ["12.00"],
+        "amount_tax_other": ["3.00"],
+        "amount_retention_isr": ["100.00"],
+    }

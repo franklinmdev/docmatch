@@ -71,6 +71,17 @@ LIR = {
 """The 19 LIR fieldtypes, likewise."""
 
 
+REGIONAL = {
+    "amount_tip",
+    "amount_tax_selective",
+    "amount_tax_other",
+    "document_id_modified",
+    "amount_retention_itbis",
+    "amount_retention_isr",
+}
+"""The six fieldtypes a comprobante or the 606 carries and DocILE lacks (#225)."""
+
+
 def test_asks_for_every_fieldtype_the_labels_use() -> None:
     """A fieldtype the schema omits cannot be predicted, so it scores as a miss.
 
@@ -78,7 +89,7 @@ def test_asks_for_every_fieldtype_the_labels_use() -> None:
     here means a schema that drifts from the labels fails a test instead of
     quietly losing recall on whatever it dropped.
     """
-    assert set(HEADER_FIELDTYPES) == KILE
+    assert set(HEADER_FIELDTYPES) == KILE | REGIONAL
     assert set(CELL_FIELDTYPES) == LIR
 
 
@@ -131,3 +142,17 @@ def test_a_reading_of_nothing_is_a_prediction_of_nothing() -> None:
 
     assert prediction.fields == {}
     assert prediction.line_items == ()
+
+
+def test_a_reading_of_a_regional_fieldtype_reaches_the_prediction() -> None:
+    reading = Invoice(
+        amount_tip=["10%: 250.00"],
+        document_id_modified=["B0100000417"],
+        amount_retention_isr=["100.00"],
+    )
+
+    assert reading.prediction().fields == {
+        "amount_tip": ["10%: 250.00"],
+        "document_id_modified": ["B0100000417"],
+        "amount_retention_isr": ["100.00"],
+    }

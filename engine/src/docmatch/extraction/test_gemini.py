@@ -24,6 +24,7 @@ from docmatch.extraction.gemini import (
     GeminiExtractor,
 )
 from docmatch.extraction.pages import MIME_TYPE
+from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 
 
 def a_document(tmp_path: Path, *, pages: int = 1, rotate: int = 0) -> Document:
@@ -498,3 +499,23 @@ def test_a_copy_that_cannot_be_rendered_is_not_worth_retrying(
     assert not raised.value.retryable
     assert raised.value.cost == Decimal(0)
     assert calls.calls == []
+
+
+def test_reads_the_regional_fieldtypes_it_is_asked_for(document: Document) -> None:
+    reading, calls = extractor(
+        answer(
+            '{"amount_tip": ["250.00"], "document_id_modified": ["B0100000417"],'
+            ' "amount_retention_itbis": ["75.00"]}'
+        )
+    )
+
+    extracted = reading.extract(document)
+
+    (call,) = calls.calls
+    asked = call["response_format"]["schema"]["properties"]
+    assert set(REGIONAL_FIELDTYPES) <= set(asked)
+    assert extracted.prediction.fields == {
+        "amount_tip": ["250.00"],
+        "document_id_modified": ["B0100000417"],
+        "amount_retention_itbis": ["75.00"],
+    }

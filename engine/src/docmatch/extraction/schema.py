@@ -12,6 +12,11 @@ model was asked for and the names the labels use, and every disagreement about
 that table would show up in the score as an extraction error. Naming the
 fieldtypes after the labels makes the mapping the identity function.
 
+Six more fieldtypes follow the 36, for what a Dominican comprobante or the 606
+carries and DocILE does not label: the legal tip, selective and other taxes,
+the modified NCF and the printed ITBIS and ISR retentions (#225). DocILE's
+labels never name them, so on DocILE they can only be left empty.
+
 One value or several
 --------------------
 
@@ -256,6 +261,40 @@ class Invoice(BaseModel):
     bank_num: list[str] = Field(
         default_factory=list, description=_many("A bank, sort or routing code.")
     )
+    amount_tip: list[str] = Field(
+        default_factory=list,
+        description=_many("The legal tip (propina legal) charged, as an amount."),
+    )
+    amount_tax_selective: list[str] = Field(
+        default_factory=list,
+        description=_many("The selective consumption tax charged, as an amount."),
+    )
+    amount_tax_other: list[str] = Field(
+        default_factory=list,
+        description=_many(
+            "Taxes charged besides the main sales tax and the selective consumption "
+            "tax, as an amount."
+        ),
+    )
+    document_id_modified: list[str] = Field(
+        default_factory=list,
+        description=_many(
+            "The number of the earlier document this one modifies, such as the "
+            "invoice a credit or debit note corrects."
+        ),
+    )
+    amount_retention_itbis: list[str] = Field(
+        default_factory=list,
+        description=_many(
+            "The sales tax (ITBIS) withheld, when the document prints it."
+        ),
+    )
+    amount_retention_isr: list[str] = Field(
+        default_factory=list,
+        description=_many(
+            "The income tax (ISR) withheld, when the document prints it."
+        ),
+    )
     line_items: list[LineItem] = Field(
         default_factory=list,
         description="Every row of the line-item table, in the order printed.",
@@ -290,3 +329,13 @@ HEADER_FIELDTYPES = tuple(name for name in Invoice.model_fields if name != "line
 
 CELL_FIELDTYPES = tuple(LineItem.model_fields)
 """The LIR fieldtypes one row of the schema asks for."""
+
+REGIONAL_FIELDTYPES = (
+    "amount_tip",
+    "amount_tax_selective",
+    "amount_tax_other",
+    "document_id_modified",
+    "amount_retention_itbis",
+    "amount_retention_isr",
+)
+"""The six header fieldtypes beyond DocILE's, for a Dominican comprobante."""
