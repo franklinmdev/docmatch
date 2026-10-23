@@ -21,7 +21,7 @@ COVERAGE = ("vendor_tax_id", "document_id", "amount_total_gross")
 LABELS = (
     "filename,vendor_tax_id,document_id,amount_total_gross,paper\n"
     "do0001.png,130000001,B0100000001,1180.00,thermal\n"
-    "do0002.png,130000002,,590.00,letter\n"
+    "do0002.png,130000018,,590.00,letter\n"
 )
 
 
@@ -369,3 +369,63 @@ def test_refuses_a_set_that_pins_no_digest_for_its_images(tmp_path: Path) -> Non
 
     with pytest.raises(RegionalError, match="digest"):
         list(read_set(FakeExtractor(answers=[READING]), manifest, tmp_path))
+
+
+def regional_check(run: SubsetScore, document: int, rule: str) -> str:
+    return next(
+        each.outcome
+        for each in run.documents[document].gate.checks
+        if each.rule == rule
+    )
+
+
+def test_a_regional_set_gates_its_readings_with_the_admitted_regional_rules(
+    tmp_path: Path,
+) -> None:
+    misread = READING.model_copy(
+        update={"fields": {**READING.fields, "vendor_tax_id": "130000009"}}
+    )
+
+    run = scored(tmp_path, misread)
+
+    assert regional_check(run, 0, "vendor RNC") == "failed"
+    assert run.documents[0].gate.verdict == "failed"
+    assert run.documents[0].predicted
+    assert run.fields.false_positives >= 1  # kept and scored as read
+
+
+def test_a_rule_the_labels_break_is_not_added_to_the_gate(tmp_path: Path) -> None:
+    broken = LABELS.replace("B0100000001", "Z0100000001")
+    (tmp_path / "labels.csv").write_text(broken, encoding="utf-8")
+    manifest = a_set(tmp_path, broken)
+
+    run = score_subset(
+        read_labels(manifest, tmp_path),
+        manifest,
+        {"do0001.png": READING, "do0002.png": Prediction()},
+    )
+
+    names = [each.rule.name for each in run.admission if each.admitted]
+    assert "NCF" not in names
+    assert "vendor RNC" in names
+    assert all(
+        each.rule != "NCF"
+        for document in run.documents
+        for each in document.gate.checks
+    )
+
+
+def test_a_neutral_set_scores_with_no_regional_rule(tmp_path: Path) -> None:
+    manifest = a_set(tmp_path).model_copy(update={"region": None})
+
+    run = score_subset(
+        read_labels(manifest, tmp_path),
+        manifest,
+        {"do0001.png": READING, "do0002.png": Prediction()},
+    )
+
+    assert run.admission == ()
+    assert {each.rule for each in run.documents[0].gate.checks} == {
+        "dates sane",
+        "totals agree",
+    }

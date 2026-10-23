@@ -72,7 +72,7 @@ Measurement before modeling.
 - Pydantic schemas where absence is explicit rather than guessed. A confidence rides beside each value only where a backend returns one natively; no model is asked to grade itself.
 - An `Extractor` interface with three benchmarked backends: `gemini-3.1-flash-lite`, Azure Document Intelligence `prebuilt-invoice`, and `gpt-5.6-luna`. Google Document AI, Claude, a Cloud Vision OCR-then-LLM path, and local Docling stay candidates. See Extraction backends.
 - Image preprocessing: orientation from metadata, downscale to a fixed long edge, no grayscale.
-- Deterministic validation gate: totals agree and dates are sane. Only rules the labels themselves pass belong in it; line-total reconciliation, tax arithmetic, and identifier checksums fail too often on the labels or apply to almost no documents. Confidence never gates acceptance on its own.
+- Deterministic validation gate: totals agree and dates are sane. Only rules the labels themselves pass belong in it; line-total reconciliation and tax arithmetic fail too often on the labels. A region adds its identifier rules (Dominican RNC, cedula, NCF and e-NCF through python-stdnum, offline), each admitted only when every label of the regional set passes it. Confidence never gates acceptance on its own.
 - Bounded retries with per-document cost accounting.
 
 **The number:** a backend comparison table with field F1, line-item F1, gate pass rate, cost per document, and p50/p95 latency. A calibration table showing accuracy by confidence bucket. A gate ablation showing what the gate catches that confidence does not.
