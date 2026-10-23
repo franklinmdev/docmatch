@@ -1197,6 +1197,27 @@ nothing is written negative. A retention not printed is written as zero until
 only, never a number or a name from a comprobante. CI's `Regional` step
 exports the made-up set's saved run.
 
+```bash
+uv run docmatch prevalidate 606 --export data/exports/606/do-gemini \
+  --binary ~/.cache/docmatch/dgii/Pre_Validado.zip
+```
+
+`prevalidate 606` runs DGII's own pre-validator over every file the export
+wrote and prints, for the reading and for the labels control, N of M monthly
+files with zero errors and the rows with an error out of all rows. DGII's
+`Pre_Validado.zip` is downloaded from its pre-validation page with a browser's
+user agent and never committed; any file but SHA-256 `130afff...091e6` (MSI
+2.6, exe 4.0.0.9) is refused. It runs under Mono 6.12 in the container
+`engine/src/docmatch/export/prevalidator/` builds, with `--network none`,
+driven by a C# harness that types the reporter and the period and reads the
+form's error count: a file passes at zero errors, never on `Proceso
+Completado`, which shows on both outcomes. A month the export failed counts
+as failed without running, its failing documents as rows with an error, its
+other rows as withheld. The form's messages are printed with every digit as
+`#`. A pass under Mono is uncompared with one on Windows, and a pass is not
+DGII's verdict on the file. CI's `Regional` step pre-validates the made-up
+export with the binary cached by its hash; pytest never runs the container.
+
 ### Matching
 
 ```bash
@@ -1689,7 +1710,7 @@ docmatch/
       matching/        records, pairing, the rules, the case generator, the scorer
       resolution/      the catalog, the query set, the embedder, the Postgres working space, the arms, the run
       pipeline/        the loop's statuses, API, server, replay and labels backends, loop runs and their report
-      export/          the regional set's filing annotation and the 606 built from a saved run
+      export/          the regional set's filing annotation, the 606 built from a saved run, and DGII's pre-validator run over it in a container
     tests/evals/       the synthetic corpus CI runs the eval, the match, the resolve and the loop on
       regional/        made-up Dominican sets, paper and e-CF, their labels and saved runs, for the regional eval
   apps/review/         Next.js review page, from phase 4
