@@ -50,12 +50,13 @@ archive fails loudly rather than quietly moving the benchmark.
 Regional sets
 -------------
 
-A regional benchmark set is pinned by the same manifest, with three things a
-DocILE subset never declares (#213, #214): its region, its label coverage
-and the digests of its own files beside the documents, `labels.csv` among
-them. Its documents are not drawn, so its seed is 0 and nothing reproduces it
-from a pool, and its document ids are the documents' filenames, which is what
-its labels are keyed by. A manifest declaring none of the three is DocILE's,
+A regional benchmark set is pinned by the same manifest, with what a DocILE
+subset never declares (#213, #214): its region, its label coverage, the
+digests of its own files beside the documents, `labels.csv` among them, and
+the taxpayer its documents are filed by, whose number heads the 606 (#228).
+Its documents are not drawn, so its seed is 0 and nothing reproduces it from
+a pool, and its document ids are the documents' filenames, which is what its
+labels are keyed by. A manifest declaring none of them is DocILE's,
 neutral and covered for every fieldtype, and is written back without them.
 """
 
@@ -66,6 +67,7 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from stdnum.do import cedula, rnc
 
 from docmatch.extraction.schema import CELL_FIELDTYPES, HEADER_FIELDTYPES
 
@@ -130,6 +132,9 @@ class Manifest(BaseModel):
     files: dict[str, str] = {}
     """The sha256 of each of the set's own files beside its documents, by
     filename, hex; `labels.csv` is one."""
+    reporter: str | None = None
+    """The RNC or cedula of the taxpayer a regional set's documents are filed
+    by, which a report's header names; None for a set never filed."""
 
     @model_validator(mode="after")
     def _a_consistent_pin(self) -> "Manifest":
@@ -151,6 +156,13 @@ class Manifest(BaseModel):
             )
         if self.coverage is not None:
             _check_coverage(self.coverage)
+        if self.reporter is not None and not (
+            rnc.is_valid(self.reporter) or cedula.is_valid(self.reporter)
+        ):
+            raise ValueError(
+                f"the reporter {self.reporter} is neither a valid RNC nor a valid "
+                "cedula"
+            )
         return self
 
     def first(self, size: int) -> "Manifest":
@@ -294,7 +306,7 @@ def _first_problem(error: ValidationError) -> str:
     return f"{named}: {first['msg'].lower()}."
 
 
-REGIONAL_KEYS = ("region", "coverage", "files")
+REGIONAL_KEYS = ("region", "coverage", "files", "reporter")
 """What only a regional set declares, left out of a manifest that declares none."""
 
 

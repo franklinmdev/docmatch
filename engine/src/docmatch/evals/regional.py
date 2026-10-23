@@ -89,10 +89,42 @@ def read_labels(manifest: Manifest, directory: Path) -> RegionalLabels:
     """
     if manifest.coverage is None:
         raise RegionalError("a regional set's manifest declares no label coverage")
-    pinned = manifest.files.get(LABELS_FILE)
+    coverage = manifest.coverage
+    header, rows = read_pinned_csv(
+        manifest,
+        directory,
+        LABELS_FILE,
+        lambda header, path: _check_columns(header, coverage, path),
+    )
+    values: dict[str, dict[str, tuple[str, ...]]] = {}
+    papers: dict[str, str | None] = {}
+    for filename, row in rows.items():
+        paper = row.pop(PAPER, None)
+        papers[filename] = (paper.strip() or None) if paper is not None else None
+        values[filename] = {
+            fieldtype: (text.strip(),) if text.strip() else ()
+            for fieldtype, text in row.items()
+        }
+    return RegionalLabels(values=values, papers=papers)
+
+
+def read_pinned_csv(
+    manifest: Manifest,
+    directory: Path,
+    name: str,
+    check_columns: Callable[[list[str], Path], None],
+) -> tuple[list[str], dict[str, dict[str, str]]]:
+    """A CSV of the set's own, `name` in `directory`, keyed by filename: its
+    header and each pinned document's row, the filename column left out.
+
+    The file must match the digest the manifest pins for it, `check_columns`
+    must pass its header, and it must hold exactly one row for each pinned
+    document; `RegionalError` names the first thing that does not hold.
+    """
+    pinned = manifest.files.get(name)
     if pinned is None:
-        raise RegionalError(f"the manifest pins no digest for {LABELS_FILE}")
-    path = directory / LABELS_FILE
+        raise RegionalError(f"the manifest pins no digest for {name}")
+    path = directory / name
     try:
         content = path.read_bytes()
     except OSError as error:
@@ -103,35 +135,29 @@ def read_labels(manifest: Manifest, directory: Path) -> RegionalLabels:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError as error:
         raise RegionalError(f"{path} is not UTF-8: {error}") from error
-    rows = list(csv.reader(io.StringIO(text, newline="")))
-    if not rows:
+    lines = list(csv.reader(io.StringIO(text, newline="")))
+    if not lines:
         raise RegionalError(f"{path} has no header")
-    header, *body = rows
-    _check_columns(header, manifest.coverage, path)
-    values: dict[str, dict[str, tuple[str, ...]]] = {}
-    papers: dict[str, str | None] = {}
+    header, *body = lines
+    if FILENAME not in header:
+        raise RegionalError(f"{path} has no {FILENAME} column")
+    if len(header) != len(set(header)):
+        raise RegionalError(f"{path} names a column more than once")
+    check_columns(header, path)
+    rows: dict[str, dict[str, str]] = {}
     for cells in body:
         if not cells:
             continue
         row = _row(header, cells, path)
         filename = row.pop(FILENAME)
-        if filename in values:
-            raise RegionalError(f"{path} labels {filename} more than once")
-        paper = row.pop(PAPER, None)
-        papers[filename] = (paper.strip() or None) if paper is not None else None
-        values[filename] = {
-            fieldtype: (text.strip(),) if text.strip() else ()
-            for fieldtype, text in row.items()
-        }
-    _check_documents(values, manifest, path)
-    return RegionalLabels(values=values, papers=papers)
+        if filename in rows:
+            raise RegionalError(f"{path} has more than one row for {filename}")
+        rows[filename] = row
+    _check_documents(rows, manifest, path)
+    return header, rows
 
 
 def _check_columns(header: list[str], coverage: tuple[str, ...], path: Path) -> None:
-    if FILENAME not in header:
-        raise RegionalError(f"{path} has no {FILENAME} column")
-    if len(header) != len(set(header)):
-        raise RegionalError(f"{path} names a column more than once")
     unknown = [
         column for column in header if column not in (FILENAME, PAPER, *coverage)
     ]
@@ -166,7 +192,8 @@ def _check_documents(
     unpinned = [each for each in values if each not in pinned]
     if unpinned:
         raise RegionalError(
-            f"{path} labels {', '.join(unpinned)}, which the manifest does not pin"
+            f"{path} has a row for {', '.join(unpinned)}, which the manifest does "
+            "not pin"
         )
 
 

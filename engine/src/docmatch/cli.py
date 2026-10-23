@@ -128,6 +128,9 @@ from docmatch.evals.run import (
     read_saved_run,
     score_subset,
 )
+from docmatch.export import dgii606
+from docmatch.export.dgii606 import ExportError
+from docmatch.export.filing import read_filing
 from docmatch.extraction import azure, backends, ecf, gemini, pages
 from docmatch.extraction.extractor import ExtractionError, Extractor
 from docmatch.extraction.gemini import GeminiExtractor
@@ -793,6 +796,39 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"(default: ${DATABASE_URL_VARIABLE}, else {DEFAULT_DATABASE_URL})"
         ),
     )
+    filing_export = subcommands.add_parser(
+        "export",
+        help=(
+            "write a regional set's tax report from a saved run, beside the "
+            "same report from its labels"
+        ),
+    )
+    filing_export.add_argument(
+        "report",
+        choices=("606",),
+        help="606, DGII's monthly report of purchases, one file per month",
+    )
+    filing_export.add_argument(
+        "--manifest",
+        type=Path,
+        required=True,
+        help=(
+            "the regional set, whose labels.csv and filing.csv are beside it "
+            "and which names the reporter"
+        ),
+    )
+    filing_export.add_argument(
+        "--run",
+        type=Path,
+        required=True,
+        help="a directory `extract --out` wrote over the whole set",
+    )
+    filing_export.add_argument(
+        "--out",
+        type=Path,
+        required=True,
+        help="a new or empty directory for reading/, control/ and export.json",
+    )
     counts = subcommands.add_parser(
         "corpus",
         parents=[dataset],
@@ -996,6 +1032,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         RegressionError,
         ReproduceError,
         RegionalError,
+        ExportError,
     ) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
@@ -1024,6 +1061,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
         return _regression(arguments)
     if arguments.command == "reproduce":
         return _reproduce(arguments)
+    if arguments.command == "export":
+        return _export_606(arguments)
     dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
     if arguments.command == "serve":
         return _serve(arguments, dataset)
@@ -1103,6 +1142,44 @@ def _eval(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, i
         None if arguments.aggregate is None else _aggregate(arguments, dataset, run)
     )
     return render_eval(arguments.manifest, run, corrected, written), 0
+
+
+def _export_606(arguments: argparse.Namespace) -> tuple[str, int]:
+    """Write a Dominican set's 606 from a saved run and from its labels.
+
+    The run must cover the whole set, as an eval row's does; a document it
+    holds no reading for is one whose extraction failed. Exits 0 whenever it
+    prints, failed months included: they are the number (#215).
+    """
+    pinned = manifest.load(arguments.manifest)
+    if pinned.region != dgii606.REGION:
+        raise RegionalError(
+            f"{arguments.manifest} pins a set of region {pinned.region or 'none'}, "
+            f"and the 606 is filed for region {dgii606.REGION}"
+        )
+    if pinned.reporter is None:
+        raise RegionalError(
+            f"{arguments.manifest} names no reporter, the RNC or cedula a 606 is "
+            "filed as"
+        )
+    saved = read_saved_run(arguments.run, pinned, arguments.manifest)
+    _check_region(arguments.run / RECORD_FILE, pinned)
+    directory = arguments.manifest.parent
+    labels = read_labels(pinned, directory)
+    filing = read_filing(pinned, directory)
+    exported = dgii606.export_606(
+        pinned.reporter,
+        {name: reading.header for name, reading in saved.predictions.items()},
+        {name: labels.header(name) for name in pinned.document_ids},
+        {name: filing[name] for name in pinned.document_ids},
+    )
+    dgii606.write_export(exported, arguments.out, arguments.manifest, arguments.run)
+    return (
+        dgii606.render_export(
+            exported, arguments.out, arguments.manifest, arguments.run
+        ),
+        0,
+    )
 
 
 def _check_region(record: Path, pinned: Manifest) -> None:

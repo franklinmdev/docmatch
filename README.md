@@ -1113,15 +1113,17 @@ Republic:
 
 ```text
 data/regional/do/
-  manifest.json   region, coverage, a sha256 per image and one for labels.csv
+  manifest.json   region, coverage, reporter, a sha256 per image and per CSV
   labels.csv      filename, one column per covered fieldtype, then paper
+  filing.csv      filename, then the owner's filing choices for the 606
   do0001.jpg      one image per comprobante, named by the manifest
 ```
 
-The manifest is the fixed subset's with three more keys: `region`, the region
-the set belongs to; `coverage`, the fieldtypes its labels hold; and `files`,
-the digest of `labels.csv`, so a label edited after pinning is refused rather
-than scored. A row of `labels.csv` labels one image; an empty cell says the
+The manifest is the fixed subset's with four more keys: `region`, the region
+the set belongs to; `coverage`, the fieldtypes its labels hold; `files`, the
+digest of `labels.csv` and `filing.csv`, so a label edited after pinning is
+refused rather than scored; and `reporter`, the RNC or cedula the set's 606 is
+filed as. A row of `labels.csv` labels one image; an empty cell says the
 comprobante prints no such value, so a reading of one is a false positive, and
 a fieldtype outside `coverage` is not scored at all. The `paper` column (for
 example `thermal` or `letter`) is never a value. The committed made-up set in
@@ -1164,6 +1166,36 @@ and never verifies the signature. A vision backend refuses an e-CF set and the
 parser refuses a set of images. The committed made-up e-CFs in
 `engine/tests/evals/regional/ecf/` validate against the XSDs in CI, which
 downloads them, and CI's `Regional e-CF` step scores the parser's saved run.
+
+### The 606
+
+```bash
+uv run docmatch export 606 --manifest data/regional/do/manifest.json \
+  --run data/runs/regional/do-gemini --out data/exports/606/do-gemini
+```
+
+`export 606` writes DGII's monthly report of purchases twice, from the run's
+readings into `reading/` and from `labels.csv` into `control/`, one
+`DGII_F_606_<reporter>_<AAAAMM>.TXT` per month of the comprobante dates, with
+`export.json` listing every month's file or why it has none. The layout is the
+instructivo's, DGII's February 2026 edition: a header line, then 23
+pipe-delimited columns per comprobante. A column is read (RNC, NCF, dates,
+ITBIS, retentions printed on the comprobante, selective and other taxes, tip),
+computed (Tipo Id from the identifier's length, the services and goods split
+of the net amount, the total, ITBIS por adelantar), or taken from
+`filing.csv`, the owner's choices a comprobante does not print: whether it is
+reported, purchase type, services or goods or the services amount, payment
+date and method, ITBIS to proportionality and to cost, ISR retention type.
+`filing.csv` is never scored, so the two sides differ only in what was read.
+
+A document with no reading, or one missing its NCF, RNC or date, fails its
+month, which gets no file; one with no readable date, or no reading, fails a
+`no month` row. So does an RNC, cedula or NCF python-stdnum does not validate,
+a negative amount, and a split, retention or ITBIS share beyond what was read:
+nothing is written negative. A retention not printed is written as zero until
+#230 computes it at the rate in force. The report prints counts and reasons
+only, never a number or a name from a comprobante. CI's `Regional` step
+exports the made-up set's saved run.
 
 ### Matching
 
@@ -1657,6 +1689,7 @@ docmatch/
       matching/        records, pairing, the rules, the case generator, the scorer
       resolution/      the catalog, the query set, the embedder, the Postgres working space, the arms, the run
       pipeline/        the loop's statuses, API, server, replay and labels backends, loop runs and their report
+      export/          the regional set's filing annotation and the 606 built from a saved run
     tests/evals/       the synthetic corpus CI runs the eval, the match, the resolve and the loop on
       regional/        made-up Dominican sets, paper and e-CF, their labels and saved runs, for the regional eval
   apps/review/         Next.js review page, from phase 4
