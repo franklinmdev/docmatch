@@ -1789,6 +1789,10 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     # documents of spend.
     _check_kind(arguments.backend, pinned)
     if arguments.backend == ecf.BACKEND:
+        if arguments.model is not None:
+            raise RegionalError(
+                "the ecf backend parses with no model, so --model is not taken"
+            )
         backend: Extractor = ecf.ECFExtractor()
     else:
         backend = backends.extractor(

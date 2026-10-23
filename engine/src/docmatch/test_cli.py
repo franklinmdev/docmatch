@@ -3327,6 +3327,29 @@ def test_extract_parses_an_e_cf_set_at_no_cost_into_the_committed_run(
     )
 
 
+def test_extract_refuses_a_model_for_the_e_cf_parser(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The parser has no model to choose, so a --model is a mistake, not a
+    choice to drop silently."""
+    exit_code = main(
+        extract_ecf(
+            tmp_path / "run",
+            REGIONAL / "ecf" / "manifest.json",
+            "--backend",
+            "ecf",
+            "--model",
+            "gemini-3-flash",
+        )
+    )
+
+    assert exit_code == 1
+    assert capsys.readouterr().err == (
+        "docmatch: the ecf backend parses with no model, so --model is not taken\n"
+    )
+    assert not (tmp_path / "run").exists()
+
+
 def test_extract_refuses_the_e_cf_parser_on_a_set_of_images(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
