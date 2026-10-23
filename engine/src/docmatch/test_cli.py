@@ -3102,3 +3102,66 @@ def test_eval_refuses_an_aggregate_row_for_a_regional_set(
     assert exit_code == 1
     assert "regional" in capsys.readouterr().err
     assert not (tmp_path / "a.json").exists()
+
+
+def test_extract_reads_a_regional_set_from_its_own_directory_and_records_its_region(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No DocILE dataset and no public copies: the set is its manifest's
+    directory, and the run says which region it read (#222)."""
+    fake = FakeExtractor(answers=[READING])
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
+    out = tmp_path / "run"
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(out),
+            "--manifest",
+            str(REGIONAL / "do" / "manifest.json"),
+            "--data-dir",
+            str(tmp_path / "nothing"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert [each.document_id for each in fake.attempts] == [
+        "do0001.png",
+        "do0002.png",
+        "do0003.png",
+    ]
+    assert json.loads((out / "run.json").read_text())["region"] == "do"
+    assert load(out / "manifest.json").region == "do"
+    assert list(read_predictions(out / "predictions.json")) == [
+        "do0001.png",
+        "do0002.png",
+        "do0003.png",
+    ]
+    capsys.readouterr()
+    assert main(evaluate_regional_run(out)) == 0
+    assert "Regional set" in capsys.readouterr().out
+
+
+def evaluate_regional_run(out: Path) -> list[str]:
+    return [
+        "eval",
+        "--manifest",
+        str(REGIONAL / "do" / "manifest.json"),
+        "--predictions",
+        str(out / "predictions.json"),
+    ]
+
+
+def test_extract_on_a_neutral_set_records_no_region(
+    tmp_path: Path, pinned_copies: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeExtractor(answers=[READING])
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
+    out = tmp_path / "run"
+
+    assert main(extracting(pinned_copies, out)) == 0
+
+    assert "region" not in json.loads((out / "run.json").read_text())

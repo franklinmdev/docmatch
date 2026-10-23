@@ -64,6 +64,7 @@ engine's, the terminal is this module's.
 """
 
 import argparse
+import json
 import os
 import sys
 from collections import Counter
@@ -99,7 +100,12 @@ from docmatch.evals.failures import (
 )
 from docmatch.evals.manifest import Manifest, ManifestError, Reason
 from docmatch.evals.public import PublicCopyError
-from docmatch.evals.regional import RegionalError, RegionalLabels, read_labels
+from docmatch.evals.regional import (
+    RegionalError,
+    RegionalLabels,
+    read_labels,
+    read_set,
+)
 from docmatch.evals.run import (
     CONFIDENCE_FILE,
     CURRENCY_SYMBOLS_FILE,
@@ -1778,13 +1784,23 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     backend = backends.extractor(
         arguments.backend, arguments.model, long_edge=arguments.long_edge
     )
-    reading = extract_subset(
-        backend,
-        dataset,
-        pinned,
-        arguments.copies,
-        attempts=arguments.attempts,
-        cost_cap=arguments.cost_cap,
+    reading = (
+        extract_subset(
+            backend,
+            dataset,
+            pinned,
+            arguments.copies,
+            attempts=arguments.attempts,
+            cost_cap=arguments.cost_cap,
+        )
+        if pinned.region is None
+        else read_set(
+            backend,
+            pinned,
+            arguments.manifest.parent,
+            attempts=arguments.attempts,
+            cost_cap=arguments.cost_cap,
+        )
     )
     _prepare(arguments.out)
     commit, dirty = _extracted_on(arguments.backend)
@@ -1863,10 +1879,25 @@ def _write(extracted: Run, out: Path) -> None:
         write_predictions(extracted, out / PREDICTIONS_FILE)
         write_manifest(extracted, out / MANIFEST_FILE)
         write_record(extracted, out / RECORD_FILE)
+        if extracted.manifest.region is not None:
+            _record_region(out / RECORD_FILE, extracted.manifest.region)
         write_confidence(extracted, out / CONFIDENCE_FILE)
         write_currency_symbols(extracted, out / CURRENCY_SYMBOLS_FILE)
     except OSError as error:
         raise ExtractionError(f"cannot write the run to {out}: {error}") from error
+
+
+def _record_region(path: Path, region: str) -> None:
+    """Add the region of the set read to the run's record, for `eval` and
+    `export` to read from the run rather than from a flag (#222).
+
+    Added here, after `write_record`, because a change under `extraction/`
+    owes every backend a paid re-extraction before the regression gate
+    passes (#153), and the record is the same file either way.
+    """
+    body = json.loads(path.read_text("utf-8"))
+    body["region"] = region
+    path.write_text(json.dumps(body, indent=2, ensure_ascii=False) + "\n", "utf-8")
 
 
 def _match(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
