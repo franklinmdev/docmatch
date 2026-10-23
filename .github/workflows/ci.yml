@@ -136,6 +136,16 @@ jobs:
           --manifest engine/tests/evals/regional/ecf/manifest.json
           --predictions engine/tests/evals/regional/ecf-run/predictions.json
 
+      # The made-up set's 606, from its saved run and from its labels: one
+      # file per month on each side, written to a scratch directory. It only
+      # prints; pre-validating the files is #229's step.
+      - name: Export 606
+        run: >-
+          uv run docmatch export 606
+          --manifest engine/tests/evals/regional/do/manifest.json
+          --run engine/tests/evals/regional/run
+          --out ${{ runner.temp }}/606
+
       # The matching report on the same synthetic subset: cases generated
       # from its labels at the real sizes, matched and scored, then matched
       # again with the fixture's saved readings as the invoices, so the whole
