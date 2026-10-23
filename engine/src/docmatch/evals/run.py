@@ -35,6 +35,17 @@ right reading it failed. When the run saved a confidence, the sweep in
 `confidence` sets it beside the gate at every fixed edge, and the calibration
 table says what each bucket of it is worth; a run with none has no signal.
 
+Label coverage
+--------------
+
+A regional set's labels were written for the fieldtypes its manifest covers
+and no others (#213, #214). A reading of any other fieldtype is neither right
+nor wrong, since nobody labeled it, so it is dropped from the reading before
+either scorer sees it, and from what the ablation and the calibration judge;
+the gate still checks the whole reading, as it would in the pipeline. A
+manifest declaring no coverage, DocILE's, covers every fieldtype and is
+scored exactly as before.
+
 Counts, not values
 ------------------
 
@@ -49,6 +60,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
@@ -71,6 +83,7 @@ from docmatch.extraction.extractor import Confidence
 from docmatch.gate import RULES, GateResult, RuleName, gate
 from docmatch.metrics.fields import (
     FieldScore,
+    FieldValues,
     Prediction,
     PredictionError,
     first_problem,
@@ -515,8 +528,34 @@ NO_CONFIDENCE = Confidence()
 """What a document with no saved confidence is judged with: none on any value."""
 
 
+class Labels(Protocol):
+    """Where a set's labels come from: DocILE's annotations, or a regional set's
+    `labels.csv`."""
+
+    def header(self, document_id: str) -> FieldValues:
+        """The document's labeled header values, by fieldtype."""
+        ...
+
+    def rows(self, document_id: str) -> tuple[FieldValues, ...]:
+        """The document's labeled line items."""
+        ...
+
+
+@dataclass(frozen=True)
+class _Docile:
+    """DocILE's annotations as labels."""
+
+    dataset: DocileDataset
+
+    def header(self, document_id: str) -> FieldValues:
+        return labeled_fields(self.dataset.annotation(document_id))
+
+    def rows(self, document_id: str) -> tuple[FieldValues, ...]:
+        return labeled_line_items(self.dataset.annotation(document_id))
+
+
 def score_subset(
-    dataset: DocileDataset,
+    dataset: DocileDataset | Labels,
     manifest: Manifest,
     predictions: Mapping[str, Prediction],
     *,
@@ -529,15 +568,17 @@ def score_subset(
     amounts, the second source of its derived currency. `confidence` is what
     it returned beside each reading; a run with none has no signal.
     """
+    labels = _Docile(dataset) if isinstance(dataset, DocileDataset) else dataset
     symbols = currency_symbols or {}
     saved = confidence or {}
     documents = tuple(
         _score_document(
-            dataset,
+            labels,
             document_id,
             predictions.get(document_id),
             symbols.get(document_id, {}),
             saved.get(document_id, NO_CONFIDENCE),
+            manifest.coverage,
         )
         for document_id in manifest.document_ids
     )
@@ -553,21 +594,23 @@ def score_subset(
 
 
 def _score_document(
-    dataset: DocileDataset,
+    labels: Labels,
     document_id: str,
     prediction: Prediction | None,
     currency_symbols: Mapping[str, Sequence[str]],
     confidence: Confidence,
+    coverage: tuple[str, ...] | None,
 ) -> DocumentScore:
-    annotation = dataset.annotation(document_id)
+    labeled = labels.header(document_id)
+    labeled_rows = labels.rows(document_id)
     predicted = prediction is not None
     prediction = NOTHING if prediction is None else prediction
-    labeled = labeled_fields(annotation)
     reading = derived_header(prediction, currency_symbols)
-    fields = score_fields(labeled, reading)
-    as_read = score_fields(labeled, prediction.header)
-    line_items = score_line_items(labeled_line_items(annotation), prediction.rows)
     gated = gate(reading)
+    covered, confidence = _covered(prediction, confidence, coverage)
+    fields = score_fields(labeled, _only(reading, coverage))
+    as_read = score_fields(labeled, covered.header)
+    line_items = score_line_items(labeled_rows, covered.rows)
     return DocumentScore(
         document_id=document_id,
         predicted=predicted,
@@ -575,17 +618,68 @@ def _score_document(
         fields_as_read=as_read,
         line_items=line_items,
         gate=gated,
-        wrong=_wrong(gated, fields),
-        values=judge_header(prediction.fields, confidence, as_read),
-        cells=judge_cells(prediction.line_items, confidence, line_items),
+        wrong=_wrong(gated, fields, coverage),
+        values=judge_header(covered.fields, confidence, as_read),
+        cells=judge_cells(covered.line_items, confidence, line_items),
         gated_confidence=gated_confidence(prediction.fields, confidence, gated),
     )
 
 
-def _wrong(gated: GateResult, fields: FieldScore) -> bool:
-    """Whether the field scorer left any value the gate used unmatched."""
+def _only(values: FieldValues, coverage: tuple[str, ...] | None) -> FieldValues:
+    """The values of covered fieldtypes; every value when nothing is declared."""
+    if coverage is None:
+        return values
+    return {key: value for key, value in values.items() if key in coverage}
+
+
+def _covered(
+    prediction: Prediction, confidence: Confidence, coverage: tuple[str, ...] | None
+) -> tuple[Prediction, Confidence]:
+    """The reading and its confidence with every uncovered value dropped.
+
+    A row left with no covered cell is dropped with its confidence, so the
+    confidence of each row left still sits at that row's index.
+    """
+    if coverage is None:
+        return prediction, confidence
+    kept = [
+        (
+            {key: value for key, value in row.items() if key in coverage},
+            confidence.line_items[index] if index < len(confidence.line_items) else {},
+        )
+        for index, row in enumerate(prediction.line_items)
+    ]
+    kept = [(row, cells) for row, cells in kept if row]
+    return (
+        Prediction(
+            fields={
+                key: value
+                for key, value in prediction.fields.items()
+                if key in coverage
+            },
+            line_items=tuple(row for row, _ in kept),
+        ),
+        Confidence(
+            fields={
+                key: value
+                for key, value in confidence.fields.items()
+                if key in coverage
+            },
+            line_items=tuple(
+                {key: value for key, value in cells.items() if key in coverage}
+                for _, cells in kept
+            ),
+        ),
+    )
+
+
+def _wrong(
+    gated: GateResult, fields: FieldScore, coverage: tuple[str, ...] | None
+) -> bool:
+    """Whether the field scorer left any covered value the gate used unmatched."""
     matched = {each.fieldtype: set(each.matched) for each in fields.per_fieldtype}
     return any(
         normalize(fieldtype, text) not in matched.get(fieldtype, set())
         for fieldtype, text in gated.used
+        if coverage is None or fieldtype in coverage
     )

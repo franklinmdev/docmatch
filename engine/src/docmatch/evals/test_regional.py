@@ -7,6 +7,9 @@ import pytest
 from docmatch.evals.manifest import Manifest
 from docmatch.evals.public import digest
 from docmatch.evals.regional import LabelsError, read_labels
+from docmatch.evals.run import SubsetScore, score_subset
+from docmatch.extraction.extractor import Confidence
+from docmatch.metrics.fields import Prediction
 
 COVERAGE = ("vendor_tax_id", "document_id", "amount_total_gross")
 
@@ -162,3 +165,111 @@ def test_refuses_a_row_with_more_cells_than_columns(tmp_path: Path) -> None:
 
     with pytest.raises(LabelsError, match="do0001.png"):
         read_labels(a_set(tmp_path, text), tmp_path)
+
+
+READING = Prediction(
+    fields={
+        "vendor_tax_id": "130000001",
+        "document_id": "B0100000001",
+        "amount_total_gross": "1180.00",
+    }
+)
+"""do0001.png read right on every covered fieldtype."""
+
+
+def scored(
+    directory: Path,
+    first: Prediction = READING,
+    *,
+    confidence: dict[str, Confidence] | None = None,
+) -> SubsetScore:
+    manifest = a_set(directory)
+    return score_subset(
+        read_labels(manifest, directory),
+        manifest,
+        {"do0001.png": first, "do0002.png": Prediction()},
+        confidence=confidence,
+    )
+
+
+def test_a_reading_of_an_uncovered_fieldtype_is_neither_right_nor_wrong(
+    tmp_path: Path,
+) -> None:
+    """Nobody labeled it, so nobody can say: the score is the covered one's."""
+    uncovered = READING.model_copy(
+        update={"fields": {**READING.fields, "vendor_email": "ventas@example.do"}}
+    )
+
+    with_it = scored(tmp_path, uncovered).fields
+    without = scored(tmp_path).fields
+
+    assert (with_it.true_positives, with_it.false_positives) == (3, 0)
+    assert (without.true_positives, without.false_positives) == (3, 0)
+
+
+def test_a_reading_of_a_value_labeled_absent_is_a_false_positive(
+    tmp_path: Path,
+) -> None:
+    manifest = a_set(tmp_path)
+    run = score_subset(
+        read_labels(manifest, tmp_path),
+        manifest,
+        {"do0002.png": Prediction(fields={"document_id": "B0100000002"})},
+    )
+
+    assert run.fields.false_positives == 1
+
+
+def test_a_covered_value_left_unread_is_a_false_negative(tmp_path: Path) -> None:
+    run = scored(tmp_path)
+
+    # do0002.png's two labeled values, read as nothing.
+    assert run.fields.false_negatives == 2
+
+
+def test_a_line_item_read_on_a_set_covering_no_cell_is_not_a_false_positive(
+    tmp_path: Path,
+) -> None:
+    rows = READING.model_copy(
+        update={
+            "line_items": (
+                {"line_item_description": "Arroz", "line_item_quantity": "1"},
+            )
+        }
+    )
+
+    run = scored(tmp_path, rows)
+
+    assert run.line_items.false_positives == 0
+    assert run.line_items.true_positives == 0
+
+
+def test_the_breakdown_by_fieldtype_lists_only_covered_fieldtypes(
+    tmp_path: Path,
+) -> None:
+    uncovered = READING.model_copy(
+        update={"fields": {**READING.fields, "vendor_email": "ventas@example.do"}}
+    )
+
+    run = scored(tmp_path, uncovered)
+
+    assert {each.fieldtype for each in run.per_fieldtype} == set(COVERAGE)
+
+
+def test_calibration_judges_only_covered_values(tmp_path: Path) -> None:
+    uncovered = READING.model_copy(
+        update={"fields": {**READING.fields, "vendor_email": "ventas@example.do"}}
+    )
+    confidence = Confidence(
+        fields={
+            "vendor_tax_id": (0.95,),
+            "document_id": (0.95,),
+            "amount_total_gross": (0.95,),
+            "vendor_email": (0.95,),
+        }
+    )
+
+    run = scored(tmp_path, uncovered, confidence={"do0001.png": confidence})
+
+    assert run.calibration is not None
+    assert sum(bucket.n for bucket in run.calibration.header.buckets) == 3
