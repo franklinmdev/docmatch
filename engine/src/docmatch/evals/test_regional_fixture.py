@@ -14,6 +14,7 @@ from docmatch.evals.regional_fixture import (
     write_set,
 )
 from docmatch.evals.run import read_run_record
+from docmatch.export.filing import read_filing
 from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 
 FIXTURE = Path(__file__).parents[3] / "tests" / "evals" / "regional"
@@ -81,6 +82,19 @@ def test_the_set_written_reads_back_as_its_own_labels(tmp_path: Path) -> None:
     )
 
 
+def test_the_set_written_files_its_606_as_the_buyer_of_its_b01(
+    tmp_path: Path,
+) -> None:
+    write_set(tmp_path)
+    manifest = load(tmp_path / "manifest.json")
+
+    filing = read_filing(manifest, tmp_path)
+
+    assert manifest.reporter == COMPROBANTES[0].labels["customer_tax_id"]
+    assert list(filing) == [each.filename for each in COMPROBANTES]
+    assert [each.reported for each in filing.values()] == [True, False, True, True]
+
+
 def test_the_manifest_pins_the_digest_of_every_image_written(tmp_path: Path) -> None:
     write_set(tmp_path)
     manifest = load(tmp_path / "manifest.json")
@@ -105,7 +119,12 @@ def test_the_committed_labels_and_run_are_what_the_generator_writes(
     write_set(tmp_path / "do")
     write_run(tmp_path / "run", load(tmp_path / "do" / "manifest.json"))
 
-    for name in ("do/labels.csv", "run/predictions.json", "run/run.json"):
+    for name in (
+        "do/labels.csv",
+        "do/filing.csv",
+        "run/predictions.json",
+        "run/run.json",
+    ):
         assert (FIXTURE / name).read_bytes() == (tmp_path / name).read_bytes(), name
 
 

@@ -24,6 +24,12 @@ one comprobante read right with a value of a fieldtype the set does not cover
 and a line item, one with its NCF misread, one with its tax left unread
 and one read right.
 
+Beside the labels, `filing.csv` holds the made-up reporter's filing annotation
+(#228) and the manifest names that reporter, the B01's buyer: the consumo is
+not reported, the E31 is paid with its retentions printed, the nota de
+credito is settled as one. The export does not check a comprobante's buyer
+against the reporter, so the E31 to a person stands in the same 606.
+
 Regenerate with `uv run python -m docmatch.evals.regional_fixture`.
 """
 
@@ -40,6 +46,8 @@ from docmatch.evals.manifest import Manifest, write
 from docmatch.evals.public import digest
 from docmatch.evals.regional import FILENAME, LABELS_FILE, PAPER
 from docmatch.evals.run import MANIFEST_FILE, PREDICTIONS_FILE, RECORD_FILE
+from docmatch.export.filing import COLUMNS as FILING_COLUMNS
+from docmatch.export.filing import FILING_FILE
 from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 
 FIXTURE = Path(__file__).parents[3] / "tests" / "evals" / "regional"
@@ -66,6 +74,10 @@ def _rnc(base: str) -> str:
     return base + rnc.calc_check_digit(base)
 
 
+REPORTER = _rnc("13099002")
+"""The made-up company the set's 606 is filed as, the B01's buyer."""
+
+
 def _cedula(base: str) -> str:
     return base + luhn.calc_check_digit(base)
 
@@ -83,6 +95,8 @@ class Comprobante:
     labels: dict[str, str]
     """Every covered fieldtype to its printed value; empty is a labeled absence."""
     paper: str
+    filing: str
+    """Its `filing.csv` row past the filename, the reporter's made-up choices."""
     customer_name: str = ""
 
 
@@ -102,6 +116,7 @@ COMPROBANTES = (
             amount_tax_other="25.00",
         ),
         paper="thermal",
+        filing="yes,09,goods,,4,,,",
         customer_name="Constructora Arenal SRL",
     ),
     Comprobante(
@@ -117,6 +132,7 @@ COMPROBANTES = (
             amount_tip="70.00",
         ),
         paper="thermal",
+        filing="no,,,,,,,",
     ),
     Comprobante(
         filename="do0003.png",
@@ -133,6 +149,7 @@ COMPROBANTES = (
             amount_retention_isr="800.00",
         ),
         paper="letter",
+        filing="yes,02,services,2026-05-30,2,all,,2",
         customer_name="Ana Perez",
     ),
     Comprobante(
@@ -149,6 +166,7 @@ COMPROBANTES = (
             document_id_modified="B0100000417",
         ),
         paper="thermal",
+        filing="yes,09,goods,,6,,75.00,",
         customer_name="Constructora Arenal SRL",
     ),
 )
@@ -223,6 +241,13 @@ def labels_csv() -> str:
     return "\n".join((header, *rows)) + "\n"
 
 
+def filing_csv() -> str:
+    """The set's filing annotation as `filing.csv` holds it."""
+    header = ",".join((FILENAME, *FILING_COLUMNS))
+    rows = (f"{each.filename},{each.filing}" for each in COMPROBANTES)
+    return "\n".join((header, *rows)) + "\n"
+
+
 def _cell(value: str) -> str:
     return f'"{value}"' if "," in value else value
 
@@ -234,6 +259,8 @@ def write_set(directory: Path) -> Manifest:
         draw(each).save(directory / each.filename, "PNG")
     labels = labels_csv().encode()
     (directory / LABELS_FILE).write_bytes(labels)
+    filing = filing_csv().encode()
+    (directory / FILING_FILE).write_bytes(filing)
     manifest = Manifest(
         split="paper",
         seed=0,
@@ -246,7 +273,8 @@ def write_set(directory: Path) -> Manifest:
         },
         region=REGION,
         coverage=COVERAGE,
-        files={LABELS_FILE: digest(labels)},
+        files={LABELS_FILE: digest(labels), FILING_FILE: digest(filing)},
+        reporter=REPORTER,
     )
     write(manifest, directory / MANIFEST_FILE)
     return manifest

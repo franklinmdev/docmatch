@@ -34,6 +34,8 @@
     "amount_retention_isr"
   ],
   "files": {
-    "labels.csv": "5ff3bbff611171fc0db97ad5ccbe03ab48e43ae0912b1ce974617a35dfddcd1d"
-  }
+    "labels.csv": "5ff3bbff611171fc0db97ad5ccbe03ab48e43ae0912b1ce974617a35dfddcd1d",
+    "filing.csv": "78681bc55f182280c29095fcbaeff7a6d0e8e4ac2d00f0e74d3c5c1864e690c1"
+  },
+  "reporter": "130990026"
 }

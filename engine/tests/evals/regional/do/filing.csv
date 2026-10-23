@@ -1,0 +1,5 @@
+filename,reported,purchase_type,split,payment_date,payment_method,itbis_proportional,itbis_to_cost,isr_retention_type
+do0001.png,yes,09,goods,,4,,,
+do0002.png,no,,,,,,,
+do0003.png,yes,02,services,2026-05-30,2,all,,2
+do0004.png,yes,09,goods,,6,,75.00,
