@@ -187,3 +187,10 @@ def test_a_comprobante_amount_is_read_as_a_number(fieldtype: str) -> None:
     """A tip, tax or retention printed with a symbol and separators matches
     the plain amount its label carries, as every other amount does (#225)."""
     assert normalize(fieldtype, "RD$ 1,250.00") == normalize(fieldtype, "1250")
+
+
+def test_a_modified_ncf_keeps_its_zeros() -> None:
+    """A modified NCF is an identifier: the number rule would read it as 100000001."""
+    assert normalize("document_id_modified", "B0100000001") != normalize(
+        "document_id_modified", "B100000001"
+    )
