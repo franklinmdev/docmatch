@@ -17,6 +17,18 @@ that every tutorial still shows is documented as legacy on
 https://ai.google.dev/gemini-api/docs/interactions, which is why it is not used
 here.
 
+Storage
+-------
+
+The Interactions API stores every request by default, 55 days on the paid tier
+and 1 day on the free one, and `store=false` opts out; the same page notes it
+is incompatible with background execution and with `previous_interaction_id`,
+neither of which this backend uses. Every request sends it (#212, #223). That
+nothing else is kept beyond an abuse log is #212's reading and not on this page:
+unverified.
+https://ai.google.dev/gemini-api/docs/interactions, read 2026-10-22, against
+`google-genai` 2.23.0, whose `interactions.create` takes `store: bool`.
+
 Why not the cheapest model
 --------------------------
 
@@ -226,6 +238,7 @@ class Interactions(Protocol):
         model: str,
         input: list[dict[str, Any]],
         response_format: dict[str, Any],
+        store: bool,
     ) -> object: ...
 
 
@@ -345,7 +358,10 @@ class GeminiExtractor:
         started = time.perf_counter()
         try:
             answer = self.interactions.create(
-                model=self.model, input=content, response_format=response_format
+                model=self.model,
+                input=content,
+                response_format=response_format,
+                store=False,
             )
         except Exception as error:
             raise ExtractionError(

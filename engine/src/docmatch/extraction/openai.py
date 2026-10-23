@@ -37,6 +37,12 @@ All read 2026-09-16, against `openai` 3.14.1:
   tokens "are billed as output tokens" and are already inside `output_tokens`,
   and `input_tokens_details` carries `cached_tokens` and `cache_write_tokens`.
   A refusal is an output part of type `refusal`.
+- `store=False` on every request: "Responses are stored by default. ... To
+  disable storage ..., set `store: false`", on
+  https://developers.openai.com/api/docs/guides/migrate-to-responses, read
+  2026-10-22, against `openai` 3.14.1, whose `responses.create` takes
+  `store: Optional[bool]`. That nothing else is kept beyond an abuse log is
+  #212's reading and not on that page: unverified (#212, #223).
 - `OpenAI(max_retries=0)` is one request and no retries; the SDK's default is
   two, with a 600 second timeout.
 
@@ -183,7 +189,7 @@ class Responses(Protocol):
     key and without a network.
     """
 
-    def create(self, *, model: str, input: Any, text: Any) -> Response: ...
+    def create(self, *, model: str, input: Any, text: Any, store: bool) -> Response: ...
 
 
 @dataclass(frozen=True)
@@ -223,6 +229,7 @@ class OpenAIExtractor:
                 model=self.model,
                 input=[{"role": "user", "content": _content(pages)}],
                 text=text,
+                store=False,
             )
         except Exception as error:
             raise ExtractionError(
