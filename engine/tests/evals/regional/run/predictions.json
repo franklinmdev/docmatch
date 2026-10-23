@@ -8,7 +8,13 @@
       "date_issue": "14/03/2026",
       "amount_total_net": "2,500.00",
       "amount_total_tax": "375.00",
-      "amount_total_gross": "2,875.00",
+      "amount_total_gross": "2,950.00",
+      "amount_tip": null,
+      "amount_tax_selective": "50.00",
+      "amount_tax_other": "25.00",
+      "document_id_modified": null,
+      "amount_retention_itbis": null,
+      "amount_retention_isr": null,
       "vendor_email": "ventas@example.do"
     },
     "line_items": [
@@ -27,7 +33,13 @@
       "date_issue": "02/04/2026",
       "amount_total_net": "700.00",
       "amount_total_tax": "20.00",
-      "amount_total_gross": "720.00"
+      "amount_total_gross": "790.00",
+      "amount_tip": "70.00",
+      "amount_tax_selective": null,
+      "amount_tax_other": null,
+      "document_id_modified": null,
+      "amount_retention_itbis": null,
+      "amount_retention_isr": null
     }
   },
   "do0003.png": {
@@ -38,7 +50,31 @@
       "document_id": "E310000000052",
       "date_issue": "21/05/2026",
       "amount_total_net": "8,000.00",
-      "amount_total_gross": "9,000.00"
+      "amount_total_gross": "9,000.00",
+      "amount_tip": null,
+      "amount_tax_selective": null,
+      "amount_tax_other": null,
+      "document_id_modified": null,
+      "amount_retention_itbis": "750.00",
+      "amount_retention_isr": "800.00"
+    }
+  },
+  "do0004.png": {
+    "fields": {
+      "vendor_name": "Ferreteria Los Pinos SRL",
+      "vendor_tax_id": "130990018",
+      "customer_tax_id": "130990026",
+      "document_id": "B0400000009",
+      "date_issue": "20/03/2026",
+      "amount_total_net": "500.00",
+      "amount_total_tax": "75.00",
+      "amount_total_gross": "575.00",
+      "amount_tip": null,
+      "amount_tax_selective": null,
+      "amount_tax_other": null,
+      "document_id_modified": "B0100000417",
+      "amount_retention_itbis": null,
+      "amount_retention_isr": null
     }
   }
 }
