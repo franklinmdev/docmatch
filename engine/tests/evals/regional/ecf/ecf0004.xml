@@ -1,0 +1,35 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ECF>
+  <Encabezado>
+    <Version>1.0</Version>
+    <IdDoc>
+      <TipoeCF>43</TipoeCF>
+      <eNCF>E430000000001</eNCF>
+      <FechaVencimientoSecuencia>31-12-2027</FechaVencimientoSecuencia>
+      <TipoPago>1</TipoPago>
+    </IdDoc>
+    <Emisor>
+      <RNCEmisor>130990085</RNCEmisor>
+      <RazonSocialEmisor>Constructora Ficticia del Sur SRL</RazonSocialEmisor>
+      <DireccionEmisor>Calle Inventada 1</DireccionEmisor>
+      <FechaEmision>13-06-2026</FechaEmision>
+    </Emisor>
+    <Totales>
+      <MontoExento>350.00</MontoExento>
+      <MontoTotal>350.00</MontoTotal>
+    </Totales>
+  </Encabezado>
+  <DetallesItems>
+    <Item>
+      <NumeroLinea>1</NumeroLinea>
+      <IndicadorFacturacion>4</IndicadorFacturacion>
+      <NombreItem>Peaje</NombreItem>
+      <IndicadorBienoServicio>2</IndicadorBienoServicio>
+      <CantidadItem>1</CantidadItem>
+      <PrecioUnitarioItem>350.00</PrecioUnitarioItem>
+      <MontoItem>350.00</MontoItem>
+    </Item>
+  </DetallesItems>
+  <FechaHoraFirma>10-06-2026 10:00:00</FechaHoraFirma>
+  <Signature xmlns="http://www.w3.org/2000/09/xmldsig#" />
+</ECF>

@@ -1,0 +1,78 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ECF>
+  <Encabezado>
+    <Version>1.0</Version>
+    <IdDoc>
+      <TipoeCF>31</TipoeCF>
+      <eNCF>E310000000001</eNCF>
+      <FechaVencimientoSecuencia>31-12-2027</FechaVencimientoSecuencia>
+      <IndicadorMontoGravado>0</IndicadorMontoGravado>
+      <TipoIngresos>01</TipoIngresos>
+      <TipoPago>1</TipoPago>
+    </IdDoc>
+    <Emisor>
+      <RNCEmisor>130990052</RNCEmisor>
+      <RazonSocialEmisor>Distribuidora Ficticia del Cibao SRL</RazonSocialEmisor>
+      <DireccionEmisor>Calle Inventada 1</DireccionEmisor>
+      <FechaEmision>10-06-2026</FechaEmision>
+    </Emisor>
+    <Comprador>
+      <RNCComprador>130990069</RNCComprador>
+      <RazonSocialComprador>Hotel Imaginario Playa SRL</RazonSocialComprador>
+    </Comprador>
+    <Totales>
+      <MontoGravadoTotal>10000.00</MontoGravadoTotal>
+      <MontoGravadoI1>10000.00</MontoGravadoI1>
+      <MontoExento>500.00</MontoExento>
+      <ITBIS1>18</ITBIS1>
+      <TotalITBIS>1800.00</TotalITBIS>
+      <TotalITBIS1>1800.00</TotalITBIS1>
+      <MontoImpuestoAdicional>1350.00</MontoImpuestoAdicional>
+      <ImpuestosAdicionales>
+        <ImpuestoAdicional>
+          <TipoImpuesto>001</TipoImpuesto>
+          <TasaImpuestoAdicional>10</TasaImpuestoAdicional>
+          <OtrosImpuestosAdicionales>1000.00</OtrosImpuestosAdicionales>
+        </ImpuestoAdicional>
+        <ImpuestoAdicional>
+          <TipoImpuesto>002</TipoImpuesto>
+          <TasaImpuestoAdicional>2</TasaImpuestoAdicional>
+          <OtrosImpuestosAdicionales>200.00</OtrosImpuestosAdicionales>
+        </ImpuestoAdicional>
+        <ImpuestoAdicional>
+          <TipoImpuesto>023</TipoImpuesto>
+          <TasaImpuestoAdicional>10</TasaImpuestoAdicional>
+          <MontoImpuestoSelectivoConsumoAdvalorem>150.00</MontoImpuestoSelectivoConsumoAdvalorem>
+        </ImpuestoAdicional>
+      </ImpuestosAdicionales>
+      <MontoTotal>13650.00</MontoTotal>
+    </Totales>
+  </Encabezado>
+  <DetallesItems>
+    <Item>
+      <NumeroLinea>1</NumeroLinea>
+      <IndicadorFacturacion>1</IndicadorFacturacion>
+      <NombreItem>Servicio de catering</NombreItem>
+      <IndicadorBienoServicio>2</IndicadorBienoServicio>
+      <CantidadItem>1</CantidadItem>
+      <PrecioUnitarioItem>10000.00</PrecioUnitarioItem>
+      <MontoItem>10000.00</MontoItem>
+    </Item>
+    <Item>
+      <NumeroLinea>2</NumeroLinea>
+      <IndicadorFacturacion>4</IndicadorFacturacion>
+      <NombreItem>Agua embotellada</NombreItem>
+      <IndicadorBienoServicio>1</IndicadorBienoServicio>
+      <CantidadItem>50</CantidadItem>
+      <PrecioUnitarioItem>10.00</PrecioUnitarioItem>
+      <MontoItem>500.00</MontoItem>
+    </Item>
+  </DetallesItems>
+  <InformacionReferencia>
+    <NCFModificado>B0100000005</NCFModificado>
+    <FechaNCFModificado>09-06-2026</FechaNCFModificado>
+    <CodigoModificacion>4</CodigoModificacion>
+  </InformacionReferencia>
+  <FechaHoraFirma>10-06-2026 10:00:00</FechaHoraFirma>
+  <Signature xmlns="http://www.w3.org/2000/09/xmldsig#" />
+</ECF>

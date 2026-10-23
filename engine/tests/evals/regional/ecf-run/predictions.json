@@ -1,0 +1,74 @@
+{
+  "ecf0001.xml": {
+    "fields": {
+      "document_id": "E310000000001",
+      "date_issue": "2026-06-10",
+      "vendor_name": "Distribuidora Ficticia del Cibao SRL",
+      "vendor_tax_id": "130990052",
+      "customer_tax_id": "130990069",
+      "amount_total_net": "10500.00",
+      "amount_total_tax": "1800.00",
+      "amount_total_gross": "13650.00",
+      "amount_tip": "1000.00",
+      "amount_tax_selective": "150.00",
+      "amount_tax_other": "200.00",
+      "document_id_modified": "B0100000005",
+      "amount_retention_itbis": null,
+      "amount_retention_isr": null
+    }
+  },
+  "ecf0002.xml": {
+    "fields": {
+      "document_id": "E320000000001",
+      "date_issue": "2026-06-11",
+      "vendor_name": "Supermercado Inventado SRL",
+      "vendor_tax_id": "130990077",
+      "customer_tax_id": null,
+      "amount_total_net": "1000.00",
+      "amount_total_tax": "180.00",
+      "amount_total_gross": "1180.00",
+      "amount_tip": null,
+      "amount_tax_selective": null,
+      "amount_tax_other": null,
+      "document_id_modified": null,
+      "amount_retention_itbis": null,
+      "amount_retention_isr": null
+    }
+  },
+  "ecf0003.xml": {
+    "fields": {
+      "document_id": "E410000000001",
+      "date_issue": "2026-06-12",
+      "vendor_name": "Juan Ejemplo",
+      "vendor_tax_id": "00099000028",
+      "customer_tax_id": "130990085",
+      "amount_total_net": "5000.00",
+      "amount_total_tax": "900.00",
+      "amount_total_gross": "5900.00",
+      "amount_tip": null,
+      "amount_tax_selective": null,
+      "amount_tax_other": null,
+      "document_id_modified": null,
+      "amount_retention_itbis": "900.00",
+      "amount_retention_isr": "500.00"
+    }
+  },
+  "ecf0004.xml": {
+    "fields": {
+      "document_id": "E430000000001",
+      "date_issue": "2026-06-13",
+      "vendor_name": null,
+      "vendor_tax_id": null,
+      "customer_tax_id": "130990085",
+      "amount_total_net": "350.00",
+      "amount_total_tax": null,
+      "amount_total_gross": "350.00",
+      "amount_tip": null,
+      "amount_tax_selective": null,
+      "amount_tax_other": null,
+      "document_id_modified": null,
+      "amount_retention_itbis": null,
+      "amount_retention_isr": null
+    }
+  }
+}
