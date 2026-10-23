@@ -39,9 +39,10 @@ from pathlib import Path
 from stdnum import luhn
 from stdnum.do import rnc
 
-from docmatch.evals.ecf import COVERAGE, MODEL, REGION, read, write_set
+from docmatch.evals.ecf import REGION, write_set
 from docmatch.evals.manifest import Manifest, write
 from docmatch.evals.run import MANIFEST_FILE, PREDICTIONS_FILE, RECORD_FILE
+from docmatch.extraction.ecf import COVERAGE, MODEL, read
 
 FIXTURE = Path(__file__).parents[3] / "tests" / "evals" / "regional"
 SET = "ecf"

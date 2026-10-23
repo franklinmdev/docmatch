@@ -77,7 +77,7 @@ from typing import get_args
 from docmatch import regression, reproduce
 from docmatch.docile.annotation import Annotation, FieldExtraction
 from docmatch.docile.dataset import DatasetNotFoundError, DocileDataset, DocileError
-from docmatch.evals import corpus, ecf, manifest, public
+from docmatch.evals import corpus, manifest, public
 from docmatch.evals.confidence import Buckets, Calibration, Sweep
 from docmatch.evals.corpus import Census, Coverage, RuleCoverage, Survey
 from docmatch.evals.corrections import (
@@ -88,6 +88,7 @@ from docmatch.evals.corrections import (
     read_corrections,
     score_corrections,
 )
+from docmatch.evals.ecf import SPLIT as ECF_SPLIT
 from docmatch.evals.failures import (
     ROW_CLASSES,
     VALUE_CLASSES,
@@ -127,7 +128,7 @@ from docmatch.evals.run import (
     read_saved_run,
     score_subset,
 )
-from docmatch.extraction import azure, backends, gemini, pages
+from docmatch.extraction import azure, backends, ecf, gemini, pages
 from docmatch.extraction.extractor import ExtractionError, Extractor
 from docmatch.extraction.gemini import GeminiExtractor
 from docmatch.extraction.openai import OpenAIExtractor
@@ -211,8 +212,6 @@ DEFAULT_DATA_DIR = Path("data/docile")
 DEFAULT_COPIES_DIR = Path("data/ucsf")
 SOURCE = Path(__file__).parent
 """Where the engine's code is, whose checkout a run or a score was made on."""
-ECF_PARSER = f"{regression.PACKAGE}/evals/ecf.py"
-"""The file the e-CF parser reads with, its run's only extraction path."""
 
 
 def money(given: str) -> Decimal:
@@ -1788,6 +1787,7 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     # document, because an --out that cannot be written is worth a hundred
     # documents of spend.
     _check_kind(arguments.backend, pinned)
+    # Built here, not in `backends`, which every vendor row imports (#237).
     if arguments.backend == ecf.BACKEND:
         if arguments.model is not None:
             raise RegionalError(
@@ -1876,17 +1876,11 @@ def _check_kind(backend: str, pinned: Manifest) -> None:
 
 def _extracted_on(backend: str) -> tuple[str | None, bool]:
     """The commit the engine's checkout is at, and whether this backend's
-    extraction paths differ from it; no commit outside a git checkout.
-
-    The e-CF parser is not a vendor row the regression gate knows, and it
-    reads with `evals/ecf.py` alone, so that file is its extraction path."""
+    extraction paths differ from it; no commit outside a git checkout."""
     try:
         repo = regression.root(SOURCE)
         dirty = regression.dirty_paths(
-            repo,
-            (lambda path: path == ECF_PARSER)
-            if backend == ecf.BACKEND
-            else (lambda path: regression.extraction_path(path, backend)),
+            repo, lambda path: regression.extraction_path(path, backend)
         )
         return regression.commit_of(repo), bool(dirty)
     except RegressionError:
@@ -2838,7 +2832,7 @@ def _regional(path: Path, run: SubsetScore) -> list[str]:
     what it read when the set was pinned, never how well a page is read."""
     parsing = (
         (("F1 measures", "parsing an e-CF's XML, not reading a page"),)
-        if run.manifest.split == ecf.SPLIT
+        if run.manifest.split == ECF_SPLIT
         else ()
     )
     return [

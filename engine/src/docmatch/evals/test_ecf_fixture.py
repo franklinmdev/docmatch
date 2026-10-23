@@ -9,7 +9,7 @@ import pytest
 import xmlschema
 from stdnum.do import cedula, ncf, rnc
 
-from docmatch.evals.ecf import COVERAGE, SOURCE, SPLIT, ECFError, pin
+from docmatch.evals.ecf import SOURCE, SPLIT, pin
 from docmatch.evals.ecf_fixture import (
     ECF,
     ECFS,
@@ -27,6 +27,7 @@ from docmatch.evals.public import digest
 from docmatch.evals.regional import read_labels
 from docmatch.evals.regional_fixture import COVERAGE as PAPER_COVERAGE
 from docmatch.evals.run import read_run_record
+from docmatch.extraction.ecf import COVERAGE, ECFError
 from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 
 XSDS = os.environ.get("DOCMATCH_ECF_XSDS")

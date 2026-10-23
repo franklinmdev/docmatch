@@ -101,9 +101,12 @@ READS: Mapping[str, frozenset[str]] = {
         f"{EXTRACTION}/{module}.py"
         for module in ("openai", "gemini", "extractor", "pages", "schema")
     ),
+    "ecf": frozenset(f"{EXTRACTION}/{module}.py" for module in ("ecf", "extractor")),
 }
 """The extraction modules each backend reads: its own and what it imports from
-the package, kept by hand and derived from the imports by a test (#237)."""
+the package, kept by hand and derived from the imports by a test (#237). The
+e-CF parser has no row to re-extract, but listing it keeps a change to it
+from owing every vendor row a re-extraction as an unknown module would."""
 
 SCORING = (
     f"{PACKAGE}/metrics",

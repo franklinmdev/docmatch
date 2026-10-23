@@ -7,13 +7,13 @@ import pypdfium2 as pdfium
 import pytest
 from PIL import Image
 
-from docmatch.evals.ecf import ECFExtractor
-from docmatch.evals.ecf import read as ecf_read
 from docmatch.evals.manifest import Manifest, load
 from docmatch.evals.public import digest
 from docmatch.evals.regional import RegionalError, read_labels, read_set
 from docmatch.evals.regional_fixture import FIXTURE
 from docmatch.evals.run import SubsetScore, score_subset
+from docmatch.extraction.ecf import ECFExtractor
+from docmatch.extraction.ecf import read as ecf_read
 from docmatch.extraction.extractor import Confidence, Document, Extraction
 from docmatch.extraction.test_run import FakeExtractor
 from docmatch.metrics.fields import Prediction

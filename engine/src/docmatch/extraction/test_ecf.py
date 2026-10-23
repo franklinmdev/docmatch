@@ -1,14 +1,15 @@
 """Tests for the e-CF parser backend, over the made-up e-CFs the fixture
-generator writes from DGII's XSDs v1.0 (spec #222, seam 2)."""
+writes by hand in the order of DGII's XSDs v1.0 (spec #222, seam 2)."""
 
+import re
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from docmatch.evals.ecf import MODEL, ECFError, ECFExtractor, read
 from docmatch.evals.ecf_fixture import ECF, ECFS, to_xml
+from docmatch.extraction.ecf import MODEL, ECFError, ECFExtractor, read
 from docmatch.extraction.extractor import Document, ExtractionError
 
 
@@ -88,6 +89,10 @@ def test_an_e43_names_no_vendor() -> None:
     assert fields["customer_tax_id"] == by_type(43).issuer_rnc
 
 
+def test_an_e43_with_no_taxed_amount_reads_its_net_from_the_exempt_alone() -> None:
+    assert read(to_xml(by_type(43))).fields["amount_total_net"] == "350.00"
+
+
 def test_the_parser_reads_no_line_item() -> None:
     assert read(to_xml(by_type(31))).line_items == ()
 
@@ -104,6 +109,24 @@ def test_the_parser_reads_no_line_item() -> None:
         (
             to_xml(by_type(31)).replace(b">10-06-2026<", b">2026-06-10<"),
             "not dd-MM-yyyy",
+        ),
+        *(
+            (
+                to_xml(by_type(31)).replace(b">13650.00<", f">{amount}<".encode()),
+                re.escape(f"{amount} is not an amount"),
+            )
+            for amount in ("NaN", "Infinity", "1E+3", "13,650.00", "-1.00")
+        ),
+        (
+            to_xml(by_type(31)).replace(
+                b"</InformacionReferencia>",
+                b"<NCFModificado>B0100000013</NCFModificado></InformacionReferencia>",
+            ),
+            "2 NCFModificado",
+        ),
+        (
+            to_xml(by_type(31)).replace(b"<ECF>", b'<ECF xmlns="urn:example">'),
+            re.escape("root element is {urn:example}ECF"),
         ),
     ],
 )
