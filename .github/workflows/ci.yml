@@ -90,6 +90,17 @@ jobs:
           --predictions engine/tests/evals/synthetic/predictions.json
           --corrections engine/tests/evals/synthetic/corrections.json
 
+      # The regional set's report: three made-up Dominican comprobantes,
+      # their labels.csv and a saved run of made-up readings, scored over the
+      # fieldtypes the set covers only. A real set is the owner's, never
+      # committed, and is scored locally with the same command. It only prints;
+      # pytest pins what it prints.
+      - name: Regional
+        run: >-
+          uv run docmatch eval
+          --manifest engine/tests/evals/regional/do/manifest.json
+          --predictions engine/tests/evals/regional/run/predictions.json
+
       # The matching report on the same synthetic subset: cases generated
       # from its labels at the real sizes, matched and scored, then matched
       # again with the fixture's saved readings as the invoices, so the whole
