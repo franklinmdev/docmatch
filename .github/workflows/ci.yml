@@ -119,8 +119,9 @@ jobs:
       # DGII's 606 pre-validator for the Regional step (#229). DGII's binary
       # is never committed: it is downloaded once with a browser's user agent
       # (DGII refuses curl's default, #217), checked against the SHA-256
-      # `prevalidate 606` pins, and cached by that hash, so a republished zip
-      # misses the cache and fails the check rather than moving the number.
+      # `prevalidate 606` pins, and cached under a key made of that hash. On a
+      # cache miss the download is hash-checked here, and `prevalidate 606`
+      # checks the cached file again before it runs anything.
       - name: Cache the 606 pre-validator
         id: prevalidator
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
