@@ -116,13 +116,39 @@ jobs:
           --predictions engine/tests/evals/synthetic/predictions.json
           --corrections engine/tests/evals/synthetic/corrections.json
 
+      # DGII's 606 pre-validator for the Regional step (#229). DGII's binary
+      # is never committed: it is downloaded once with a browser's user agent
+      # (DGII refuses curl's default, #217), checked against the SHA-256
+      # `prevalidate 606` pins, and cached by that hash, so a republished zip
+      # misses the cache and fails the check rather than moving the number.
+      - name: Cache the 606 pre-validator
+        id: prevalidator
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/dgii-prevalidator
+          key: dgii-prevalidator-130affffbdb3f2f3a6e344564d47f88f1d7381436e7ed8c57cba299504a091e6
+
+      - name: Download the 606 pre-validator
+        if: steps.prevalidator.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ${{ runner.temp }}/dgii-prevalidator
+          curl --fail --silent --show-error --location \
+            --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36" \
+            --referer "https://dgii.gov.do/herramientas/formularios/pre-validacion/" \
+            --output ${{ runner.temp }}/dgii-prevalidator/Pre_Validado.zip \
+            "https://dgii.gov.do/herramientas/formularios/pre-validacion/Documents/Pre_Validado.zip"
+          echo "130affffbdb3f2f3a6e344564d47f88f1d7381436e7ed8c57cba299504a091e6  ${{ runner.temp }}/dgii-prevalidator/Pre_Validado.zip" \
+            | sha256sum --check
+
       # The regional set's report: four made-up Dominican comprobantes,
       # their labels.csv and a saved run of made-up readings, scored over the
       # fieldtypes the set covers only. A real set is the owner's, never
       # committed, and is scored locally with the same command. It only prints;
       # pytest pins what it prints. Then the same run's 606, from its readings
       # and from its labels, one file per month on each side, written to a
-      # scratch directory; pre-validating the files is a later step.
+      # scratch directory. Then DGII's own pre-validator over those files, in
+      # the pinned Mono container with no network; pytest pins what it
+      # prints from captured output and never runs the container.
       - name: Regional
         run: |
           uv run docmatch eval \
@@ -132,6 +158,9 @@ jobs:
             --manifest engine/tests/evals/regional/do/manifest.json \
             --run engine/tests/evals/regional/run \
             --out ${{ runner.temp }}/606
+          uv run docmatch prevalidate 606 \
+            --export ${{ runner.temp }}/606 \
+            --binary ${{ runner.temp }}/dgii-prevalidator/Pre_Validado.zip
 
       # The e-CF set's report: four made-up e-CFs, one of each type the
       # parser reads, with their hand-written labels and the parser's saved
