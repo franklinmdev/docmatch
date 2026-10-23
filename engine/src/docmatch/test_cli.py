@@ -2960,3 +2960,145 @@ def test_regression_refuses_a_merge_base_older_than_the_aggregate(
     assert main(["regression", "--base", "main"]) == 1
 
     assert "merge main into the change" in capsys.readouterr().err
+
+
+REGIONAL = Path(__file__).parents[2] / "tests" / "evals" / "regional"
+"""The committed `do` paper set and its made-up run, which CI's Regional step
+scores; `evals.regional_fixture` writes both."""
+
+EXPECTED_REGIONAL_OUTPUT = "\n".join(
+    [
+        "Regional set",
+        "  manifest        {manifest}",
+        "  region          do",
+        "  split           paper",
+        "  documents       3",
+        "  labeled values  23",
+        "  predicted       3",
+        "  not predicted   0",
+        "  not pinned      0",
+        "",
+        # A value nobody labeled is neither right nor wrong, so the reading
+        # of vendor_email on do0001.png is in neither count.
+        "Field score, over the 8 covered fieldtypes only",
+        "  precision  0.955",
+        "  recall     0.913",
+        "  F1         0.933",
+        "  21 matched, 2 missing, 1 spurious",
+        "",
+        "Fields (8)",
+        "  amount_total_gross  1.000  3 matched, 0 missing",
+        "  amount_total_net    1.000  3 matched, 0 missing",
+        "  amount_total_tax    0.800  2 matched, 1 missing",
+        "  customer_tax_id     1.000  2 matched, 0 missing",
+        "  date_issue          1.000  3 matched, 0 missing",
+        "  document_id         0.667  2 matched, 1 missing, 1 spurious",
+        "  vendor_name         1.000  3 matched, 0 missing",
+        "  vendor_tax_id       1.000  3 matched, 0 missing",
+        "",
+        # Code derives only fieldtypes the set does not cover.
+        "Derived values (0)",
+        "",
+        # The set covers no cell, so a line item read is neither right nor
+        # wrong, and a ratio over nothing would read as a perfect score.
+        "Line-item score",
+        "  no line-item fieldtype covered",
+        "",
+        "Calibration",
+        "  no signal",
+        "",
+    ]
+)
+
+
+def evaluate_regional(*arguments: str) -> list[str]:
+    return [
+        "eval",
+        "--manifest",
+        str(REGIONAL / "do" / "manifest.json"),
+        "--predictions",
+        str(REGIONAL / "run" / "predictions.json"),
+        *arguments,
+    ]
+
+
+def test_eval_reports_a_regional_set_over_its_covered_fieldtypes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code = main(evaluate_regional())
+
+    output = capsys.readouterr().out
+    assert output.startswith(
+        EXPECTED_REGIONAL_OUTPUT.format(manifest=REGIONAL / "do" / "manifest.json")
+    )
+    assert "vendor_email" not in output
+    assert exit_code == 0
+
+
+def test_eval_on_a_regional_set_prints_no_label_text(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main(evaluate_regional())
+
+    output = capsys.readouterr().out
+    assert "Ferreteria" not in output
+    assert "130990018" not in output
+
+
+def test_eval_refuses_a_run_that_read_another_region(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    predictions = tmp_path / "predictions.json"
+    predictions.write_bytes((REGIONAL / "run" / "predictions.json").read_bytes())
+    (tmp_path / "run.json").write_text(
+        json.dumps({"backend": "gemini", "requested_model": "x"}), encoding="utf-8"
+    )
+
+    exit_code = main(
+        [
+            "eval",
+            "--manifest",
+            str(REGIONAL / "do" / "manifest.json"),
+            "--predictions",
+            str(predictions),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "region" in capsys.readouterr().err
+
+
+def test_eval_refuses_labels_edited_after_they_were_pinned(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for each in (REGIONAL / "do").iterdir():
+        (tmp_path / each.name).write_bytes(each.read_bytes())
+    labels = tmp_path / "labels.csv"
+    labels.write_text(
+        labels.read_text(encoding="utf-8").replace("720.00", "721.00"), encoding="utf-8"
+    )
+
+    exit_code = main(
+        [
+            "eval",
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+            "--predictions",
+            str(REGIONAL / "run" / "predictions.json"),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "digest" in capsys.readouterr().err
+
+
+def test_eval_refuses_an_aggregate_row_for_a_regional_set(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The aggregate holds the fixed subset's rows, which a regional set's
+    number would overwrite."""
+    exit_code = main(evaluate_regional("--aggregate", str(tmp_path / "a.json")))
+
+    assert exit_code == 1
+    assert "regional" in capsys.readouterr().err
+    assert not (tmp_path / "a.json").exists()

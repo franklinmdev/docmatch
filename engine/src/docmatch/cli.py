@@ -99,6 +99,7 @@ from docmatch.evals.failures import (
 )
 from docmatch.evals.manifest import Manifest, ManifestError, Reason
 from docmatch.evals.public import PublicCopyError
+from docmatch.evals.regional import RegionalError, RegionalLabels, read_labels
 from docmatch.evals.run import (
     CONFIDENCE_FILE,
     CURRENCY_SYMBOLS_FILE,
@@ -115,6 +116,7 @@ from docmatch.evals.run import (
     read_confidence,
     read_currency_symbols,
     read_predictions,
+    read_run_record,
     read_saved_run,
     score_subset,
 )
@@ -132,6 +134,7 @@ from docmatch.extraction.run import (
     write_predictions,
     write_record,
 )
+from docmatch.extraction.schema import CELL_FIELDTYPES
 from docmatch.matching import floors
 from docmatch.matching.generator import (
     BANDED_TYPES,
@@ -981,6 +984,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         CorrectionsError,
         RegressionError,
         ReproduceError,
+        RegionalError,
     ) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
@@ -1031,30 +1035,7 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
     if arguments.command == "loop":
         return _loop(arguments, dataset)
     if arguments.command == "eval":
-        predictions = read_predictions(arguments.predictions)
-        run = score_subset(
-            dataset,
-            manifest.load(arguments.manifest),
-            predictions,
-            currency_symbols=read_currency_symbols(
-                arguments.predictions.parent / CURRENCY_SYMBOLS_FILE
-            ),
-            confidence=read_confidence(arguments.predictions.parent / CONFIDENCE_FILE),
-        )
-        corrected = (
-            None
-            if arguments.corrections is None
-            else (
-                arguments.corrections,
-                score_corrections(
-                    read_corrections(arguments.corrections), predictions, dataset
-                ),
-            )
-        )
-        written = (
-            None if arguments.aggregate is None else _aggregate(arguments, dataset, run)
-        )
-        return render_eval(arguments.manifest, run, corrected, written), 0
+        return _eval(arguments, dataset)
     annotation = dataset.annotation(arguments.document_id)
     if arguments.command == "show":
         return render(arguments.document_id, annotation), 0
@@ -1067,6 +1048,66 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
         ),
         0,
     )
+
+
+def _eval(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
+    """Score a saved run over the set its manifest pins.
+
+    A manifest declaring a region is a regional set: its labels are the
+    `labels.csv` beside it, never DocILE's, and the run must have read that
+    region, which its `run.json` says when there is one. Its number is not a
+    fixed-subset row, so neither the corrections nor the aggregate apply.
+    """
+    pinned = manifest.load(arguments.manifest)
+    labels: DocileDataset | RegionalLabels = dataset
+    if pinned.region is not None:
+        if arguments.aggregate is not None or arguments.corrections is not None:
+            raise ManifestError(
+                f"{arguments.manifest} pins a regional set, which has no aggregate "
+                "row and no corrections"
+            )
+        labels = read_labels(pinned, arguments.manifest.parent)
+    _check_region(arguments.predictions.parent / RECORD_FILE, pinned)
+    predictions = read_predictions(arguments.predictions)
+    run = score_subset(
+        labels,
+        pinned,
+        predictions,
+        currency_symbols=read_currency_symbols(
+            arguments.predictions.parent / CURRENCY_SYMBOLS_FILE
+        ),
+        confidence=read_confidence(arguments.predictions.parent / CONFIDENCE_FILE),
+    )
+    corrected = (
+        None
+        if arguments.corrections is None
+        else (
+            arguments.corrections,
+            score_corrections(
+                read_corrections(arguments.corrections), predictions, dataset
+            ),
+        )
+    )
+    written = (
+        None if arguments.aggregate is None else _aggregate(arguments, dataset, run)
+    )
+    return render_eval(arguments.manifest, run, corrected, written), 0
+
+
+def _check_region(record: Path, pinned: Manifest) -> None:
+    """Refuse a run whose record names another region than the manifest's.
+
+    A predictions file with no record beside it, one written by hand, is
+    taken at its word.
+    """
+    if not record.is_file():
+        return
+    read = read_run_record(record).region
+    if read != pinned.region:
+        raise ManifestError(
+            f"{record} read a set of region {read or 'none'}, and the manifest pins "
+            f"one of region {pinned.region or 'none'}"
+        )
 
 
 def _serve(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str, int]:
@@ -2636,21 +2677,18 @@ def render_eval(
 
     Counts and ratios only: `run` explains why no label text appears here.
     """
-    predicted = len(run.documents) - len(run.not_predicted)
+    coverage = run.manifest.coverage
     lines = [
-        "Fixed subset",
-        *_rows(
-            ("manifest", str(path)),
-            ("split", run.manifest.split),
-            ("size", str(run.manifest.size)),
-            ("predicted", str(predicted)),
-            ("not predicted", str(len(run.not_predicted))),
-            ("not pinned", str(len(run.unpinned))),
-        ),
+        *(_set(path, run) if run.manifest.region is None else _regional(path, run)),
         "",
         *_listed("Not predicted", run.not_predicted),
         *_listed("Not pinned", run.unpinned),
-        *_ratios("Field score", run.fields),
+        *_ratios(
+            "Field score"
+            if coverage is None
+            else f"Field score, over the {len(coverage)} covered fieldtypes only",
+            run.fields,
+        ),
         "",
         f"Fields ({len(run.per_fieldtype)})",
         *_totals(run.per_fieldtype),
@@ -2658,10 +2696,11 @@ def render_eval(
         f"Derived values ({len(run.derived)})",
         *_derived(run.derived),
         "",
-        *_ratios("Line-item score", run.line_items),
-        "",
-        f"Cell accuracy ({len(run.per_cell_fieldtype)})",
-        *_accuracies(run.per_cell_fieldtype),
+        *(
+            _line_items(run)
+            if coverage is None or set(coverage) & CELLS
+            else ["Line-item score", "  no line-item fieldtype covered"]
+        ),
         "",
         *_calibration(run.calibration),
         "",
@@ -2676,6 +2715,56 @@ def render_eval(
         ),
     ]
     return "\n".join([*lines, ""])
+
+
+CELLS = frozenset(CELL_FIELDTYPES)
+
+
+def _line_items(run: SubsetScore) -> list[str]:
+    """The line-item score and its cell accuracy."""
+    return [
+        *_ratios("Line-item score", run.line_items),
+        "",
+        f"Cell accuracy ({len(run.per_cell_fieldtype)})",
+        *_accuracies(run.per_cell_fieldtype),
+    ]
+
+
+def _set(path: Path, run: SubsetScore) -> list[str]:
+    """The fixed subset a run was scored over."""
+    return [
+        "Fixed subset",
+        *_rows(
+            ("manifest", str(path)),
+            ("split", run.manifest.split),
+            ("size", str(run.manifest.size)),
+            ("predicted", str(len(run.documents) - len(run.not_predicted))),
+            ("not predicted", str(len(run.not_predicted))),
+            ("not pinned", str(len(run.unpinned))),
+        ),
+    ]
+
+
+def _regional(path: Path, run: SubsetScore) -> list[str]:
+    """The regional set a run was scored over, with how many values its
+    labels hold, since a hand-labeled set is small and its F1 moves in
+    steps of one value."""
+    return [
+        "Regional set",
+        *_rows(
+            ("manifest", str(path)),
+            ("region", str(run.manifest.region)),
+            ("split", run.manifest.split),
+            ("documents", str(run.manifest.size)),
+            (
+                "labeled values",
+                str(run.fields.true_positives + run.fields.false_negatives),
+            ),
+            ("predicted", str(len(run.documents) - len(run.not_predicted))),
+            ("not predicted", str(len(run.not_predicted))),
+            ("not pinned", str(len(run.unpinned))),
+        ),
+    ]
 
 
 def _corrected(path: Path, scored: CorrectionsScore) -> list[str]:

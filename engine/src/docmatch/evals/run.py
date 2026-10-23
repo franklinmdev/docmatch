@@ -401,7 +401,8 @@ class SubsetScore:
         """Every fieldtype code adds values to, as read and with derived values.
 
         Listed whether or not anything was added or labeled, so the report
-        always shows the line and a zero is a finding rather than an absence.
+        always shows the line and a zero is a finding rather than an absence;
+        a fieldtype the set does not cover is not listed.
         """
         as_read = {
             each.fieldtype: each
@@ -415,6 +416,7 @@ class SubsetScore:
                 with_derived=with_derived.get(fieldtype, _no_totals(fieldtype)),
             )
             for fieldtype in DERIVED_FIELDTYPES
+            if self.manifest.coverage is None or fieldtype in self.manifest.coverage
         )
 
     @property

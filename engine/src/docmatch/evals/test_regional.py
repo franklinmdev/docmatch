@@ -1,14 +1,19 @@
 """Tests for reading a regional set's labels, on sets written by each test."""
 
+import io
 from pathlib import Path
 
+import pypdfium2 as pdfium
 import pytest
+from PIL import Image
 
-from docmatch.evals.manifest import Manifest
+from docmatch.evals.manifest import Manifest, load
 from docmatch.evals.public import digest
-from docmatch.evals.regional import LabelsError, read_labels
+from docmatch.evals.regional import RegionalError, read_labels, read_set
+from docmatch.evals.regional_fixture import FIXTURE
 from docmatch.evals.run import SubsetScore, score_subset
-from docmatch.extraction.extractor import Confidence
+from docmatch.extraction.extractor import Confidence, Document, Extraction
+from docmatch.extraction.test_run import FakeExtractor
 from docmatch.metrics.fields import Prediction
 
 COVERAGE = ("vendor_tax_id", "document_id", "amount_total_gross")
@@ -98,21 +103,21 @@ def test_refuses_a_column_that_is_not_a_covered_fieldtype(tmp_path: Path) -> Non
     )
     text = text.replace("letter\n", "letter,\n")
 
-    with pytest.raises(LabelsError, match="vendor_email"):
+    with pytest.raises(RegionalError, match="vendor_email"):
         read_labels(a_set(tmp_path, text), tmp_path)
 
 
 def test_refuses_a_covered_fieldtype_with_no_column(tmp_path: Path) -> None:
     manifest = a_set(tmp_path, coverage=(*COVERAGE, "customer_tax_id"))
 
-    with pytest.raises(LabelsError, match="customer_tax_id"):
+    with pytest.raises(RegionalError, match="customer_tax_id"):
         read_labels(manifest, tmp_path)
 
 
 def test_refuses_a_file_naming_a_document_twice(tmp_path: Path) -> None:
     text = LABELS + "do0001.png,130000001,B0100000001,1180.00,thermal\n"
 
-    with pytest.raises(LabelsError, match="do0001.png"):
+    with pytest.raises(RegionalError, match="do0001.png"):
         read_labels(a_set(tmp_path, text), tmp_path)
 
 
@@ -122,24 +127,24 @@ def test_refuses_labels_whose_digest_is_not_the_pinned_one(tmp_path: Path) -> No
         LABELS.replace("1180.00", "1181.00"), encoding="utf-8"
     )
 
-    with pytest.raises(LabelsError, match="digest"):
+    with pytest.raises(RegionalError, match="digest"):
         read_labels(manifest, tmp_path)
 
 
 def test_refuses_a_set_that_pins_no_digest_for_its_labels(tmp_path: Path) -> None:
-    with pytest.raises(LabelsError, match="labels.csv"):
+    with pytest.raises(RegionalError, match="labels.csv"):
         read_labels(a_set(tmp_path, files={}), tmp_path)
 
 
 def test_refuses_a_set_that_declares_no_coverage(tmp_path: Path) -> None:
-    with pytest.raises(LabelsError, match="coverage"):
+    with pytest.raises(RegionalError, match="coverage"):
         read_labels(a_set(tmp_path, coverage=None), tmp_path)
 
 
 def test_refuses_labels_missing_a_pinned_document(tmp_path: Path) -> None:
     text = LABELS.rsplit("do0002.png", 1)[0]
 
-    with pytest.raises(LabelsError, match="do0002.png"):
+    with pytest.raises(RegionalError, match="do0002.png"):
         read_labels(a_set(tmp_path, text), tmp_path)
 
 
@@ -148,7 +153,7 @@ def test_refuses_labels_for_a_document_the_manifest_does_not_pin(
 ) -> None:
     text = LABELS + "do0003.png,130000003,B0100000003,10.00,letter\n"
 
-    with pytest.raises(LabelsError, match="do0003.png"):
+    with pytest.raises(RegionalError, match="do0003.png"):
         read_labels(a_set(tmp_path, text), tmp_path)
 
 
@@ -156,14 +161,14 @@ def test_refuses_a_set_with_no_labels_file(tmp_path: Path) -> None:
     manifest = a_set(tmp_path)
     (tmp_path / "labels.csv").unlink()
 
-    with pytest.raises(LabelsError, match="labels.csv"):
+    with pytest.raises(RegionalError, match="labels.csv"):
         read_labels(manifest, tmp_path)
 
 
 def test_refuses_a_row_with_more_cells_than_columns(tmp_path: Path) -> None:
     text = LABELS.replace("thermal\n", "thermal,extra\n")
 
-    with pytest.raises(LabelsError, match="do0001.png"):
+    with pytest.raises(RegionalError, match="do0001.png"):
         read_labels(a_set(tmp_path, text), tmp_path)
 
 
@@ -273,3 +278,94 @@ def test_calibration_judges_only_covered_values(tmp_path: Path) -> None:
 
     assert run.calibration is not None
     assert sum(bucket.n for bucket in run.calibration.header.buckets) == 3
+
+
+def copied_fixture(directory: Path) -> Manifest:
+    """The committed `do` set copied into `directory`, its manifest returned."""
+    for each in (FIXTURE / "do").iterdir():
+        (directory / each.name).write_bytes(each.read_bytes())
+    return load(directory / "manifest.json")
+
+
+def test_reads_every_pinned_image_as_a_one_page_pdf(tmp_path: Path) -> None:
+    manifest = copied_fixture(tmp_path)
+    seen: list[tuple[str, int, tuple[int, int]]] = []
+
+    class Looking(FakeExtractor):
+        def extract(self, document: Document) -> Extraction:
+            pdf = pdfium.PdfDocument(document.path)
+            bitmap = pdf[0].get_objects().__next__()
+            assert isinstance(bitmap, pdfium.PdfImage)
+            seen.append((document.document_id, len(pdf), bitmap.get_px_size()))
+            pdf.close()
+            return super().extract(document)
+
+    read = list(read_set(Looking(answers=[READING]), manifest, tmp_path))
+
+    with Image.open(tmp_path / "do0001.png") as image:
+        size = image.size
+    assert [each.document_id for each in read] == list(manifest.document_ids)
+    assert seen[0] == ("do0001.png", 1, size)
+    assert all(pages == 1 for _, pages, _ in seen)
+
+
+def test_a_jpeg_is_carried_into_the_pdf_without_being_encoded_again(
+    tmp_path: Path,
+) -> None:
+    """A phone photo is already compressed; a second pass would lose detail."""
+    photo = io.BytesIO()
+    Image.new("RGB", (40, 60), (200, 10, 10)).save(photo, "JPEG")
+    (tmp_path / "do0001.jpg").write_bytes(photo.getvalue())
+    manifest = Manifest(
+        split="paper",
+        seed=0,
+        source="synthetic",
+        size=1,
+        document_ids=("do0001.jpg",),
+        digests={"do0001.jpg": digest(photo.getvalue())},
+        region="do",
+        coverage=COVERAGE,
+    )
+    carried: list[bytes] = []
+
+    class Looking(FakeExtractor):
+        def extract(self, document: Document) -> Extraction:
+            carried.append(document.path.read_bytes())
+            return super().extract(document)
+
+    list(read_set(Looking(answers=[READING]), manifest, tmp_path))
+
+    assert photo.getvalue() in carried[0]
+
+
+def test_refuses_an_image_whose_digest_is_not_the_pinned_one_before_any_request(
+    tmp_path: Path,
+) -> None:
+    manifest = copied_fixture(tmp_path)
+    (tmp_path / "do0003.png").write_bytes(b"not the pinned image")
+    fake = FakeExtractor(answers=[READING])
+
+    with pytest.raises(RegionalError, match="do0003.png"):
+        list(read_set(fake, manifest, tmp_path))
+
+    assert fake.attempts == []
+
+
+def test_refuses_a_set_missing_a_pinned_image_before_any_request(
+    tmp_path: Path,
+) -> None:
+    manifest = copied_fixture(tmp_path)
+    (tmp_path / "do0002.png").unlink()
+    fake = FakeExtractor(answers=[READING])
+
+    with pytest.raises(RegionalError, match="do0002.png"):
+        list(read_set(fake, manifest, tmp_path))
+
+    assert fake.attempts == []
+
+
+def test_refuses_a_set_that_pins_no_digest_for_its_images(tmp_path: Path) -> None:
+    manifest = copied_fixture(tmp_path).model_copy(update={"digests": {}})
+
+    with pytest.raises(RegionalError, match="digest"):
+        list(read_set(FakeExtractor(answers=[READING]), manifest, tmp_path))
