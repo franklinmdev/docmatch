@@ -110,7 +110,9 @@ def test_export_lists_every_month_and_document_in_export_json(
     assert listed == {
         "manifest": str(SET),
         "run": str(RUN),
-        "not_reported": ["do0002.png"],
+        "not_reported": [
+            {"filename": "do0002.png", "reason": "annotated not reported"}
+        ],
         "reading": [
             {"period": "202603", "file": f"reading/{MARCH}", "rows": 2, "failures": []},
             {"period": "202605", "file": f"reading/{MAY}", "rows": 1, "failures": []},

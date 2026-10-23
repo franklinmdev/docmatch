@@ -264,3 +264,28 @@ def test_an_absent_amount_is_written_as_zero() -> None:
 
     [content] = exported.reading.files().values()
     assert content.split("\r\n")[1].split("|")[10] == "0.00"
+
+
+def test_a_services_amount_above_the_read_net_fails_rather_than_goods_below_zero() -> (
+    None
+):
+    """A misread net can fall below the annotated services amount; a negative
+    goods column would hide it."""
+    mixed = Filing(
+        reported=True,
+        purchase_type=2,
+        split=Decimal("3000.00"),
+        payment_date=None,
+        payment_method=1,
+        itbis_proportional=None,
+        itbis_to_cost=None,
+        isr_retention_type=None,
+    )
+
+    [march] = export_606(
+        REPORTER, {"a.png": comprobante()}, {}, {"a.png": mixed}
+    ).reading.failed
+
+    assert march.failures == (
+        Failure("a.png", ("services split above the net amount",)),
+    )

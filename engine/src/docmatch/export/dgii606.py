@@ -42,7 +42,8 @@ Failures
 A document with no reading, or one lacking an NCF, an RNC or a date, fails
 its month (#215 decision 6): that month gets no file and is listed with every
 reason. So does an identifier of neither length, or an amount the file cannot
-hold, rather than a guessed Tipo Id or a zero standing in for what was read.
+hold, or a services split above the read net amount, rather than a guessed
+Tipo Id, a zero standing in for what was read, or negative goods.
 A document with no date, or with one that does not read as a day, goes to a
 "no month" row, which counts as one failed file. A document annotated not
 reported is left out of both sides and listed apart (#213 decision 2).
@@ -69,6 +70,9 @@ from docmatch.metrics.normalization import read_number
 
 REGION = "do"
 """The region whose sets a 606 is filed for."""
+
+NOT_REPORTED = "annotated not reported"
+"""Why a document is in neither side's files."""
 
 NO_MONTH = "no month"
 """The row of documents whose date is missing or unreadable."""
@@ -144,6 +148,14 @@ class Export:
     reading: Side
     control: Side
     not_reported: tuple[str, ...]
+
+    def sides(self) -> tuple[tuple[str, str, Side], ...]:
+        """Each side's directory under the export, its heading in the report,
+        and the side."""
+        return (
+            ("reading", "Reading", self.reading),
+            ("control", "Labels control", self.control),
+        )
 
 
 def filename(reporter: str, period: str) -> str:
@@ -230,6 +242,9 @@ def _line(
             reasons.append(f"{fieldtype} unreadable")
         else:
             amounts[fieldtype] = amount
+    net = amounts.get("amount_total_net")
+    if isinstance(filing.split, Decimal) and net is not None and filing.split > net:
+        reasons.append("services split above the net amount")
     period = NO_MONTH if day is None else f"{day:%Y%m}"
     if reasons:
         return period, None, tuple(reasons)
@@ -342,9 +357,6 @@ def read_day(text: str) -> date | None:
 EXPORT_FILE = "export.json"
 """What `export_606` wrote, month by month, for `prevalidate 606` (#229)."""
 
-SIDES = (("reading", "Reading"), ("control", "Labels control"))
-"""Each side's directory under the export, and its heading in the report."""
-
 
 class ExportError(Exception):
     """An export that cannot be written where it was asked to go."""
@@ -359,10 +371,11 @@ def write_export(exported: Export, out: Path, manifest: Path, run: Path) -> None
     listed: dict[str, object] = {
         "manifest": str(manifest),
         "run": str(run),
-        "not_reported": list(exported.not_reported),
+        "not_reported": [
+            {"filename": name, "reason": NOT_REPORTED} for name in exported.not_reported
+        ],
     }
-    for directory, _ in SIDES:
-        side: Side = getattr(exported, directory)
+    for directory, _, side in exported.sides():
         (out / directory).mkdir(parents=True)
         for name, content in side.files().items():
             (out / directory / name).write_bytes(content.encode("ascii"))
@@ -398,8 +411,7 @@ def render_export(exported: Export, out: Path, manifest: Path, run: Path) -> str
         f"  not reported  {len(exported.not_reported)}",
         "",
     ]
-    for directory, heading in SIDES:
-        side: Side = getattr(exported, directory)
+    for _, heading, side in exported.sides():
         written = len(side.months) - len(side.failed)
         lines.append(
             f"{heading}, {written} of {len(side.months)} monthly files written"
