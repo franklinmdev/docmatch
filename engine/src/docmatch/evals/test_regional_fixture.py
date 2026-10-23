@@ -7,8 +7,14 @@ from stdnum.do import cedula, ncf, rnc
 from docmatch.evals.manifest import load
 from docmatch.evals.public import digest
 from docmatch.evals.regional import read_labels
-from docmatch.evals.regional_fixture import COMPROBANTES, write_run, write_set
+from docmatch.evals.regional_fixture import (
+    COMPROBANTES,
+    COVERAGE,
+    write_run,
+    write_set,
+)
 from docmatch.evals.run import read_run_record
+from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 
 FIXTURE = Path(__file__).parents[3] / "tests" / "evals" / "regional"
 
@@ -28,6 +34,27 @@ def test_every_customer_number_is_a_valid_rnc_or_cedula() -> None:
 def test_every_ncf_is_a_valid_ncf_or_e_ncf() -> None:
     for each in COMPROBANTES:
         assert ncf.is_valid(each.labels["document_id"]), each.filename
+
+
+def test_the_modified_ncf_is_a_valid_ncf_and_never_the_comprobantes_own() -> None:
+    modified = [each for each in COMPROBANTES if each.labels["document_id_modified"]]
+
+    assert modified
+    for each in modified:
+        assert ncf.is_valid(each.labels["document_id_modified"]), each.filename
+        assert each.labels["document_id_modified"] != each.labels["document_id"]
+
+
+def test_the_set_covers_the_six_regional_fieldtypes() -> None:
+    assert set(REGIONAL_FIELDTYPES) <= set(COVERAGE)
+
+
+def test_a_regional_fieldtype_is_labeled_present_once_and_absent_once() -> None:
+    """A regional column that is always empty, or never, would pin only one half of
+    what the scorer must tell apart."""
+    for fieldtype in REGIONAL_FIELDTYPES:
+        cells = [bool(each.labels[fieldtype]) for each in COMPROBANTES]
+        assert any(cells) and not all(cells), fieldtype
 
 
 def test_a_consumer_comprobante_names_no_customer() -> None:
