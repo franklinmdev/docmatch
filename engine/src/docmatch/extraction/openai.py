@@ -62,7 +62,7 @@ import base64
 import os
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -119,7 +119,9 @@ def client() -> openai.OpenAI:
     return openai.OpenAI(api_key=key, timeout=TIMEOUT, max_retries=0)
 
 
-def extractor(model: str = MODEL, long_edge: int = LONG_EDGE) -> "OpenAIExtractor":
+def extractor(
+    model: str = MODEL, long_edge: int = LONG_EDGE, asks: type[Invoice] = Invoice
+) -> "OpenAIExtractor":
     """A backend reading with the key in the environment.
 
     A model with no price written down is refused here, before a run has a
@@ -127,7 +129,7 @@ def extractor(model: str = MODEL, long_edge: int = LONG_EDGE) -> "OpenAIExtracto
     """
     price_of(model)
     return OpenAIExtractor(
-        responses=client().responses, model=model, long_edge=long_edge
+        responses=client().responses, model=model, long_edge=long_edge, asks=asks
     )
 
 
@@ -200,9 +202,12 @@ class OpenAIExtractor:
     model: str = MODEL
     long_edge: int = LONG_EDGE
     """Pixels on a rendered page's longer side."""
-    schema: dict[str, Any] = field(
-        default_factory=lambda: strict(Invoice.model_json_schema())
-    )
+    asks: type[Invoice] = Invoice
+    """What the set is asked to fill in: `schema.asked` of its region (#225)."""
+
+    @property
+    def schema(self) -> dict[str, Any]:
+        return strict(self.asks.model_json_schema())
 
     def extract(self, document: Document) -> Extraction:
         """Read one document, or say why it could not be read.
@@ -239,7 +244,7 @@ class OpenAIExtractor:
         usage = _usage(answer)
         cost = price.of(usage)
         return Extraction(
-            prediction=_read(answer, cost, usage).prediction(),
+            prediction=_read(answer, cost, usage, self.asks).prediction(),
             usage=usage,
             cost=cost,
             latency=latency,
@@ -247,7 +252,9 @@ class OpenAIExtractor:
         )
 
 
-def _read(answer: Response, cost: Decimal, usage: Usage) -> Invoice:
+def _read(
+    answer: Response, cost: Decimal, usage: Usage, asks: type[Invoice]
+) -> Invoice:
     """The model's JSON as an `Invoice`, or the reason it is not one.
 
     Every failure here was paid for, so each carries the cost and the tokens.
@@ -275,7 +282,7 @@ def _read(answer: Response, cost: Decimal, usage: Usage) -> Invoice:
     if not text:
         raise ExtractionError("the backend returned no text", cost, usage=usage)
     try:
-        return Invoice.model_validate_json(text)
+        return asks.model_validate_json(text)
     except ValidationError as error:
         location = error.errors()[0]["loc"]
         where = ".".join(str(part) for part in location) or "the answer itself"

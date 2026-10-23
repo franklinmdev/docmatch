@@ -140,7 +140,7 @@ from docmatch.extraction.run import (
     write_predictions,
     write_record,
 )
-from docmatch.extraction.schema import CELL_FIELDTYPES
+from docmatch.extraction.schema import CELL_FIELDTYPES, asked
 from docmatch.matching import floors
 from docmatch.matching.generator import (
     BANDED_TYPES,
@@ -1782,7 +1782,10 @@ def _extract(arguments: argparse.Namespace, dataset: DocileDataset) -> tuple[str
     # document, because an --out that cannot be written is worth a hundred
     # documents of spend.
     backend = backends.extractor(
-        arguments.backend, arguments.model, long_edge=arguments.long_edge
+        arguments.backend,
+        arguments.model,
+        long_edge=arguments.long_edge,
+        asks=asked(pinned.region),
     )
     reading = (
         extract_subset(

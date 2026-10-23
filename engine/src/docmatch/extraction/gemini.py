@@ -62,7 +62,7 @@ import json
 import os
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Protocol, runtime_checkable
 
@@ -182,7 +182,9 @@ def client() -> genai.Client:
     )
 
 
-def extractor(model: str = MODEL, long_edge: int = LONG_EDGE) -> "GeminiExtractor":
+def extractor(
+    model: str = MODEL, long_edge: int = LONG_EDGE, asks: type[Invoice] = Invoice
+) -> "GeminiExtractor":
     """A backend reading with the key in the environment, and its client kept.
 
     A model with no price written down is refused here, before a run has a
@@ -191,7 +193,11 @@ def extractor(model: str = MODEL, long_edge: int = LONG_EDGE) -> "GeminiExtracto
     price_of(model)
     keep = client()
     return GeminiExtractor(
-        interactions=keep.interactions, model=model, long_edge=long_edge, owner=keep
+        interactions=keep.interactions,
+        model=model,
+        long_edge=long_edge,
+        asks=asks,
+        owner=keep,
     )
 
 
@@ -302,7 +308,8 @@ class GeminiExtractor:
     model: str = MODEL
     long_edge: int = LONG_EDGE
     """Pixels on a rendered page's longer side."""
-    schema: dict[str, Any] = field(default_factory=Invoice.model_json_schema)
+    asks: type[Invoice] = Invoice
+    """What the set is asked to fill in: `schema.asked` of its region (#225)."""
     owner: object = None
     """Whatever `interactions` came off, kept only so that it outlives this.
 
@@ -316,6 +323,10 @@ class GeminiExtractor:
     @property
     def price(self) -> Price:
         return price_of(self.model)
+
+    @property
+    def schema(self) -> dict[str, Any]:
+        return self.asks.model_json_schema()
 
     def extract(self, document: Document) -> Extraction:
         """Read one document, or say why it could not be read.
@@ -379,7 +390,7 @@ class GeminiExtractor:
         usage = _usage(answer)
         cost = price.of(usage)
         return Extraction(
-            prediction=_read(answer, cost, usage).prediction(),
+            prediction=_read(answer, cost, usage, self.asks).prediction(),
             usage=usage,
             cost=cost,
             latency=latency,
@@ -387,7 +398,7 @@ class GeminiExtractor:
         )
 
 
-def _read(answer: Answer, cost: Decimal, usage: Usage) -> Invoice:
+def _read(answer: Answer, cost: Decimal, usage: Usage, asks: type[Invoice]) -> Invoice:
     """The model's JSON as an `Invoice`, or the reason it is not one.
 
     Every failure here is one the model was paid for, so each carries the cost
@@ -403,7 +414,7 @@ def _read(answer: Answer, cost: Decimal, usage: Usage) -> Invoice:
     if not text:
         raise ExtractionError("the backend returned no text", cost, usage=usage)
     try:
-        return Invoice.model_validate_json(text)
+        return asks.model_validate_json(text)
     except ValidationError as error:
         raise ExtractionError(
             f"the backend's answer does not fit the schema: {error.error_count()} "

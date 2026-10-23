@@ -12,10 +12,10 @@ model was asked for and the names the labels use, and every disagreement about
 that table would show up in the score as an extraction error. Naming the
 fieldtypes after the labels makes the mapping the identity function.
 
-Six more fieldtypes follow the 36, for what a Dominican comprobante or the 606
-carries and DocILE does not label: the legal tip, selective and other taxes,
-the modified NCF and the printed ITBIS and ISR retentions (#225). DocILE's
-labels never name them, so on DocILE they can only be left empty.
+A `Comprobante` asks for six more, for what a Dominican comprobante or the
+606 carries and DocILE does not label: the legal tip, selective and other
+taxes, the modified NCF and the printed ITBIS and ISR retentions (#225). Only
+a set declaring region `do` asks for them; DocILE's request is unchanged.
 
 One value or several
 --------------------
@@ -261,6 +261,42 @@ class Invoice(BaseModel):
     bank_num: list[str] = Field(
         default_factory=list, description=_many("A bank, sort or routing code.")
     )
+    line_items: list[LineItem] = Field(
+        default_factory=list,
+        description="Every row of the line-item table, in the order printed.",
+    )
+
+    def prediction(self) -> Prediction:
+        """This reading as the thing the scorers take.
+
+        Empty lists and null cells are dropped rather than written down as
+        empty values, because `Prediction` already treats a fieldtype it does
+        not carry as an absence, and carrying it explicitly would say the same
+        thing in more bytes.
+        """
+        header: WrittenValues = {
+            fieldtype: values
+            for fieldtype, values in self.model_dump(exclude={"line_items"}).items()
+            if values
+        }
+        rows = tuple(
+            {
+                fieldtype: value
+                for fieldtype, value in row.model_dump().items()
+                if value is not None
+            }
+            for row in self.line_items
+        )
+        return Prediction(fields=header, line_items=rows)
+
+
+class Comprobante(Invoice):
+    """A Dominican comprobante: DocILE's fieldtypes and the six it lacks.
+
+    Only a set whose manifest declares region `do` asks for these, so DocILE's
+    request is the one it was before regions and its numbers stay put (#225).
+    """
+
     amount_tip: list[str] = Field(
         default_factory=list,
         description=_many("The legal tip (propina legal) charged, as an amount."),
@@ -295,47 +331,27 @@ class Invoice(BaseModel):
             "The income tax (ISR) withheld, when the document prints it."
         ),
     )
-    line_items: list[LineItem] = Field(
-        default_factory=list,
-        description="Every row of the line-item table, in the order printed.",
-    )
-
-    def prediction(self) -> Prediction:
-        """This reading as the thing the scorers take.
-
-        Empty lists and null cells are dropped rather than written down as
-        empty values, because `Prediction` already treats a fieldtype it does
-        not carry as an absence, and carrying it explicitly would say the same
-        thing in more bytes.
-        """
-        header: WrittenValues = {
-            fieldtype: values
-            for fieldtype, values in self.model_dump(exclude={"line_items"}).items()
-            if values
-        }
-        rows = tuple(
-            {
-                fieldtype: value
-                for fieldtype, value in row.model_dump().items()
-                if value is not None
-            }
-            for row in self.line_items
-        )
-        return Prediction(fields=header, line_items=rows)
 
 
-HEADER_FIELDTYPES = tuple(name for name in Invoice.model_fields if name != "line_items")
-"""The KILE fieldtypes the schema asks for, in the order it asks for them."""
+def asked(region: str | None) -> type[Invoice]:
+    """What a set of this region is asked to fill in: DocILE's invoice when it
+    declares none, a comprobante for `do`."""
+    if region is None:
+        return Invoice
+    if region == "do":
+        return Comprobante
+    raise ValueError(f"no schema is written down for region {region}")
+
+
+HEADER_FIELDTYPES = tuple(
+    name for name in Comprobante.model_fields if name != "line_items"
+)
+"""Every header fieldtype a backend may be asked for, KILE's then the six."""
 
 CELL_FIELDTYPES = tuple(LineItem.model_fields)
 """The LIR fieldtypes one row of the schema asks for."""
 
-REGIONAL_FIELDTYPES = (
-    "amount_tip",
-    "amount_tax_selective",
-    "amount_tax_other",
-    "document_id_modified",
-    "amount_retention_itbis",
-    "amount_retention_isr",
+REGIONAL_FIELDTYPES = tuple(
+    name for name in Comprobante.model_fields if name not in Invoice.model_fields
 )
 """The six header fieldtypes beyond DocILE's, for a Dominican comprobante."""
