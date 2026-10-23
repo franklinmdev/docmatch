@@ -405,3 +405,28 @@ def test_a_prefix_of_a_regional_set_keeps_its_region_coverage_and_files() -> Non
     assert first.coverage == ("vendor_tax_id", "document_id")
     assert first.files == {"labels.csv": "c" * 64}
     assert first.digests == {"do0001.png": "a" * 64}
+
+
+def test_a_regional_manifest_reads_back_with_the_reporter_it_files_as(
+    tmp_path: Path,
+) -> None:
+    """The 606's header names the taxpayer reporting, never read from a page."""
+    path = tmp_path / "manifest.json"
+    write(regional(reporter="130990026"), path)
+
+    assert load(path).reporter == "130990026"
+
+
+def test_a_manifest_naming_no_reporter_is_written_back_without_one(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "manifest.json"
+    write(regional(), path)
+
+    assert "reporter" not in path.read_text("utf-8")
+
+
+def test_a_reporter_that_is_neither_an_rnc_nor_a_cedula_is_refused() -> None:
+    """A typo in the reporter would put every 606 under someone else's number."""
+    with pytest.raises(ValidationError, match="130990027"):
+        Manifest.model_validate({**regional().model_dump(), "reporter": "130990027"})
