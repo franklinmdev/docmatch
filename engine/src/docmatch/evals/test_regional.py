@@ -7,6 +7,8 @@ import pypdfium2 as pdfium
 import pytest
 from PIL import Image
 
+from docmatch.evals.ecf import ECFExtractor
+from docmatch.evals.ecf import read as ecf_read
 from docmatch.evals.manifest import Manifest, load
 from docmatch.evals.public import digest
 from docmatch.evals.regional import RegionalError, read_labels, read_set
@@ -369,6 +371,37 @@ def test_refuses_a_set_that_pins_no_digest_for_its_images(tmp_path: Path) -> Non
 
     with pytest.raises(RegionalError, match="digest"):
         list(read_set(FakeExtractor(answers=[READING]), manifest, tmp_path))
+
+
+def copied_ecf_set(directory: Path) -> Manifest:
+    """The committed e-CF set copied into `directory`, its manifest returned."""
+    for each in (FIXTURE / "ecf").iterdir():
+        (directory / each.name).write_bytes(each.read_bytes())
+    return load(directory / "manifest.json")
+
+
+def test_an_e_cf_is_handed_to_the_backend_as_its_own_xml(tmp_path: Path) -> None:
+    """An e-CF is parsed, not looked at, so it is never wrapped in a PDF."""
+    manifest = copied_ecf_set(tmp_path)
+
+    read = list(read_set(ECFExtractor(), manifest, tmp_path))
+
+    assert [each.document_id for each in read] == list(manifest.document_ids)
+    assert all(each.predicted and each.cost == 0 for each in read)
+    assert read[0].prediction == ecf_read((tmp_path / "ecf0001.xml").read_bytes())
+
+
+def test_refuses_an_e_cf_whose_digest_is_not_the_pinned_one_before_any_reading(
+    tmp_path: Path,
+) -> None:
+    manifest = copied_ecf_set(tmp_path)
+    (tmp_path / "ecf0002.xml").write_bytes(b"<ECF/>")
+    fake = FakeExtractor(answers=[READING])
+
+    with pytest.raises(RegionalError, match="ecf0002.xml"):
+        list(read_set(fake, manifest, tmp_path))
+
+    assert fake.attempts == []
 
 
 def regional_check(run: SubsetScore, document: int, rule: str) -> str:
