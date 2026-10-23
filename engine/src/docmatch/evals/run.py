@@ -159,6 +159,9 @@ class RunRecord(BaseModel):
     recorded one (#153)."""
     dirty: bool = False
     """Whether the backend's extraction code differed from that commit."""
+    region: str | None = None
+    """The region of the set the run read, copied from its manifest; None for
+    a neutral set and for a run saved before runs recorded one (#222)."""
 
     @property
     def name(self) -> str:
