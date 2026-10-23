@@ -1,0 +1,5 @@
+{
+  "backend": "gemini",
+  "requested_model": "synthetic-001",
+  "region": "do"
+}

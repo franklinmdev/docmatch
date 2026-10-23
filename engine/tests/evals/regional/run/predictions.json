@@ -1,0 +1,44 @@
+{
+  "do0001.png": {
+    "fields": {
+      "vendor_name": "Ferreteria Los Pinos SRL",
+      "vendor_tax_id": "130990018",
+      "customer_tax_id": "130990026",
+      "document_id": "B0100000417",
+      "date_issue": "14/03/2026",
+      "amount_total_net": "2,500.00",
+      "amount_total_tax": "375.00",
+      "amount_total_gross": "2,875.00",
+      "vendor_email": "ventas@example.do"
+    },
+    "line_items": [
+      {
+        "line_item_description": "Cemento gris",
+        "line_item_quantity": "10"
+      }
+    ]
+  },
+  "do0002.png": {
+    "fields": {
+      "vendor_name": "Colmado La Esquina",
+      "vendor_tax_id": "130990034",
+      "customer_tax_id": null,
+      "document_id": "B0200001238",
+      "date_issue": "02/04/2026",
+      "amount_total_net": "700.00",
+      "amount_total_tax": "20.00",
+      "amount_total_gross": "720.00"
+    }
+  },
+  "do0003.png": {
+    "fields": {
+      "vendor_name": "Servicios Tecnicos Caribe SRL",
+      "vendor_tax_id": "130990042",
+      "customer_tax_id": "00099000010",
+      "document_id": "E310000000052",
+      "date_issue": "21/05/2026",
+      "amount_total_net": "8,000.00",
+      "amount_total_gross": "9,000.00"
+    }
+  }
+}

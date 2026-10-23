@@ -46,6 +46,17 @@ the ranking minus the rejects, cut at `size`, is the pinned list, and that needs
 DocILE's metadata and no network. Every admitted document is pinned with the
 sha256 of the public copy that was admitted, so a file that changes in the
 archive fails loudly rather than quietly moving the benchmark.
+
+Regional sets
+-------------
+
+A regional benchmark set is pinned by the same manifest, with three things a
+DocILE subset never declares (#213, #214): its region, its label coverage
+and the digests of its own files beside the documents, `labels.csv` among
+them. Its documents are not drawn, so its seed is 0 and nothing reproduces it
+from a pool, and its document ids are the documents' filenames, which is what
+its labels are keyed by. A manifest declaring none of the three is DocILE's,
+neutral and covered for every fieldtype, and is written back without them.
 """
 
 import hashlib
@@ -55,6 +66,8 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+
+from docmatch.extraction.schema import CELL_FIELDTYPES, HEADER_FIELDTYPES
 
 SPLIT = "val"
 """The split the subset is drawn from: held out, and the smaller of the two."""
@@ -109,6 +122,14 @@ class Manifest(BaseModel):
     digests: dict[str, str] = {}
     """The sha256 of each pinned document's public copy, hex. Empty for a
     corpus that is only ever scored and never read, like the synthetic one."""
+    region: str | None = None
+    """The tax jurisdiction the set's documents belong to; None is neutral."""
+    coverage: tuple[str, ...] | None = None
+    """The fieldtypes the set's labels were written for, the only ones a score
+    counts; None covers every fieldtype."""
+    files: dict[str, str] = {}
+    """The sha256 of each of the set's own files beside its documents, by
+    filename, hex; `labels.csv` is one."""
 
     @model_validator(mode="after")
     def _a_consistent_pin(self) -> "Manifest":
@@ -128,6 +149,8 @@ class Manifest(BaseModel):
                 f"digests cover {digested} of the {self.size} documents, and "
                 "digest nothing else"
             )
+        if self.coverage is not None:
+            _check_coverage(self.coverage)
         return self
 
     def first(self, size: int) -> "Manifest":
@@ -166,6 +189,25 @@ class Manifest(BaseModel):
             each for each in rank(pool, seed=self.seed) if each not in self.rejected
         )
         return tuple(admitted)[: self.size]
+
+
+FIELDTYPES = frozenset((*HEADER_FIELDTYPES, *CELL_FIELDTYPES))
+"""Every fieldtype a backend is asked for, the only ones a set can cover."""
+
+
+def _check_coverage(coverage: tuple[str, ...]) -> None:
+    """Refuse a coverage naming no fieldtype, one twice or one no backend reads,
+    since a typo would quietly leave a fieldtype out of the score, and an empty
+    one scores nothing yet is written back as no coverage, which covers all."""
+    if not coverage:
+        raise ValueError("the coverage names no fieldtype")
+    if len(coverage) != len(set(coverage)):
+        raise ValueError("the coverage names a fieldtype more than once")
+    unknown = [each for each in coverage if each not in FIELDTYPES]
+    if unknown:
+        raise ValueError(
+            f"the coverage names {', '.join(unknown)}, which no backend is asked for"
+        )
 
 
 def rank(document_ids: Iterable[str], *, seed: int) -> tuple[str, ...]:
@@ -252,7 +294,16 @@ def _first_problem(error: ValidationError) -> str:
     return f"{named}: {first['msg'].lower()}."
 
 
+REGIONAL_KEYS = ("region", "coverage", "files")
+"""What only a regional set declares, left out of a manifest that declares none."""
+
+
 def write(manifest: Manifest, path: Path = MANIFEST) -> None:
-    """Write the manifest as a diff-readable JSON object, one id per line."""
-    body = manifest.model_dump_json(indent=2)
+    """Write the manifest as a diff-readable JSON object, one id per line.
+
+    A key only a regional set declares is written only when it is declared,
+    so DocILE's manifest is written back as it was before regions existed.
+    """
+    unset = {key for key in REGIONAL_KEYS if not getattr(manifest, key)}
+    body = manifest.model_dump_json(indent=2, exclude=unset)
     path.write_text(f"{body}\n", encoding="utf-8")

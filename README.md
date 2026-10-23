@@ -1103,6 +1103,43 @@ uv run docmatch noise --run data/runs/noise/gemini-1 --run data/runs/noise/gemin
 
 It prints each run's two numbers, the measured noise and the constant beside it.
 
+### A regional set
+
+A regional set is paper comprobantes photographed or scanned by their owner,
+labeled by hand, and never committed. It lives in one directory under the
+ignored `data/regional/`, one per region, `data/regional/do/` for the Dominican
+Republic:
+
+```text
+data/regional/do/
+  manifest.json   region, coverage, a sha256 per image and one for labels.csv
+  labels.csv      filename, one column per covered fieldtype, then paper
+  do0001.jpg      one image per comprobante, named by the manifest
+```
+
+The manifest is the fixed subset's with three more keys: `region`, the region
+the set belongs to; `coverage`, the fieldtypes its labels hold; and `files`,
+the digest of `labels.csv`, so a label edited after pinning is refused rather
+than scored. A row of `labels.csv` labels one image; an empty cell says the
+comprobante prints no such value, so a reading of one is a false positive, and
+a fieldtype outside `coverage` is not scored at all. The `paper` column (for
+example `thermal` or `letter`) is never a value. The committed made-up set in
+`engine/tests/evals/regional/` shows the layout, and CI's `Regional` step
+scores its saved run.
+
+```bash
+uv run docmatch extract --backend gemini --manifest data/regional/do/manifest.json \
+  --out data/runs/regional/do-gemini
+uv run docmatch eval --manifest data/regional/do/manifest.json \
+  --predictions data/runs/regional/do-gemini/predictions.json
+```
+
+`extract` verifies every image against its digest before the first request,
+sends each to the backend as a one-page PDF, and records the region in
+`run.json`; `eval` reads `labels.csv` beside the manifest, refuses a run of
+another region, and prints field F1 over the covered fieldtypes only. A
+regional set writes no aggregate and takes no corrections.
+
 ### Matching
 
 ```bash
@@ -1596,6 +1633,7 @@ docmatch/
       resolution/      the catalog, the query set, the embedder, the Postgres working space, the arms, the run
       pipeline/        the loop's statuses, API, server, replay and labels backends, loop runs and their report
     tests/evals/       the synthetic corpus CI runs the eval, the match, the resolve and the loop on
+      regional/        a made-up Dominican set, its labels and a saved run, for the regional eval
   apps/review/         Next.js review page, from phase 4
   data/                ignored: datasets, generated fixtures, private sets
   benchmark/           committed aggregates: the regression gate's F1 per backend, the matching per-type tables `reproduce` compares with

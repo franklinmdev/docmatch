@@ -1,0 +1,4 @@
+filename,vendor_name,vendor_tax_id,customer_tax_id,document_id,date_issue,amount_total_net,amount_total_tax,amount_total_gross,paper
+do0001.png,Ferreteria Los Pinos SRL,130990018,130990026,B0100000417,14/03/2026,"2,500.00",375.00,"2,875.00",thermal
+do0002.png,Colmado La Esquina,130990034,,B0200001288,02/04/2026,700.00,20.00,720.00,thermal
+do0003.png,Servicios Tecnicos Caribe SRL,130990042,00099000010,E310000000052,21/05/2026,"8,000.00","1,000.00","9,000.00",letter

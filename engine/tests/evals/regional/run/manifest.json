@@ -1,0 +1,31 @@
+{
+  "split": "paper",
+  "seed": 0,
+  "source": "synthetic",
+  "size": 3,
+  "document_ids": [
+    "do0001.png",
+    "do0002.png",
+    "do0003.png"
+  ],
+  "rejected": {},
+  "digests": {
+    "do0001.png": "0a0556f3e04223cc2229dfc56526d4bad9b6c26fa97630a3f6a10ac6bcf5ca22",
+    "do0002.png": "f2d0aa0317e4f30bf02406eaab423d397ca5308b1083d9f7fbc9802d57b29c79",
+    "do0003.png": "b355fce6d1c175c697f3dd1a19decac2cd0ee36b038eec10aebb36e18a1c8972"
+  },
+  "region": "do",
+  "coverage": [
+    "vendor_name",
+    "vendor_tax_id",
+    "customer_tax_id",
+    "document_id",
+    "date_issue",
+    "amount_total_net",
+    "amount_total_tax",
+    "amount_total_gross"
+  ],
+  "files": {
+    "labels.csv": "cde9441be6f76e70f402feab08a1a1d0558b440c0e936b233d83f682a2f19f37"
+  }
+}
