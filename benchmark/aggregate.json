@@ -1,15 +1,15 @@
 {
   "gemini": {
     "requested_model": "gemini-3.1-flash-lite",
-    "field_f1": 0.6145503840939901,
-    "line_item_f1": 0.37444279346210996,
-    "predictions": "db0d54d91a84353dd57286ae8af83b4489c5f2ebf9f28e7bb997059d1314812f",
+    "field_f1": 0.6079054975011358,
+    "line_item_f1": 0.30357142857142855,
+    "predictions": "0dba01232dddaa84b405ad7cd503137d9ae086decbe3311029915cf3f5e3855e",
     "extracted_on": {
-      "commit": "28d07389e78363be8da6284e55f5163e049d3bff",
-      "tree": "0b1a1bd8b649d847f87e4d827d2259c920d522971606cba3eddaa005284cef84"
+      "commit": "957eef61d88258783a3edce1ff41efcd1f4ff960",
+      "tree": "f826e6911c834f14db145f4d64babb62408bde7bde401004881767cb7839767a"
     },
     "scored_on": {
-      "commit": "c8caae4bde50fdeda352238b93225618c151412f",
+      "commit": "957eef61d88258783a3edce1ff41efcd1f4ff960",
       "tree": "2e51b376ec9f46636dc7ff003f7d50bf6308d2b1642a1652f56e7e9154fc593d"
     }
   },
@@ -29,15 +29,15 @@
   },
   "openai": {
     "requested_model": "gpt-5.6-luna",
-    "field_f1": 0.5880266075388026,
-    "line_item_f1": 0.15886524822695036,
-    "predictions": "abcdb81a77c8adb49e01aae5246c81bca5c0efd2b766719669bf57cc953d5191",
+    "field_f1": 0.5776997366110623,
+    "line_item_f1": 0.17341040462427745,
+    "predictions": "73a66545e2ce3e64fce1c1287693ca751cae323f131ce8e2fff323b3f8155a90",
     "extracted_on": {
-      "commit": "42e69faaea0863c6c3b9dbf1da220e5d1c842e34",
-      "tree": "df459fee2719e7492aa0e9e03b59099d8ca9bbee6c543a37f37909124a2960b7"
+      "commit": "957eef61d88258783a3edce1ff41efcd1f4ff960",
+      "tree": "bff3937dace768a2ea077493bb4e58ed6488f9ba8e5a063fe49d397347dd810e"
     },
     "scored_on": {
-      "commit": "c8caae4bde50fdeda352238b93225618c151412f",
+      "commit": "957eef61d88258783a3edce1ff41efcd1f4ff960",
       "tree": "2e51b376ec9f46636dc7ff003f7d50bf6308d2b1642a1652f56e7e9154fc593d"
     }
   }
