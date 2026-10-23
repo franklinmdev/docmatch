@@ -16,7 +16,8 @@ Two path lists
 What a pull request touches decides what it owes.
 
 - Extraction paths, the extraction package except the derived-currency
-  module: a backend's own module touches its row, any other file every row.
+  module: a module a backend reads, its own or one it imports from the
+  package, touches that backend's row; any other file every row (#237).
   A touched row must be re-extracted on a commit whose extraction tree for
   that backend equals the pull request's.
 - Scoring paths, the metrics, the evals, derived currency, the gate and the
@@ -88,8 +89,21 @@ REASON_HEADING = "Regression reason"
 PACKAGE = "engine/src/docmatch"
 EXTRACTION = f"{PACKAGE}/extraction"
 DERIVED = f"{EXTRACTION}/derived.py"
-OWN_MODULES = {backend: f"{EXTRACTION}/{backend}.py" for backend in BACKENDS}
-"""Each backend's own module, which touches that backend's row alone."""
+READS: Mapping[str, frozenset[str]] = {
+    "gemini": frozenset(
+        f"{EXTRACTION}/{module}.py"
+        for module in ("gemini", "extractor", "pages", "schema")
+    ),
+    "azure": frozenset(
+        f"{EXTRACTION}/{module}.py" for module in ("azure", "extractor")
+    ),
+    "openai": frozenset(
+        f"{EXTRACTION}/{module}.py"
+        for module in ("openai", "gemini", "extractor", "pages", "schema")
+    ),
+}
+"""The extraction modules each backend reads: its own and what it imports from
+the package, kept by hand and derived from the imports by a test (#237)."""
 
 SCORING = (
     f"{PACKAGE}/metrics",
@@ -195,8 +209,8 @@ def extraction_path(path: str, backend: str) -> bool:
     """Whether a change to this file demands this backend's row re-extracted."""
     if not _within(path, EXTRACTION) or path == DERIVED or _is_test(path):
         return False
-    owner = next((b for b, module in OWN_MODULES.items() if module == path), None)
-    return owner is None or owner == backend
+    read = any(path in modules for modules in READS.values())
+    return not read or path in READS[backend]
 
 
 def scoring_path(path: str) -> bool:

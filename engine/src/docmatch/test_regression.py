@@ -5,6 +5,7 @@ listing, so no git, no DocILE and no model is involved; the git helpers are
 tested apart, on a repository made for the test.
 """
 
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -12,8 +13,10 @@ from pathlib import Path
 import pytest
 
 from docmatch.conftest import git
+from docmatch.extraction.backends import BACKENDS
 from docmatch.regression import (
     EXTRACTION_NOISE,
+    READS,
     Aggregate,
     Noise,
     RegressionError,
@@ -69,8 +72,11 @@ def with_blob(path: str, blob: str) -> tuple[tuple[str, str], ...]:
     [
         (f"{ROOT}/extraction/extractor.py", {"gemini", "azure", "openai"}),
         (f"{ROOT}/extraction/run.py", {"gemini", "azure", "openai"}),
-        (f"{ROOT}/extraction/schema.py", {"gemini", "azure", "openai"}),
-        (f"{ROOT}/extraction/gemini.py", {"gemini"}),
+        (f"{ROOT}/extraction/backends.py", {"gemini", "azure", "openai"}),
+        (f"{ROOT}/extraction/schema.py", {"gemini", "openai"}),
+        (f"{ROOT}/extraction/pages.py", {"gemini", "openai"}),
+        # OpenAI's request carries Gemini's instruction.
+        (f"{ROOT}/extraction/gemini.py", {"gemini", "openai"}),
         (f"{ROOT}/extraction/azure.py", {"azure"}),
         (f"{ROOT}/extraction/openai.py", {"openai"}),
         (f"{ROOT}/extraction/derived.py", set()),
@@ -79,7 +85,7 @@ def with_blob(path: str, blob: str) -> tuple[tuple[str, str], ...]:
         (f"{ROOT}/metrics/fields.py", set()),
     ],
 )
-def test_an_extraction_path_is_shared_or_one_backends_own(
+def test_an_extraction_path_touches_the_backends_that_read_it(
     path: str, backends: set[str]
 ) -> None:
     assert {b for b in EXTRACTION_NOISE if extraction_path(path, b)} == backends
@@ -109,9 +115,42 @@ def test_the_scoring_paths(path: str, scoring: bool) -> None:
 
 
 def test_a_shared_extraction_file_demands_every_row_re_extracted() -> None:
-    demand = demanded([f"{ROOT}/extraction/pages.py"])
+    demand = demanded([f"{ROOT}/extraction/run.py"])
     assert demand.re_extract == {"gemini", "azure", "openai"}
     assert not demand.re_score
+
+
+def test_a_module_some_backends_read_demands_only_their_rows() -> None:
+    assert demanded([f"{ROOT}/extraction/pages.py"]).re_extract == {"gemini", "openai"}
+
+
+def test_the_modules_each_backend_reads_are_its_imports() -> None:
+    """`READS` is kept by hand; this derives it from the source, so a backend
+    that starts importing another module fails here until the gate knows."""
+    package = Path(__file__).parent
+
+    def imports(module: str) -> set[str]:
+        tree = ast.parse((package / "extraction" / f"{module}.py").read_text())
+        found = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                prefix = "docmatch.extraction."
+                if node.module.startswith(prefix):
+                    found.add(node.module.removeprefix(prefix))
+        return found
+
+    def reads(backend: str) -> set[str]:
+        seen, todo = set(), [backend]
+        while todo:
+            module = todo.pop()
+            if module not in seen:
+                seen.add(module)
+                todo.extend(imports(module))
+        return seen
+
+    assert {b: {f"{ROOT}/extraction/{m}.py" for m in reads(b)} for b in BACKENDS} == {
+        b: set(modules) for b, modules in READS.items()
+    }
 
 
 def test_a_backends_module_demands_only_its_row() -> None:
@@ -240,7 +279,11 @@ def test_a_re_scored_rise_passes() -> None:
 def test_a_re_extraction_within_its_noise_passes() -> None:
     changed = [f"{ROOT}/extraction/gemini.py"]
     after = with_blob(changed[0], "g2")
-    head = three(gemini=a_row(field_f1=0.615 - 0.02, predictions="p2", listing=after))
+    # OpenAI reads Gemini's module too, so its row is stamped on the new tree.
+    head = three(
+        gemini=a_row(field_f1=0.615 - 0.02, predictions="p2", listing=after),
+        openai=a_row("openai", listing=after),
+    )
 
     verdict = check(three(), head, changed, after, noise=NOISE)
 
@@ -326,10 +369,15 @@ def test_a_re_extraction_is_held_to_the_measured_noise_by_default() -> None:
     changed = [f"{ROOT}/extraction/gemini.py"]
     after = with_blob(changed[0], "g2")
     within = EXTRACTION_NOISE["gemini"].field_f1
-    head = three(gemini=a_row(field_f1=0.615 - within, predictions="p2", listing=after))
+    openai = a_row("openai", listing=after)
+    head = three(
+        gemini=a_row(field_f1=0.615 - within, predictions="p2", listing=after),
+        openai=openai,
+    )
     assert check(three(), head, changed, after).passed
     beyond = three(
-        gemini=a_row(field_f1=0.615 - within - 1e-4, predictions="p2", listing=after)
+        gemini=a_row(field_f1=0.615 - within - 1e-4, predictions="p2", listing=after),
+        openai=openai,
     )
     assert not check(three(), beyond, changed, after).passed
 
@@ -614,3 +662,16 @@ def test_scoring_from_uncommitted_scoring_code_is_refused(repo: Path) -> None:
     (repo / f"{ROOT}/gate.py").write_text("two\n")
     with pytest.raises(RegressionError, match=f"{ROOT}/gate.py"):
         measure(repo, git(repo, "rev-parse", "HEAD"))
+
+
+def test_a_change_to_geminis_module_leaves_openai_stale_until_it_re_extracts() -> None:
+    changed = [f"{ROOT}/extraction/gemini.py"]
+    after = with_blob(changed[0], "g2")
+    head = three(gemini=a_row(predictions="p2", listing=after))
+
+    verdict = check(three(), head, changed, after, noise=NOISE)
+
+    assert [(each.backend, each.paths) for each in verdict.stale] == [
+        ("openai", "extraction")
+    ]
+    assert not verdict.passed
