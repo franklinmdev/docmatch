@@ -41,8 +41,8 @@ All read 2026-09-16, against `openai` 3.14.1:
   disable storage ..., set `store: false`", on
   https://developers.openai.com/api/docs/guides/migrate-to-responses, read
   2026-10-22, against `openai` 3.14.1, whose `responses.create` takes
-  `store: Optional[bool]`. No comprobante stays stored on the vendor's side
-  beyond its abuse log (#212, #223).
+  `store: Optional[bool]`. That nothing else is kept beyond an abuse log is
+  #212's reading and not on that page: unverified (#212, #223).
 - `OpenAI(max_retries=0)` is one request and no retries; the SDK's default is
   two, with a 600 second timeout.
 

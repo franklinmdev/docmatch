@@ -23,8 +23,9 @@ Storage
 The Interactions API stores every request by default, 55 days on the paid tier
 and 1 day on the free one, and `store=false` opts out; the same page notes it
 is incompatible with background execution and with `previous_interaction_id`,
-neither of which this backend uses. Every request sends it, so no comprobante
-stays on the vendor's side beyond its abuse log (#212, #223).
+neither of which this backend uses. Every request sends it (#212, #223). That
+nothing else is kept beyond an abuse log is #212's reading and not on this page:
+unverified.
 https://ai.google.dev/gemini-api/docs/interactions, read 2026-10-22, against
 `google-genai` 2.23.0, whose `interactions.create` takes `store: bool`.
 

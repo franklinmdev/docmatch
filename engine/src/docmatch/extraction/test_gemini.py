@@ -84,7 +84,7 @@ class FakeInteractions:
         model: str,
         input: list[dict[str, Any]],
         response_format: dict[str, Any],
-        store: bool | None = None,
+        store: bool,
     ) -> object:
         self.calls.append(
             {

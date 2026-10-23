@@ -107,7 +107,7 @@ class FakeResponses:
         model: str,
         input: list[dict[str, Any]],
         text: dict[str, Any],
-        store: bool | None = None,
+        store: bool,
     ) -> Response:
         self.calls.append(
             {"model": model, "input": input, "text": text, "store": store}
