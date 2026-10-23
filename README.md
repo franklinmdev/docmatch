@@ -1058,9 +1058,10 @@ which compares the pull request's aggregate with the one at the merge base and
 checks it is fresh for what the pull request touches:
 
 - **Extraction paths**, `engine/src/docmatch/extraction/` except `derived.py`:
-  a backend's own module owes that backend's row a re-extraction, any other
-  file every row's, on a commit whose extraction files equal the pull
-  request's.
+  a module a backend reads, its own or one it imports from the package, owes
+  that backend's row a re-extraction (OpenAI reads Gemini's module, Azure
+  reads neither the schema nor the page renderer), any other file every
+  row's, on a commit whose files for that backend equal the pull request's.
 - **Scoring paths**, `metrics/`, `evals/`, `extraction/derived.py`, `gate.py`
   and `docile/`: every row re-scored on a commit whose scoring files equal the
   pull request's.
