@@ -2,17 +2,19 @@
   "split": "paper",
   "seed": 0,
   "source": "synthetic",
-  "size": 3,
+  "size": 4,
   "document_ids": [
     "do0001.png",
     "do0002.png",
-    "do0003.png"
+    "do0003.png",
+    "do0004.png"
   ],
   "rejected": {},
   "digests": {
-    "do0001.png": "0a0556f3e04223cc2229dfc56526d4bad9b6c26fa97630a3f6a10ac6bcf5ca22",
-    "do0002.png": "f2d0aa0317e4f30bf02406eaab423d397ca5308b1083d9f7fbc9802d57b29c79",
-    "do0003.png": "b355fce6d1c175c697f3dd1a19decac2cd0ee36b038eec10aebb36e18a1c8972"
+    "do0001.png": "7dd7f77a4b98c46782b47672ec0d5a1990b409b4597ef9a03b120c76abff44ab",
+    "do0002.png": "de528d4bfec431c8849d9a84953fbf1c7f3e1e213f4a7459f787b9ab8fcdd26d",
+    "do0003.png": "e154d0178f7efd2886bb5c485ff6c96a6a90afbad61dbebc5054a8bba4266f44",
+    "do0004.png": "ed83b77f92360b00abf92cf4ee1e421946b76698bba6932abda772f9f9db2f67"
   },
   "region": "do",
   "coverage": [
@@ -23,9 +25,15 @@
     "date_issue",
     "amount_total_net",
     "amount_total_tax",
-    "amount_total_gross"
+    "amount_total_gross",
+    "amount_tip",
+    "amount_tax_selective",
+    "amount_tax_other",
+    "document_id_modified",
+    "amount_retention_itbis",
+    "amount_retention_isr"
   ],
   "files": {
-    "labels.csv": "cde9441be6f76e70f402feab08a1a1d0558b440c0e936b233d83f682a2f19f37"
+    "labels.csv": "5ff3bbff611171fc0db97ad5ccbe03ab48e43ae0912b1ce974617a35dfddcd1d"
   }
 }

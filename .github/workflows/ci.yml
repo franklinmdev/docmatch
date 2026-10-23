@@ -90,7 +90,7 @@ jobs:
           --predictions engine/tests/evals/synthetic/predictions.json
           --corrections engine/tests/evals/synthetic/corrections.json
 
-      # The regional set's report: three made-up Dominican comprobantes,
+      # The regional set's report: four made-up Dominican comprobantes,
       # their labels.csv and a saved run of made-up readings, scored over the
       # fieldtypes the set covers only. A real set is the owner's, never
       # committed, and is scored locally with the same command. It only prints;
