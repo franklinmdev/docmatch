@@ -34,14 +34,6 @@ MAY_LABELS = (
     "130990042|1|02|E310000000052||20260521|20260530|8000.00|0.00|8000.00|"
     "1000.00|750.00|1000.00|0.00|1000.00|0.00|02|800.00|0.00|0.00|0.00|0.00|2"
 )
-MAY_READING = (
-    "606|130990026|202605|1\r\n"
-    "130990042|1|02|E310000000052||20260521|20260530|8000.00|0.00|8000.00|"
-    "0.00|750.00|0.00|0.00|0.00|0.00|02|800.00|0.00|0.00|0.00|0.00|2"
-)
-"""The E31 whose ITBIS the reading left out: an ITBIS of zero below a retention
-of 750, which the pre-validator is expected to flag (#217, #229)."""
-
 EXPECTED_OUTPUT = "\n".join(
     [
         "606 export",
@@ -51,9 +43,11 @@ EXPECTED_OUTPUT = "\n".join(
         "  documents     4",
         "  not reported  1",
         "",
-        "Reading, 2 of 2 monthly files written",
+        # The reading left the E31's ITBIS out, which leaves its printed
+        # ITBIS retention above an ITBIS of zero: its month is not filed.
+        "Reading, 1 of 2 monthly files written",
         "  202603  2 rows",
-        "  202605  1 row",
+        "  202605  failed, 1 document: ITBIS retention above the ITBIS",
         "",
         "Labels control, 2 of 2 monthly files written",
         "  202603  2 rows",
@@ -92,7 +86,6 @@ def test_export_writes_one_606_per_month_for_the_reading_and_the_labels(
         for path in out.rglob("*.TXT")
     } == {
         f"reading/{MARCH}": MARCH_CONTENT,
-        f"reading/{MAY}": MAY_READING,
         f"control/{MARCH}": MARCH_CONTENT,
         f"control/{MAY}": MAY_LABELS,
     }
@@ -115,7 +108,17 @@ def test_export_lists_every_month_and_document_in_export_json(
         ],
         "reading": [
             {"period": "202603", "file": f"reading/{MARCH}", "rows": 2, "failures": []},
-            {"period": "202605", "file": f"reading/{MAY}", "rows": 1, "failures": []},
+            {
+                "period": "202605",
+                "file": None,
+                "rows": 0,
+                "failures": [
+                    {
+                        "filename": "do0003.png",
+                        "reasons": ["ITBIS retention above the ITBIS"],
+                    }
+                ],
+            },
         ],
         "control": [
             {"period": "202603", "file": f"control/{MARCH}", "rows": 2, "failures": []},
