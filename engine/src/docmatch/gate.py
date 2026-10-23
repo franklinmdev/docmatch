@@ -36,7 +36,8 @@ fieldtype:
   so a letter fails. dgii-ts's prefix rules are not added.
 - **NCF** and **modified NCF**: `document_id` and `document_id_modified` pass
   when the value is an NCF or e-NCF of a known shape and type code. No
-  checksum exists.
+  checksum exists. stdnum's NCF `compact` strips spaces only, so a hyphen
+  written inside an NCF fails.
 
 `check_dgii` and `search_dgii` are never called. A rule is admitted only when
 every label of the set it checks passes it (`admit`), so a stdnum edge case
@@ -85,7 +86,8 @@ RuleName = Literal[
     "modified NCF",
 ]
 RULES: tuple[RuleName, ...] = ("dates sane", "totals agree")
-"""Every neutral rule, in the order a report lists them."""
+"""Every neutral rule, in the order a report lists them. A regional rule is
+never unreadable, so the eval's unreadable counts run over these alone."""
 
 Outcome = Literal["passed", "failed", "absent", "paid", "unreadable"]
 """What one rule decided. The last three are the reasons it could not check."""

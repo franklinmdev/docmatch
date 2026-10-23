@@ -4,9 +4,11 @@ What the gate is worth against the labels is pinned in `evals/test_run.py`,
 over the synthetic corpus; these pin what each rule decides on a reading.
 """
 
+import socket
 from collections.abc import Mapping, Sequence
 
 import pytest
+from stdnum.do import ncf as stdnum_ncf
 from stdnum.do import rnc as stdnum_rnc
 
 from docmatch.gate import GateResult, RuleCheck, admit, gate, rules_of
@@ -240,6 +242,29 @@ def test_an_absent_value_leaves_its_regional_rule_not_checked() -> None:
         if each.rule in {"vendor RNC", "customer RNC", "NCF", "modified NCF"}
     ] == ["absent"] * 4
     assert result.verdict == "not checked"
+
+
+def test_the_regional_rules_never_reach_the_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refuse(*_: object, **__: object) -> None:
+        raise AssertionError("a regional rule opened a connection")
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    for module in (stdnum_rnc, stdnum_ncf):
+        monkeypatch.setattr(module, "check_dgii", refuse)
+
+    result = gate(
+        reading(
+            vendor_tax_id=RNC,
+            customer_tax_id=CEDULA,
+            document_id="B0400000009",
+            document_id_modified="B0100000417",
+        ),
+        DO,
+    )
+
+    assert result.verdict == "passed"
 
 
 def test_every_value_of_a_listed_field_must_pass() -> None:
