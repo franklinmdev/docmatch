@@ -171,3 +171,19 @@ def test_the_number_rule_can_be_asked_about_a_fieldtype_it_does_not_have() -> No
     """What reading an identifier as a number would cost is why it is text."""
     assert reads_number("8471.30.0100") is True
     assert reads("line_item_hts_number", "8471.30.0100") is True, "the text rule"
+
+
+@pytest.mark.parametrize(
+    "fieldtype",
+    [
+        "amount_tip",
+        "amount_tax_selective",
+        "amount_tax_other",
+        "amount_retention_itbis",
+        "amount_retention_isr",
+    ],
+)
+def test_a_comprobante_amount_is_read_as_a_number(fieldtype: str) -> None:
+    """A tip, tax or retention printed with a symbol and separators matches
+    the plain amount its label carries, as every other amount does (#225)."""
+    assert normalize(fieldtype, "RD$ 1,250.00") == normalize(fieldtype, "1250")

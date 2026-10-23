@@ -124,6 +124,11 @@ NUMBER_FIELDTYPES = frozenset(
     {
         "amount_due",
         "amount_paid",
+        "amount_retention_isr",
+        "amount_retention_itbis",
+        "amount_tax_other",
+        "amount_tax_selective",
+        "amount_tip",
         "amount_total_gross",
         "amount_total_net",
         "amount_total_tax",
