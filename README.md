@@ -1215,7 +1215,10 @@ Completado`, which shows on both outcomes. A month the export failed counts
 as failed without running, its failing documents as rows with an error, its
 other rows as withheld. The form's messages are printed with every digit as
 `#`. A pass under Mono is uncompared with one on Windows, and a pass is not
-DGII's verdict on the file. CI's `Regional` step pre-validates the made-up
+DGII's verdict on the file. The harness also swaps the form's progress bar for
+one the form takes for a label, since Mono's VB runtime cannot set a
+fractional progress value and kills the check on any file of two or more rows;
+the form's own checks are untouched, but the form is not DGII's as shipped. CI's `Regional` step pre-validates the made-up
 export with the binary cached by its hash; pytest never runs the container.
 
 ### Matching
