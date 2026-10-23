@@ -3007,6 +3007,24 @@ EXPECTED_REGIONAL_OUTPUT = "\n".join(
         "Calibration",
         "  no signal",
         "",
+        # No document reads amount_due, so totals agree has nothing to
+        # check, and a gate that checked nothing has no verdict.
+        "Gate",
+        "  passed       0",
+        "  failed       0",
+        "  not checked  3",
+        "  pass rate    1.000 of 0 checked",
+        "",
+        "Unreadable",
+        "  dates sane    0",
+        "  totals agree  0",
+        "",
+        "Gate ablation, over 0 checked",
+        "  catches       0",
+        "  misses        0",
+        "  false alarms  0",
+        "  confidence    no signal",
+        "",
     ]
 )
 
@@ -3028,8 +3046,8 @@ def test_eval_reports_a_regional_set_over_its_covered_fieldtypes(
     exit_code = main(evaluate_regional())
 
     output = capsys.readouterr().out
-    assert output.startswith(
-        EXPECTED_REGIONAL_OUTPUT.format(manifest=REGIONAL / "do" / "manifest.json")
+    assert output == EXPECTED_REGIONAL_OUTPUT.format(
+        manifest=REGIONAL / "do" / "manifest.json"
     )
     assert "vendor_email" not in output
     assert exit_code == 0
@@ -3143,6 +3161,36 @@ def test_extract_reads_a_regional_set_from_its_own_directory_and_records_its_reg
     capsys.readouterr()
     assert main(evaluate_regional_run(out)) == 0
     assert "Regional set" in capsys.readouterr().out
+
+
+def test_extract_refuses_a_regional_image_whose_digest_differs_before_any_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A changed file never reaches a vendor, not even the files before it."""
+    fake = FakeExtractor(answers=[READING])
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
+    regional = tmp_path / "do"
+    shutil.copytree(REGIONAL / "do", regional)
+    (regional / "do0002.png").write_bytes(b"not the pinned image")
+
+    exit_code = main(
+        [
+            "extract",
+            "--out",
+            str(tmp_path / "run"),
+            "--manifest",
+            str(regional / "manifest.json"),
+            "--data-dir",
+            str(tmp_path / "nothing"),
+        ]
+    )
+
+    assert exit_code == 1
+    assert fake.attempts == []
+    assert "do0002.png" in capsys.readouterr().err
+    assert not (tmp_path / "run" / "predictions.json").exists()
 
 
 def evaluate_regional_run(out: Path) -> list[str]:
