@@ -15,8 +15,10 @@
 // One change to what the form does, found on #229: it reports progress by
 // late-binding a percentage string such as "66.6666666666667" onto its
 // progress bar's integer Value. .NET Framework's Visual Basic runtime
-// converts that string; Mono's throws, the worker thread dies and the form
-// crashes on any file whose line count plus one does not divide 100. The
+// converts that string; Mono's throws and the worker thread dies. Measured
+// on #229: every made-up file of two lines crashed, every one of one line
+// ran. Read from the form's IL, not run: the percentage is whole, and so
+// safe, only when the line count plus one divides 100 (unverified). The
 // form's SetText routes by the control's type name (Label gets Text, TextBox
 // gets the numbered error line, anything else gets Value), so the harness
 // puts a progress bar named Label in its place: the percentage lands on its
@@ -24,6 +26,7 @@
 using System;
 using System.IO;
 using System.Reflection;
+using System.Text;
 using System.Windows.Forms;
 
 static class Harness
@@ -56,6 +59,9 @@ static class Harness
     [STAThread]
     static int Main(string[] a)
     {
+        // UTF-8 whatever the locale, without a byte order mark: the form's
+        // messages carry accents and `read_verdict` decodes UTF-8.
+        Console.OutputEncoding = new UTF8Encoding(false);
         var asm = Assembly.LoadFrom(Path.Combine(a[0], "DGII.PreValidado.exe"));
         var form = (Form)Activator.CreateInstance(asm.GetType("DGII.PreValidado.frm_Verified"));
         var timer = new Timer { Interval = TickMs };

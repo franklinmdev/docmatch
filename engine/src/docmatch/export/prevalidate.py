@@ -21,14 +21,16 @@ Nothing printed quotes a comprobante: the form's messages quote the values
 they reject, so every digit in a message is printed as `#`.
 """
 
+import contextlib
 import hashlib
 import json
 import re
 import subprocess
+import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from docmatch.export.dgii606 import EXPORT_FILE, NOT_REPORTED
 
@@ -49,6 +51,10 @@ CONTAINER = Path(__file__).parent / "prevalidator"
 
 HASH_REFUSED = 64
 """The script's exit code when the mounted zip is not the pinned one."""
+
+ENCODING = "utf-8"
+"""What the harness prints in: it sets Mono's console to UTF-8 itself, so the
+form's accented messages read the same whatever the host's locale."""
 
 TIMEOUT_SECONDS = 300
 """Longest one file's run may take; the harness gives the form 120 s."""
@@ -124,6 +130,8 @@ def read_verdict(output: str) -> Verdict:
     if count_text != "" and not count_text.isdigit():
         raise PrevalidateError(f"the error count {count_text!r} is not a number")
     count = int(count_text or "0")
+    if "error box:" not in lines:
+        raise PrevalidateError("the harness printed no 'error box' line")
     box = lines[lines.index("error box:") + 1 :]
     errors = tuple(
         found.group(2) for line in box if (found := _NUMBERED.match(line)) is not None
@@ -248,6 +256,8 @@ def _check(export: Path, month: object, run: Runner) -> Checked:
     if (
         not isinstance(period, str)
         or not isinstance(rows, int)
+        or isinstance(rows, bool)
+        or rows < 0
         or not isinstance(failures, list)
         or not (file is None or isinstance(file, str))
     ):
@@ -268,7 +278,7 @@ def _check(export: Path, month: object, run: Runner) -> Checked:
             verdict=None,
             export_reasons=reasons,
         )
-    path = export / file
+    path = _inside(export, file)
     reporter, typed_period, count = _header(path)
     if typed_period != period or count != rows:
         raise PrevalidateError(
@@ -286,6 +296,18 @@ def _check(export: Path, month: object, run: Runner) -> Checked:
         verdict=verdict,
         export_reasons=(),
     )
+
+
+def _inside(export: Path, file: str) -> Path:
+    """The listed file, refused unless it is a relative path that stays
+    inside the export directory, the way `export 606` writes it."""
+    listed = PurePosixPath(file)
+    if listed.is_absolute() or ".." in listed.parts or not listed.parts:
+        raise PrevalidateError(
+            f"{export / EXPORT_FILE} lists {file!r}, which is not a file inside "
+            "the export directory"
+        )
+    return export / listed
 
 
 def _header(path: Path) -> tuple[str, str, int]:
@@ -322,37 +344,62 @@ def container_runner(binary: Path) -> Runner:
     )
 
     def run(path: Path, reporter: str, period: str) -> str:
-        done = _docker(
-            [
-                "run",
-                "--rm",
-                "--network",
-                "none",
-                "--volume",
-                f"{binary.resolve()}:/dgii/Pre_Validado.zip:ro",
-                "--volume",
-                f"{path.parent.resolve()}:/files:ro",
-                image,
-                BINARY_SHA256,
-                reporter,
-                period,
-                f"/files/{path.name}",
-            ],
-            f"pre-validate {path}",
-            check=False,
-        )
-        if done.returncode == HASH_REFUSED:
-            raise PrevalidateError(
-                f"the container refused {binary}: {done.stderr.strip()}"
-            )
-        if done.returncode != 0:
-            raise PrevalidateError(
-                f"the pre-validator exited {done.returncode} on {path}: "
-                f"{done.stdout.strip()[-400:]} {done.stderr.strip()[-400:]}"
-            )
-        return done.stdout
+        return run_in_container(binary, image, path, reporter, period)
 
     return run
+
+
+def run_in_container(
+    binary: Path, image: str, path: Path, reporter: str, period: str
+) -> str:
+    """One file's run, in a container of its own name with no network, the
+    zip and the file's directory bind-mounted read-only. A run that times out
+    or is interrupted has its container removed: the timeout stops only the
+    docker CLI, and the container would go on running without it."""
+    sources = (binary.resolve(), path.parent.resolve())
+    if any("," in str(source) for source in sources):
+        raise PrevalidateError(
+            f"{binary} or {path.parent} holds a comma, which `docker run "
+            "--mount` reads as the end of its source; move it to a path without one"
+        )
+    name = f"docmatch-prevalidate-{uuid.uuid4().hex[:12]}"
+    done = _docker(
+        [
+            "run",
+            "--rm",
+            "--name",
+            name,
+            "--network",
+            "none",
+            "--mount",
+            f"type=bind,source={sources[0]},target=/dgii/Pre_Validado.zip,readonly",
+            "--mount",
+            f"type=bind,source={sources[1]},target=/files,readonly",
+            image,
+            BINARY_SHA256,
+            reporter,
+            period,
+            f"/files/{path.name}",
+        ],
+        f"pre-validate {path}",
+        check=False,
+        container=name,
+    )
+    stderr = done.stderr.decode(ENCODING, errors="replace").strip()
+    if done.returncode == HASH_REFUSED:
+        raise PrevalidateError(f"the container refused {binary}: {stderr}")
+    try:
+        stdout = done.stdout.decode(ENCODING)
+    except UnicodeDecodeError as error:
+        raise PrevalidateError(
+            f"the harness's output on {path} is not UTF-8: {error}"
+        ) from error
+    if done.returncode != 0:
+        raise PrevalidateError(
+            f"the pre-validator exited {done.returncode} on {path}: "
+            f"{stdout.strip()[-400:]} {stderr[-400:]}"
+        )
+    return stdout
 
 
 def _docker(
@@ -360,24 +407,42 @@ def _docker(
     doing: str,
     check: bool = True,
     timeout: int = TIMEOUT_SECONDS,
-) -> subprocess.CompletedProcess[str]:
+    container: str | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """The docker CLI, its output left as bytes; `container`, when given, is
+    removed if the CLI times out or is interrupted."""
     try:
         done = subprocess.run(
             ["docker", *arguments],
             capture_output=True,
-            text=True,
             timeout=timeout,
             check=False,
         )
     except FileNotFoundError as error:
         raise PrevalidateError("docker is not installed or not on PATH") from error
     except subprocess.TimeoutExpired as error:
+        _remove(container)
         raise PrevalidateError(f"docker took over {timeout} s to {doing}") from error
+    except KeyboardInterrupt:
+        _remove(container)
+        raise
     if check and done.returncode != 0:
-        raise PrevalidateError(
-            f"docker could not {doing}: {done.stderr.strip()[-400:]}"
-        )
+        stderr = done.stderr.decode(ENCODING, errors="replace").strip()
+        raise PrevalidateError(f"docker could not {doing}: {stderr[-400:]}")
     return done
+
+
+def _remove(container: str | None) -> None:
+    """Remove a container left running, quietly: it may never have started."""
+    if container is None:
+        return
+    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+        subprocess.run(
+            ["docker", "rm", "-f", container],
+            capture_output=True,
+            timeout=TIMEOUT_SECONDS,
+            check=False,
+        )
 
 
 # The report.
@@ -425,10 +490,13 @@ def _month(month: Checked) -> str:
         return f"0 errors, {rows}"
     count = len(month.verdict.errors)
     messages = _tally(tuple(_hidden(error) for error in month.verdict.errors))
-    return (
-        f"{count} {_plural(count, 'error')} on {month.rows_with_error} of {rows}: "
-        f"{messages}"
-    )
+    errors = f"{count} {_plural(count, 'error')}"
+    on_header = any(_LINE.search(error) is None for error in month.verdict.errors)
+    if not on_header:
+        return f"{errors} on {month.rows_with_error} of {rows}: {messages}"
+    if month.rows_with_error == 0:
+        return f"{errors} on the header, none on its {rows}: {messages}"
+    return f"{errors} on the header and {month.rows_with_error} of {rows}: {messages}"
 
 
 def _hidden(error: str) -> str:

@@ -13,7 +13,7 @@ import pytest
 from docmatch import cli
 from docmatch.cli import main
 from docmatch.export.prevalidate import BINARY_SHA256, Runner
-from docmatch.export.test_prevalidate import NCF_ON_LINE_2, PASSED
+from docmatch.export.test_prevalidate import HEADER_ONLY, NCF_ON_LINE_2, PASSED
 
 REGIONAL = Path(__file__).parents[2] / "tests" / "evals" / "regional"
 SET = REGIONAL / "do" / "manifest.json"
@@ -141,6 +141,32 @@ def test_an_error_fails_its_file_and_its_row_with_no_value_printed(
         in output
     )
     assert "  202603  1 error on 1 of 2 rows: NCF Invalido !" in output
+
+
+def test_an_error_on_the_header_alone_fails_its_file_with_no_row_named(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    export = exported(tmp_path, capsys)
+    answering(
+        monkeypatch,
+        [],
+        {"control/DGII_F_606_130990026_202603.TXT": HEADER_ONLY},
+    )
+
+    main(prevalidating(export, tmp_path / "Pre_Validado.zip"))
+
+    output = capsys.readouterr().out
+    assert (
+        "Labels control, 1 of 2 monthly files with zero errors, "
+        "0 of 3 rows with an error" in output
+    )
+    assert (
+        "  202603  1 error on the header, none on its 2 rows: Encabezado:Cantidad "
+        "de Registros en el Archivo:(#), NO Coincide con la Cantidad "
+        "Calculada:(#)." in output
+    )
 
 
 def test_a_message_quoting_a_value_prints_it_as_hashes(
