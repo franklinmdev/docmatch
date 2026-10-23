@@ -27,26 +27,38 @@ Columns, by source (#215 decision 3):
   retentions where the comprobante prints them, 20 selective tax, 21 other
   taxes, 22 legal tip. A retention not printed is 0 here; computing it from
   the annotation at the rate in force is #230's.
-- **Computed**: 2 Tipo Id from the identifier's length (9 digits an RNC, 1;
-  11 a cedula, 2), 8 and 9 the services and goods split of the net amount,
-  10 their total, 15 ITBIS por adelantar (11 less 14).
+- **Computed**: 2 Tipo Id, 1 for a number python-stdnum 2.2 validates as an
+  RNC and 2 for one it validates as a cedula, 8 and 9 the services and goods
+  split of the net amount, 10 their total, 15 ITBIS por adelantar (11 less
+  14, the instructivo's p. 7).
 - **Filing annotation** (`export.filing`): 3, 7, 13, 14, 17, 23 and whether
   the document is reported at all.
 
 Columns 16 and 19, ITBIS and ISR percibido, are disabled until a norm sets a
-perception regime (instructivo pp. 7 and 8) and are written 0.00.
+perception regime (instructivo pp. 7 and 8) and are written 0.00. Amounts
+are written with a dot and two decimals, as the instructivo asks (p. 9,
+"RD$10.18"); it names no rounding, so a third decimal rounds half up.
 
 Failures
 --------
 
-A document with no reading, or one lacking an NCF, an RNC or a date, fails
-its month (#215 decision 6): that month gets no file and is listed with every
-reason. So does an identifier of neither length, or an amount the file cannot
-hold, or a services split above the read net amount, rather than a guessed
-Tipo Id, a zero standing in for what was read, or negative goods.
-A document with no date, or with one that does not read as a day, goes to a
-"no month" row, which counts as one failed file. A document annotated not
-reported is left out of both sides and listed apart (#213 decision 2).
+A document lacking an NCF, an RNC or a date fails its month (#215 decision
+6): that month gets no file and is listed with every reason, and its other
+rows are withheld with it. A document with no date, or with one that does
+not read as a day, goes to a "no month" row, which counts as one failed
+file; so does a document with no reading, which has no date to place it by,
+so on the reading side it fails "no month" while the control files it in its
+month. A document annotated not reported is left out of both sides and
+listed apart (#213 decision 2).
+
+A month also fails rather than hold a value the file should not: an RNC,
+cedula, NCF or modified NCF python-stdnum 2.2 does not validate (which also
+keeps a pipe, a character outside ASCII and a wrong length out of the file),
+an amount that does not read, any negative amount, a services split above
+the net amount, and an ITBIS retention, proportional share or share to cost
+above the ITBIS, the last also what would make column 15 negative. The
+instructivo names no sign convention, for a nota de credito or anything else,
+so nothing is ever written negative. No reason quotes a value.
 
 A comprobante's date is read day first, `DD/MM/YYYY`, as Dominican
 comprobantes print it, unless it starts with a four-digit year; the scorer's
@@ -62,7 +74,7 @@ from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-from stdnum.do import ncf, rnc
+from stdnum.do import cedula, ncf, rnc
 
 from docmatch.export.filing import ALL, Filing, Share
 from docmatch.metrics.fields import FieldValues
@@ -80,9 +92,6 @@ NO_MONTH = "no month"
 CENT = Decimal("0.01")
 ZERO = Decimal("0")
 LINE_BREAK = "\r\n"
-
-TIPO_ID = {9: "1", 11: "2"}
-"""Tipo Id by the identifier's length: 1 an RNC, 2 a cedula."""
 
 AMOUNTS = (
     "amount_total_net",
@@ -216,18 +225,23 @@ def _line(
     if values is None:
         return NO_MONTH, None, ("no reading",)
     reasons: list[str] = []
-    ncf_text = _value(values, "document_id")
-    if ncf_text is None:
-        reasons.append("no NCF")
+    number = _ncf(values, "document_id", "NCF", reasons)
     identifier = _value(values, "vendor_tax_id")
     tipo_id = None
     if identifier is None:
         reasons.append("no RNC")
     else:
         identifier = rnc.compact(identifier)
-        tipo_id = TIPO_ID.get(len(identifier)) if identifier.isdigit() else None
+        tipo_id = (
+            "1"
+            if rnc.is_valid(identifier)
+            else "2"
+            if cedula.is_valid(identifier)
+            else None
+        )
         if tipo_id is None:
-            reasons.append("RNC neither 9 nor 11 digits")
+            reasons.append("RNC or cedula invalid")
+    modified = _ncf(values, "document_id_modified", "modified NCF", reasons)
     date_text = _value(values, "date_issue")
     day = None if date_text is None else read_day(date_text)
     if date_text is None:
@@ -240,30 +254,69 @@ def _line(
         amount = ZERO if text is None else read_number(text)
         if amount is None:
             reasons.append(f"{fieldtype} unreadable")
+        elif amount < 0:
+            reasons.append(f"{fieldtype} negative")
         else:
             amounts[fieldtype] = amount
-    net = amounts.get("amount_total_net")
-    if isinstance(filing.split, Decimal) and net is not None and filing.split > net:
-        reasons.append("services split above the net amount")
+    reasons.extend(_beyond_bounds(amounts, filing))
     period = NO_MONTH if day is None else f"{day:%Y%m}"
     if reasons:
         return period, None, tuple(reasons)
-    assert ncf_text is not None and identifier is not None and tipo_id is not None
+    assert number is not None and identifier is not None and tipo_id is not None
     assert day is not None
-    modified = _value(values, "document_id_modified")
     return (
         period,
         _fields(
             filing,
             identifier=identifier,
             tipo_id=tipo_id,
-            ncf=ncf.compact(ncf_text),
-            modified="" if modified is None else ncf.compact(modified),
+            ncf=number,
+            modified="" if modified is None else modified,
             day=day,
             amounts=amounts,
         ),
         (),
     )
+
+
+def _ncf(
+    values: FieldValues, fieldtype: str, name: str, reasons: list[str]
+) -> str | None:
+    """The fieldtype's NCF or e-NCF compacted, or None with the reason why
+    not; a modified NCF is optional, so only its absence is not a reason."""
+    text = _value(values, fieldtype)
+    if text is None:
+        if fieldtype == "document_id":
+            reasons.append(f"no {name}")
+        return None
+    number = ncf.compact(text)
+    if not ncf.is_valid(number):
+        reasons.append(f"{name} invalid")
+        return None
+    return number
+
+
+def _beyond_bounds(amounts: Mapping[str, Decimal], filing: Filing) -> list[str]:
+    """Why a line built from these amounts would hold a column out of bounds:
+    a services split above the net, or an ITBIS retention or share above the
+    ITBIS, the last also what would turn column 15 negative."""
+    net = amounts.get("amount_total_net")
+    itbis = amounts.get("amount_total_tax")
+    reasons = []
+    if isinstance(filing.split, Decimal) and net is not None and filing.split > net:
+        reasons.append("services split above the net amount")
+    if itbis is None:
+        return reasons
+    retention = amounts.get("amount_retention_itbis")
+    if retention is not None and retention > itbis:
+        reasons.append("ITBIS retention above the ITBIS")
+    for share, name in (
+        (filing.itbis_proportional, "ITBIS to proportionality"),
+        (filing.itbis_to_cost, "ITBIS to cost"),
+    ):
+        if share is not None and _share(share, itbis) > itbis:
+            reasons.append(f"{name} above the ITBIS")
+    return reasons
 
 
 def _fields(

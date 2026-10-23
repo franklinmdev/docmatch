@@ -4,11 +4,14 @@ Every RNC, cedula and NCF here is made up and passes python-stdnum 2.2; the
 amounts are made up too and follow no tax rate.
 """
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
-from docmatch.export.dgii606 import NO_MONTH, Failure, export_606
-from docmatch.export.filing import ALL, Filing
+import pytest
+
+from docmatch.export.dgii606 import NO_MONTH, Failure, export_606, read_day
+from docmatch.export.filing import ALL, Filing, Share
 from docmatch.metrics.fields import FieldValues
 
 REPORTER = "130990026"
@@ -238,22 +241,109 @@ def test_a_reading_without_a_date_goes_to_the_no_month_row() -> None:
     )
 
 
-def test_an_identifier_of_neither_length_or_an_unreadable_amount_fails() -> None:
-    """Tipo Id is told from the length alone, 9 an RNC and 11 a cedula, and an
-    amount the file cannot hold is never written as zero. No reason quotes
-    the value, so a report of the owner's comprobantes shows none."""
-    readings = {
-        "a.png": comprobante(vendor_tax_id="13099001"),
-        "b.png": comprobante(document_id="B0100000418", amount_total_tax="ITBIS"),
-    }
-    filing = dict.fromkeys(readings, GOODS)
+def test_an_unreadable_amount_fails_rather_than_being_written_as_zero() -> None:
+    """No reason quotes the value, so a report of the owner's comprobantes
+    shows none."""
+    reading = comprobante(amount_total_tax="ITBIS")
 
-    [march] = export_606(REPORTER, readings, {}, filing).reading.failed
+    [march] = export_606(
+        REPORTER, {"a.png": reading}, {}, {"a.png": GOODS}
+    ).reading.failed
 
-    assert march.failures == (
-        Failure("a.png", ("RNC neither 9 nor 11 digits",)),
-        Failure("b.png", ("amount_total_tax unreadable",)),
-    )
+    assert march.failures == (Failure("a.png", ("amount_total_tax unreadable",)),)
+
+
+@pytest.mark.parametrize(
+    ("changes", "reason"),
+    [
+        ({"vendor_tax_id": "13099001"}, "RNC or cedula invalid"),
+        ({"vendor_tax_id": "130990019"}, "RNC or cedula invalid"),
+        ({"vendor_tax_id": "13099|0018"}, "RNC or cedula invalid"),
+        ({"vendor_tax_id": "13099001ñ"}, "RNC or cedula invalid"),
+        ({"vendor_tax_id": "00099000011"}, "RNC or cedula invalid"),
+        ({"document_id": "B01000004170"}, "NCF invalid"),
+        ({"document_id": "B01|00000417"}, "NCF invalid"),
+        ({"document_id": "B01000004ñ7"}, "NCF invalid"),
+        ({"document_id_modified": "B0100000|17"}, "modified NCF invalid"),
+    ],
+)
+def test_an_identifier_stdnum_refuses_fails_its_month(
+    changes: dict[str, str], reason: str
+) -> None:
+    """Only a number python-stdnum 2.2 validates reaches the file, which keeps
+    a pipe, a character the file cannot hold, a wrong length or a wrong check
+    digit out of it; Tipo Id is then the validator's, RNC 1 and cedula 2."""
+    reading = comprobante(**changes)
+
+    [march] = export_606(
+        REPORTER, {"a.png": reading}, {}, {"a.png": GOODS}
+    ).reading.failed
+
+    assert march.failures == (Failure("a.png", (reason,)),)
+
+
+def with_shares(proportional: Share, to_cost: Share) -> Filing:
+    return replace(GOODS, itbis_proportional=proportional, itbis_to_cost=to_cost)
+
+
+@pytest.mark.parametrize(
+    ("changes", "filing", "reason"),
+    [
+        ({"amount_total_net": "-2,500.00"}, GOODS, "amount_total_net negative"),
+        ({"amount_tip": "-1.00"}, GOODS, "amount_tip negative"),
+        (
+            {"amount_retention_itbis": "375.01"},
+            GOODS,
+            "ITBIS retention above the ITBIS",
+        ),
+        (
+            {},
+            with_shares(Decimal("375.01"), None),
+            "ITBIS to proportionality above the ITBIS",
+        ),
+        (
+            {},
+            with_shares(None, Decimal("375.01")),
+            "ITBIS to cost above the ITBIS",
+        ),
+    ],
+)
+def test_no_column_is_written_below_zero_or_beyond_the_itbis(
+    changes: dict[str, str], filing: Filing, reason: str
+) -> None:
+    """The instructivo (February 2026) names no negative convention, a nota
+    de credito included, so a negative or out-of-bounds amount fails rather
+    than being written. ITBIS to cost above the ITBIS is also what would
+    turn column 15 negative."""
+    [march] = export_606(
+        REPORTER, {"a.png": comprobante(**changes)}, {}, {"a.png": filing}
+    ).reading.failed
+
+    assert march.failures == (Failure("a.png", (reason,)),)
+
+
+def test_a_share_equal_to_the_itbis_is_written() -> None:
+    filing = with_shares(Decimal("375.00"), ALL)
+
+    exported = export_606(REPORTER, {"a.png": comprobante()}, {}, {"a.png": filing})
+
+    [content] = exported.reading.files().values()
+    assert content.split("\r\n")[1].split("|")[12:15] == ["375.00", "375.00", "0.00"]
+
+
+def test_a_comprobante_date_reads_day_first() -> None:
+    """Dominican comprobantes print DD/MM/YYYY, so 02/04/2026 is April."""
+    assert read_day("02/04/2026") == date(2026, 4, 2)
+    assert read_day("2026-04-02") == date(2026, 4, 2)
+    assert read_day("02/04/26") == date(2026, 4, 2)
+    assert read_day("31/02/2026") is None
+
+
+def test_the_header_names_the_reporter_the_month_and_the_rows() -> None:
+    exported = export_606(REPORTER, {"a.png": comprobante()}, {}, {"a.png": GOODS})
+
+    [content] = exported.reading.files().values()
+    assert content.split("\r\n")[0] == "606|130990026|202603|1"
 
 
 def test_an_absent_amount_is_written_as_zero() -> None:
