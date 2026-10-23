@@ -131,6 +131,12 @@ from docmatch.evals.run import (
 from docmatch.export import dgii606
 from docmatch.export.dgii606 import ExportError
 from docmatch.export.filing import read_filing
+from docmatch.export.prevalidate import (
+    PrevalidateError,
+    container_runner,
+    prevalidate,
+    render_prevalidation,
+)
 from docmatch.extraction import azure, backends, ecf, gemini, pages
 from docmatch.extraction.extractor import ExtractionError, Extractor
 from docmatch.extraction.gemini import GeminiExtractor
@@ -829,6 +835,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help="a new or empty directory for reading/, control/ and export.json",
     )
+    prevalidating = subcommands.add_parser(
+        "prevalidate",
+        help=(
+            "run the tax authority's own pre-validator over the files an export "
+            "wrote, in an offline container"
+        ),
+    )
+    prevalidating.add_argument(
+        "report",
+        choices=("606",),
+        help="606, pre-validated by DGII's Pre_Validado.zip pinned by its hash",
+    )
+    prevalidating.add_argument(
+        "--export",
+        type=Path,
+        required=True,
+        help="the directory `export 606 --out` wrote, with its export.json",
+    )
+    prevalidating.add_argument(
+        "--binary",
+        type=Path,
+        required=True,
+        help=(
+            "DGII's Pre_Validado.zip, downloaded and never committed; any file "
+            "but the pinned one is refused"
+        ),
+    )
     counts = subcommands.add_parser(
         "corpus",
         parents=[dataset],
@@ -1033,6 +1066,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ReproduceError,
         RegionalError,
         ExportError,
+        PrevalidateError,
     ) as error:
         print(f"docmatch: {error}", file=sys.stderr)
         return 1
@@ -1063,6 +1097,8 @@ def _run(arguments: argparse.Namespace) -> tuple[str, int]:
         return _reproduce(arguments)
     if arguments.command == "export":
         return _export_606(arguments)
+    if arguments.command == "prevalidate":
+        return _prevalidate_606(arguments)
     dataset = DocileDataset(resolve_data_dir(arguments.data_dir))
     if arguments.command == "serve":
         return _serve(arguments, dataset)
@@ -1180,6 +1216,17 @@ def _export_606(arguments: argparse.Namespace) -> tuple[str, int]:
         ),
         0,
     )
+
+
+def _prevalidate_606(arguments: argparse.Namespace) -> tuple[str, int]:
+    """Run DGII's pre-validator over an export's files and print the number.
+
+    Exits 0 whenever it prints, failed files included: they are the number
+    (#215). A binary of another hash, or a harness answer it cannot read,
+    stops it instead.
+    """
+    result = prevalidate(arguments.export, container_runner(arguments.binary))
+    return render_prevalidation(result), 0
 
 
 def _check_region(record: Path, pinned: Manifest) -> None:
