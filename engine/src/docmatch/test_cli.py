@@ -3292,6 +3292,117 @@ def evaluate_regional_run(out: Path) -> list[str]:
     ]
 
 
+def extract_ecf(out: Path, manifest_path: Path, *arguments: str) -> list[str]:
+    return [
+        "extract",
+        "--out",
+        str(out),
+        "--manifest",
+        str(manifest_path),
+        "--data-dir",
+        str(out.parent / "nothing"),
+        *arguments,
+    ]
+
+
+def test_extract_parses_an_e_cf_set_at_no_cost_into_the_committed_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The e-CF parser is a backend like any other, with no key and no
+    vendor, and the committed run is what it writes (#227)."""
+    out = tmp_path / "run"
+
+    exit_code = main(
+        extract_ecf(out, REGIONAL / "ecf" / "manifest.json", "--backend", "ecf")
+    )
+
+    assert exit_code == 0
+    assert "$0.0000" in capsys.readouterr().out
+    record = json.loads((out / "run.json").read_text())
+    assert (record["backend"], record["region"]) == ("ecf", "do")
+    assert record["requested_model"] == "ecf-parser-v1.0"
+    assert record["long_edge"] is None
+    assert read_predictions(out / "predictions.json") == read_predictions(
+        REGIONAL / "ecf-run" / "predictions.json"
+    )
+
+
+def test_extract_refuses_the_e_cf_parser_on_a_set_of_images(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = main(
+        extract_ecf(
+            tmp_path / "run", REGIONAL / "do" / "manifest.json", "--backend", "ecf"
+        )
+    )
+
+    assert exit_code == 1
+    assert capsys.readouterr().err == (
+        "docmatch: the ecf backend reads only e-CF XML, and do0001.png is not\n"
+    )
+    assert not (tmp_path / "run").exists()
+
+
+def test_extract_refuses_a_vision_backend_on_an_e_cf_set_before_any_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An e-CF's values are in its XML: a vendor would be paid to look at
+    text it cannot see as a page."""
+    fake = FakeExtractor(answers=[READING])
+    monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
+
+    exit_code = main(extract_ecf(tmp_path / "run", REGIONAL / "ecf" / "manifest.json"))
+
+    assert exit_code == 1
+    assert capsys.readouterr().err == (
+        "docmatch: ecf0001.xml is an e-CF, which only the ecf backend reads\n"
+    )
+    assert fake.attempts == []
+    assert not (tmp_path / "run").exists()
+
+
+def test_eval_says_an_e_cf_sets_f1_is_parsing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code = main(
+        [
+            "eval",
+            "--manifest",
+            str(REGIONAL / "ecf" / "manifest.json"),
+            "--predictions",
+            str(REGIONAL / "ecf-run" / "predictions.json"),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert output.startswith(
+        "\n".join(
+            [
+                "Regional set",
+                f"  manifest        {REGIONAL / 'ecf' / 'manifest.json'}",
+                "  region          do",
+                "  split           ecf",
+                "  documents       4",
+                "  labeled values  34",
+                "  predicted       4",
+                "  not predicted   0",
+                "  not pinned      0",
+                "  F1 measures     parsing an e-CF's XML, not reading a page",
+                "",
+                "Field score, over the 14 covered fieldtypes only",
+                "  precision  1.000",
+                "  recall     1.000",
+                "  F1         1.000",
+                "  34 matched, 0 missing, 0 spurious",
+                "",
+            ]
+        )
+    )
+    assert exit_code == 0
+
+
 def test_extract_on_a_neutral_set_records_no_region(
     tmp_path: Path, pinned_copies: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
