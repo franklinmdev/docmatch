@@ -333,3 +333,69 @@ def test_a_manifest_that_lists_a_document_twice_is_not_a_manifest() -> None:
         Manifest(split="val", seed=1, source="ucsf", size=2, document_ids=("a", "a"))
 
     assert "listed more than once" in str(raised.value)
+
+
+def test_a_neutral_manifest_declares_no_region_and_covers_every_fieldtype() -> None:
+    neutral = load(MANIFEST)
+
+    assert neutral.region is None
+    assert neutral.coverage is None
+
+
+def test_the_committed_manifest_is_written_back_byte_for_byte(tmp_path: Path) -> None:
+    """DocILE's manifest gains no key: a region and a coverage are a set's own."""
+    written = tmp_path / "subset.json"
+    write(load(MANIFEST), written)
+
+    assert written.read_bytes() == MANIFEST.read_bytes()
+
+
+def regional(**update: object) -> Manifest:
+    """A regional set of two documents, keyed by filename, with its labels pinned."""
+    return Manifest(
+        split="paper",
+        seed=0,
+        source="synthetic",
+        size=2,
+        document_ids=("do0001.png", "do0002.png"),
+        digests={"do0001.png": "a" * 64, "do0002.png": "b" * 64},
+        region="do",
+        coverage=("vendor_tax_id", "document_id"),
+        files={"labels.csv": "c" * 64},
+    ).model_copy(update=update)
+
+
+def test_a_regional_manifest_reads_back_with_its_region_and_coverage(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "manifest.json"
+    write(regional(), path)
+
+    assert load(path) == regional()
+    assert load(path).region == "do"
+    assert load(path).coverage == ("vendor_tax_id", "document_id")
+    assert load(path).files == {"labels.csv": "c" * 64}
+
+
+def test_a_coverage_naming_a_fieldtype_no_backend_is_asked_for_is_refused() -> None:
+    """A typo in the coverage would otherwise leave a fieldtype out of the score."""
+    with pytest.raises(ValidationError, match="vendor_tax_idd"):
+        Manifest.model_validate(
+            {**regional().model_dump(), "coverage": ["vendor_tax_idd"]}
+        )
+
+
+def test_a_coverage_naming_a_fieldtype_twice_is_refused() -> None:
+    with pytest.raises(ValidationError, match="more than once"):
+        Manifest.model_validate(
+            {**regional().model_dump(), "coverage": ["document_id", "document_id"]}
+        )
+
+
+def test_a_prefix_of_a_regional_set_keeps_its_region_coverage_and_files() -> None:
+    first = regional().first(1)
+
+    assert first.region == "do"
+    assert first.coverage == ("vendor_tax_id", "document_id")
+    assert first.files == {"labels.csv": "c" * 64}
+    assert first.digests == {"do0001.png": "a" * 64}
