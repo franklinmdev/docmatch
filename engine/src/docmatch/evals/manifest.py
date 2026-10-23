@@ -196,8 +196,11 @@ FIELDTYPES = frozenset((*HEADER_FIELDTYPES, *CELL_FIELDTYPES))
 
 
 def _check_coverage(coverage: tuple[str, ...]) -> None:
-    """Refuse a coverage naming a fieldtype twice or one no backend reads,
-    since a typo would quietly leave a fieldtype out of the score."""
+    """Refuse a coverage naming no fieldtype, one twice or one no backend reads,
+    since a typo would quietly leave a fieldtype out of the score, and an empty
+    one scores nothing yet is written back as no coverage, which covers all."""
+    if not coverage:
+        raise ValueError("the coverage names no fieldtype")
     if len(coverage) != len(set(coverage)):
         raise ValueError("the coverage names a fieldtype more than once")
     unknown = [each for each in coverage if each not in FIELDTYPES]

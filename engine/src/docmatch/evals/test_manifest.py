@@ -392,6 +392,12 @@ def test_a_coverage_naming_a_fieldtype_twice_is_refused() -> None:
         )
 
 
+def test_an_empty_coverage_is_refused() -> None:
+    """It would score nothing, and written back it reads as covering everything."""
+    with pytest.raises(ValidationError, match="no fieldtype"):
+        Manifest.model_validate({**regional().model_dump(), "coverage": []})
+
+
 def test_a_prefix_of_a_regional_set_keeps_its_region_coverage_and_files() -> None:
     first = regional().first(1)
 
