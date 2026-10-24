@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from docmatch.evals.manifest import Manifest
+from docmatch.evals.manifest import FILING_FILE, Manifest
 from docmatch.evals.public import digest
 from docmatch.evals.regional import RegionalError
-from docmatch.export.filing import ALL, FILING_FILE, Filing, read_filing
+from docmatch.export.filing import ALL, Filing, read_filing
 
 HEADER = (
     "filename,reported,purchase_type,split,payment_date,payment_method,"
@@ -218,18 +218,33 @@ def test_a_type_annotated_twice_is_refused(tmp_path: Path) -> None:
         read_filing(an_ecf_set(tmp_path, E31, E41, E31), tmp_path)
 
 
-def test_a_label_that_names_no_e_cf_type_is_refused(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "label", ["B0100000001", "E31", "E310000000", "E٣١0000000001", "e310000000001"]
+)
+def test_a_label_that_is_not_a_whole_e_ncf_names_no_type(
+    tmp_path: Path, label: str
+) -> None:
+    """Only ASCII digits, an E, two for the type and ten for the sequence."""
     manifest = an_ecf_set(tmp_path, E31, E41)
     labels = (
-        b"filename,document_id\n"
-        b"ecf0001.xml,B0100000001\n"
-        b"ecf0002.xml,E310000000002\n"
-        b"ecf0003.xml,E410000000001\n"
-    )
+        "filename,document_id\n"
+        f"ecf0001.xml,{label}\n"
+        "ecf0002.xml,E310000000002\n"
+        "ecf0003.xml,E410000000001\n"
+    ).encode()
     (tmp_path / "labels.csv").write_bytes(labels)
     manifest = manifest.model_copy(
         update={"files": {**manifest.files, "labels.csv": digest(labels)}}
     )
 
     with pytest.raises(RegionalError, match="ecf0001.xml.*e-CF type"):
+        read_filing(manifest, tmp_path)
+
+
+def test_a_filename_row_for_a_document_the_set_does_not_pin_keeps_its_wording(
+    tmp_path: Path,
+) -> None:
+    manifest = pinned(tmp_path, GOODS, NOT_REPORTED, "do0009.png,no,,,,,,,")
+
+    with pytest.raises(RegionalError, match="which the manifest does not pin"):
         read_filing(manifest, tmp_path)

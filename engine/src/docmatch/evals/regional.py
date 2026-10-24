@@ -116,6 +116,7 @@ def read_pinned_csv(
     *,
     key: str = FILENAME,
     keys: Sequence[str] | None = None,
+    unlisted: str = "the manifest does not pin",
 ) -> tuple[list[str], dict[str, dict[str, str]]]:
     """A CSV of the set's own, `name` in `directory`, keyed by `key` (the
     filename unless the caller says what else a row annotates): its header and
@@ -123,8 +124,9 @@ def read_pinned_csv(
 
     The file must match the digest the manifest pins for it, `check_columns`
     must pass its header, and it must hold exactly one row for each of `keys`,
-    the pinned documents unless the caller gives them; `RegionalError` names
-    the first thing that does not hold.
+    the pinned documents unless the caller gives them, and `unlisted` says why
+    a row for any other key is refused; `RegionalError` names the first thing
+    that does not hold.
     """
     pinned = manifest.files.get(name)
     if pinned is None:
@@ -158,7 +160,9 @@ def read_pinned_csv(
         if row_key in rows:
             raise RegionalError(f"{path} has more than one row for {row_key}")
         rows[row_key] = row
-    _check_documents(rows, manifest.document_ids if keys is None else keys, path)
+    _check_documents(
+        rows, manifest.document_ids if keys is None else keys, path, unlisted
+    )
     return header, rows
 
 
@@ -188,7 +192,7 @@ def _row(header: list[str], cells: list[str], path: Path) -> dict[str, str]:
 
 
 def _check_documents(
-    values: Mapping[str, object], expected: Sequence[str], path: Path
+    values: Mapping[str, object], expected: Sequence[str], path: Path, unlisted: str
 ) -> None:
     pinned = set(expected)
     unlabeled = [each for each in expected if each not in values]
@@ -197,7 +201,7 @@ def _check_documents(
     unpinned = [each for each in values if each not in pinned]
     if unpinned:
         raise RegionalError(
-            f"{path} has a row for {', '.join(unpinned)}, which the set does not have"
+            f"{path} has a row for {', '.join(unpinned)}, which {unlisted}"
         )
 
 

@@ -45,7 +45,7 @@ The tax jurisdiction a benchmark set's documents belong to, declared once by the
 _Avoid_: locale, country (on its own), market
 
 **Filing annotation**:
-The choices a taxpayer makes about a document when reporting it, which the document itself does not carry, so they are never read from the page: what kind of purchase it is, how it divides between goods and services, when and how it was paid, what was retained, and how the tax is credited. It is kept beside a document's labels, is the same whatever reading the report is built from, and is never scored. A set of e-CFs is annotated once per e-CF type rather than per document, the row applying to every document of that type, when its manifest declares so.
+The choices a taxpayer makes about a document when reporting it, which the document itself does not carry, so they are never read from the page: what kind of purchase it is, how it divides between goods and services, when and how it was paid, what was retained, and how the tax is credited. It is kept beside a document's labels, is the same whatever reading the report is built from, and is never scored. A set of e-CFs is annotated once per e-CF type (the `E31` of an e-NCF `E310000000001`) rather than per document, the row applying to every document of that type, when its manifest declares so.
 _Avoid_: label (for these values), metadata, classification
 
 **Pre-validation**:

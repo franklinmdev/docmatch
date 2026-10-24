@@ -89,6 +89,9 @@ SEED = 20260912
 """The seed that drew the committed subset. Changing it draws a new benchmark."""
 
 MANIFEST = Path(__file__).parent / "subset.json"
+FILING_FILE = "filing.csv"
+"""A regional set's filing annotation, beside its `labels.csv`. It lives here
+because the manifest checks for it and `evals.regional` imports this module."""
 """The committed manifest, beside the code that reads it rather than in `data/`,
 which is ignored."""
 
@@ -160,7 +163,7 @@ class Manifest(BaseModel):
             )
         if self.coverage is not None:
             _check_coverage(self.coverage)
-        if self.filing_per is not None and "filing.csv" not in self.files:
+        if self.filing_per is not None and FILING_FILE not in self.files:
             raise ValueError("filing_per is declared but no filing.csv is pinned")
         if self.reporter is not None and not (
             rnc.is_valid(self.reporter) or cedula.is_valid(self.reporter)

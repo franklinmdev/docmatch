@@ -18,11 +18,10 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-from docmatch.evals.manifest import Manifest, write
+from docmatch.evals.manifest import FILING_FILE, Manifest, write
 from docmatch.evals.public import digest
 from docmatch.evals.regional import FILENAME, LABELS_FILE
 from docmatch.evals.run import MANIFEST_FILE
-from docmatch.export.filing import FILING_FILE
 from docmatch.extraction.ecf import COVERAGE, ECFError, read
 
 REGION = "do"

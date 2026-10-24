@@ -374,3 +374,25 @@ def test_export_refuses_a_per_type_annotation_the_manifest_does_not_declare(
 
     assert exit_code == 1
     assert "no filename column" in capsys.readouterr().err
+
+
+def test_a_reading_that_misreads_the_type_still_takes_its_label_types_filing_row(
+    tmp_path: Path,
+) -> None:
+    """The annotation is the taxpayer's, the same on both sides: the E31's
+    reading says E41, and its row is still the E31's (purchase type 09, no
+    payment date), not the E41's (02, paid 2026-06-20)."""
+    shutil.copytree(REGIONAL / "ecf-run", tmp_path / "run")
+    predictions = tmp_path / "run" / "predictions.json"
+    readings = json.loads(predictions.read_text())
+    readings["ecf0001.xml"]["fields"]["document_id"] = "E410000000009"
+    predictions.write_text(json.dumps(readings))
+    out = tmp_path / "606"
+
+    assert main(exporting(out, manifest=ECF_SET, run=tmp_path / "run")) == 0
+
+    reading = (out / "reading" / ECF_JUNE).read_bytes().decode().split("\r\n")[1]
+    control = (out / "control" / ECF_JUNE).read_bytes().decode().split("\r\n")[1]
+    assert reading.split("|")[2:6] == ["09", "E410000000009", "", "20260610"]
+    assert control.split("|")[2:6] == ["09", "E310000000001", "", "20260610"]
+    assert reading.split("|")[6] == control.split("|")[6] == ""

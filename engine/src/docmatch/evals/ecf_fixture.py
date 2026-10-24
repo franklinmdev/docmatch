@@ -5,11 +5,11 @@ real e-CF may enter a commit (`CLAUDE.md` rule 6), so the e-CF set CI scores
 is four e-CFs invented here, one of each type the parser reads: an E31
 crédito fiscal carrying the legal tip, a selective and another additional tax;
 an E32 consumo to nobody, whose `Comprador` is empty and which prints no
-exempt amount, the missing optional elements; an E41 compras
-whose retentions are printed on its lines only; and an E43 gastos menores,
-which names no buyer and carries a modified e-NCF, since DGII's pre-validator
-refuses a modified NCF on any row of these types (#231), and an E43 the
-reporter does not file never reaches it. Every name, number and amount is
+exempt amount, the missing optional elements; an E41 compras whose retentions
+are printed on its lines only; and an E43 gastos menores, which names no
+buyer. The modified e-NCF is the E43's: DGII's pre-validator refuses a modified
+NCF on every row of these types (#231), and the E43, which the made-up reporter
+does not file, never reaches one. Every name, number and amount is
 made up, and the amounts are not computed at any tax rate the fixture would
 be stating: the rates the XSD requires beside an additional tax are
 placeholders. The RNCs, the cedula and the e-NCFs pass python-stdnum 2.2, as
