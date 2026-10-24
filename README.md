@@ -1199,8 +1199,8 @@ the rate in force on the payment date, which DGII says picks the percentage
 `export/fiscal.py`); a type with no rate DGII states, or no payment date, fails
 the month. An ITBIS retention not printed is zero. A B02 or E32 of RD$250,000 or
 less is left out of the file, listed with its reason and never a failure; the
-threshold is a DGII help answer, and the pre-validator itself rejects a consumo
-at any amount. The report prints counts and reasons
+threshold is a DGII help answer, its "monto" read as the net plus taxes and tip
+is unverified, and the pre-validator itself rejects a consumo at any amount. The report prints counts and reasons
 only, never a number or a name from a comprobante. CI's `Regional` step
 exports the made-up set's saved run.
 
@@ -2053,8 +2053,8 @@ the rate in force on the payment date, which DGII says picks the percentage
 `export/fiscal.py`); a type with no rate DGII states, or no payment date, fails
 the month. An ITBIS retention not printed is zero. A B02 or E32 of RD$250,000 or
 less is left out of the file, listed with its reason and never a failure; the
-threshold is a DGII help answer, and the pre-validator itself rejects a consumo
-at any amount. The report prints counts and reasons
+threshold is a DGII help answer, its "monto" read as the net plus taxes and tip
+is unverified, and the pre-validator itself rejects a consumo at any amount. The report prints counts and reasons
 only, never a number or a name from a comprobante. CI's `Regional` step
 exports the made-up set's saved run.
 

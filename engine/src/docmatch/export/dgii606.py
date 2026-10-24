@@ -233,17 +233,18 @@ def _side(
     failures: dict[str, list[Failure]] = {}
     left_out: list[LeftOut] = []
     for name in documents:
-        period, line, reasons, rule = _line(values.get(name), filing[name])
-        if rule is not None:
-            left_out.append(LeftOut(name, period, rule))
+        outcome = _line(values.get(name), filing[name])
+        period = outcome.period
+        if outcome.left_out_reason is not None:
+            left_out.append(LeftOut(name, period, outcome.left_out_reason))
             continue
         lines.setdefault(period, [])
         failures.setdefault(period, [])
-        if reasons:
-            failures[period].append(Failure(name, reasons))
+        if outcome.reasons:
+            failures[period].append(Failure(name, outcome.reasons))
         else:
-            assert line is not None
-            lines[period].append(line)
+            assert outcome.line is not None
+            lines[period].append(outcome.line)
     periods = sorted(lines, key=lambda period: (period == NO_MONTH, period))
     return Side(
         reporter=reporter,
@@ -255,13 +256,28 @@ def _side(
     )
 
 
-def _line(
-    values: FieldValues | None, filing: Filing
-) -> tuple[str, str | None, tuple[str, ...], str | None]:
-    """A document's period, and its line, the reasons it has none, or the
-    rule that leaves it out."""
+@dataclass(frozen=True)
+class _Outcome:
+    """What a document becomes: a line, the reasons it has none, or the
+    reason a rule leaves it out."""
+
+    period: str
+    line: str | None = None
+    reasons: tuple[str, ...] = ()
+    left_out_reason: str | None = None
+
+
+def _line(values: FieldValues | None, filing: Filing) -> _Outcome:
+    """A document's period and its line, its failures, or why it is left out.
+
+    The checks that make the reading itself wrong run first and fail the
+    month even for a small consumo: no reading, the NCF, the RNC or cedula,
+    the date, the amounts and their bounds. Then the consumo rule leaves a
+    small B02 or E32 out. Only after it comes the retention, which needs the
+    payment date and a rate: a document the 606 does not carry never fails
+    for a filing detail it does not use."""
     if values is None:
-        return NO_MONTH, None, ("no reading",), None
+        return _Outcome(NO_MONTH, reasons=("no reading",))
     reasons: list[str] = []
     number = _ncf(values, "document_id", "NCF", reasons)
     identifier = _value(values, "vendor_tax_id")
@@ -297,17 +313,17 @@ def _line(
         else:
             amounts[fieldtype] = amount
     reasons.extend(_beyond_bounds(amounts, filing))
-    _retain_isr(values, amounts, filing, reasons)
     period = NO_MONTH if day is None else f"{day:%Y%m}"
+    if not reasons and number is not None and _is_small_consumo(number, amounts):
+        return _Outcome(period, left_out_reason=LEFT_OUT_CONSUMO)
+    _retain_isr(values, amounts, filing, reasons)
     if reasons:
-        return period, None, tuple(reasons), None
-    if number is not None and _is_small_consumo(number, amounts):
-        return period, None, (), LEFT_OUT_CONSUMO
+        return _Outcome(period, reasons=tuple(reasons))
     assert number is not None and identifier is not None and tipo_id is not None
     assert day is not None
-    return (
+    return _Outcome(
         period,
-        _fields(
+        line=_fields(
             filing,
             identifier=identifier,
             tipo_id=tipo_id,
@@ -316,8 +332,6 @@ def _line(
             day=day,
             amounts=amounts,
         ),
-        (),
-        None,
     )
 
 
@@ -353,6 +367,9 @@ def _retain_isr(
     net = amounts.get("amount_total_net")
     type_ = filing.isr_retention_type
     if type_ is None or net is None or _value(values, "amount_retention_isr"):
+        return
+    if _services(filing, net) == ZERO:
+        amounts["amount_retention_isr"] = ZERO
         return
     if filing.payment_date is None:
         reasons.append("ISR retention to compute without a payment date")

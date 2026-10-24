@@ -63,7 +63,9 @@ monto no exceden la suma de RD$250,000.00 pesos", a DGII help answer
 2026-10-23; the page cites no norma and gives no effective date, so the
 rule is dated `None`, unverified as law)
 (https://ayuda.dgii.gov.do/conversations/discusiones/formulario-606-ncf-b02/5f3c17bc8cd858ce87a713bc).
-"No exceden" is at or below. The consumo types are B02 and E32. The
+"No exceden" is at or below. DGII does not define "monto" (unverified):
+the code reads it as the net amount plus ITBIS, selective and other taxes and
+the tip. The consumo types are B02 and E32. The
 pre-validator itself rejects a B02 (and an E32) at any amount, under or
 over the threshold (#215, 2026-10-23), so it does not encode the threshold.
 """
@@ -94,6 +96,8 @@ class Rate:
 
 ISR_RETENTION_RATES: dict[int, tuple[Rate, ...]] = {
     retention_type: (
+        # Unverified in a norm: rests on the help answers' "de 10%" wording
+        # (see the docstring); Norma 07-2007 Art. 3 does not state it.
         Rate(None, Decimal("0.10")),
         Rate(date(2026, 7, 1), Decimal("0.15")),
     )

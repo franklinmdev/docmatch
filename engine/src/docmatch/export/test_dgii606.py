@@ -561,3 +561,35 @@ def test_a_printed_zero_isr_retention_is_read_and_not_computed() -> None:
 
     [content] = exported.reading.files().values()
     assert retention_column(content) == "0.00"
+
+
+def test_a_goods_document_with_a_retention_type_needs_no_rate_or_payment_date() -> None:
+    """The services base is 0, so the retention is 0 whatever the type or date."""
+    goods = replace(GOODS, isr_retention_type=3, split="goods", payment_date=None)
+
+    exported = export_606(REPORTER, {"a": comprobante()}, {}, {"a": goods})
+
+    assert exported.reading.failed == ()
+    [content] = exported.reading.files().values()
+    assert retention_column(content) == "0.00"
+
+
+def test_a_small_consumo_is_left_out_before_any_payment_date_or_rate_check() -> None:
+    undated = replace(FEES, payment_date=None, isr_retention_type=3)
+    small = consumo("B0200000001", "700.00")
+
+    exported = export_606(REPORTER, {"a": small}, {}, {"a": undated})
+
+    assert exported.reading.failed == ()
+    assert exported.reading.left_out == (
+        LeftOut("a", "202603", "consumo of RD$250,000.00 or less"),
+    )
+
+
+def test_a_small_consumo_with_a_bad_ncf_still_fails() -> None:
+    small = consumo("B0200000001", "700.00", vendor_tax_id="123")
+
+    exported = export_606(REPORTER, {"a": small}, {}, {"a": GOODS})
+
+    assert exported.reading.left_out == ()
+    assert exported.reading.failed != ()
