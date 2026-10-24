@@ -20,9 +20,10 @@ from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 FIXTURE = Path(__file__).parents[3] / "tests" / "evals" / "regional"
 
 
-def test_every_vendor_rnc_is_a_valid_rnc() -> None:
+def test_every_vendor_number_is_a_valid_rnc_or_cedula() -> None:
     for each in COMPROBANTES:
-        assert rnc.is_valid(each.labels["vendor_tax_id"]), each.filename
+        number = each.labels["vendor_tax_id"]
+        assert rnc.is_valid(number) or cedula.is_valid(number), each.filename
 
 
 def test_every_customer_number_is_a_valid_rnc_or_cedula() -> None:
@@ -92,7 +93,16 @@ def test_the_set_written_files_its_606_as_the_buyer_of_its_b01(
 
     assert manifest.reporter == COMPROBANTES[0].labels["customer_tax_id"]
     assert list(filing) == [each.filename for each in COMPROBANTES]
-    assert [each.reported for each in filing.values()] == [True, False, True, True]
+    assert [each.reported for each in filing.values()] == [
+        True,
+        False,
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+    ]
 
 
 def test_the_manifest_pins_the_digest_of_every_image_written(tmp_path: Path) -> None:
