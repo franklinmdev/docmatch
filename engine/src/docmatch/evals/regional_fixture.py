@@ -28,8 +28,8 @@ and a line item, one with its NCF misread, one with its tax left unread
 and one read right.
 
 Beside the labels, `filing.csv` holds the made-up reporter's filing annotation
-(#228) and the manifest names that reporter, every comprobante's buyer (#253):
-the consumo is not reported, the E31 is paid with its retentions printed, the
+(#228) and the manifest names that reporter, the buyer of every comprobante
+that names one (#253): the consumo is not reported, the E31 is paid with its retentions printed, the
 nota de credito is settled as one.
 
 Regenerate with `uv run python -m docmatch.evals.regional_fixture`.
