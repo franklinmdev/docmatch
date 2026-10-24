@@ -3146,7 +3146,7 @@ def test_extract_reads_a_regional_set_from_its_own_directory_and_records_its_reg
 ) -> None:
     """No DocILE dataset and no public copies: the set is its manifest's
     directory, and the run says which region it read (#222)."""
-    fake = FakeExtractor(answers=[READING])
+    fake = FakeExtractor(answers=[READING] * 8)
     monkeypatch.setattr(gemini, "extractor", lambda model, long_edge: fake)
     out = tmp_path / "run"
 
@@ -3168,6 +3168,10 @@ def test_extract_reads_a_regional_set_from_its_own_directory_and_records_its_reg
         "do0002.png",
         "do0003.png",
         "do0004.png",
+        "do0005.png",
+        "do0006.png",
+        "do0007.png",
+        "do0008.png",
     ]
     assert json.loads((out / "run.json").read_text())["region"] == "do"
     assert load(out / "manifest.json").region == "do"
@@ -3176,6 +3180,10 @@ def test_extract_reads_a_regional_set_from_its_own_directory_and_records_its_reg
         "do0002.png",
         "do0003.png",
         "do0004.png",
+        "do0005.png",
+        "do0006.png",
+        "do0007.png",
+        "do0008.png",
     ]
     capsys.readouterr()
     assert main(evaluate_regional_run(out)) == 0
