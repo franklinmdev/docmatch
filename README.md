@@ -1203,8 +1203,9 @@ date and method, ITBIS to proportionality and to cost, ISR retention type.
 A document with no reading, or one missing its NCF, RNC or date, fails its
 month, which gets no file; one with no readable date, or no reading, fails a
 `no month` row. So does an RNC, cedula or NCF python-stdnum does not validate,
-a negative amount, and a split, retention or ITBIS share beyond what was read:
-nothing is written negative. An ISR retention the comprobante does not print is
+a negative amount, a read buyer RNC or cedula other than the reporter's (an
+absent buyer files as before), and a split, retention or ITBIS share beyond
+what was read: nothing is written negative. An ISR retention the comprobante does not print is
 computed over the services amount when `filing.csv` names a retention type: at
 the rate in force on the payment date, which DGII says picks the percentage,
 or on the comprobante date when the annotation has no payment date, the export
@@ -2077,8 +2078,9 @@ date and method, ITBIS to proportionality and to cost, ISR retention type.
 A document with no reading, or one missing its NCF, RNC or date, fails its
 month, which gets no file; one with no readable date, or no reading, fails a
 `no month` row. So does an RNC, cedula or NCF python-stdnum does not validate,
-a negative amount, and a split, retention or ITBIS share beyond what was read:
-nothing is written negative. An ISR retention the comprobante does not print is
+a negative amount, a read buyer RNC or cedula other than the reporter's (an
+absent buyer files as before), and a split, retention or ITBIS share beyond
+what was read: nothing is written negative. An ISR retention the comprobante does not print is
 computed over the services amount when `filing.csv` names a retention type: at
 the rate in force on the payment date, which DGII says picks the percentage,
 or on the comprobante date when the annotation has no payment date, the export
