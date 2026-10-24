@@ -186,6 +186,8 @@ def test_export_lists_every_month_and_document_in_export_json(
         "control_rate_dates": RATE_DATES,
         "reading_left_out": [LEFT_OUT_B02],
         "control_left_out": [LEFT_OUT_B02, LEFT_OUT_E32],
+        "reading_dropped_modified": [],
+        "control_dropped_modified": [],
     }
 
 
@@ -322,8 +324,8 @@ ECF_JUNE_CONTENT = (
     "0.00|0.00|0.00||0.00|0.00|0.00|0.00|0.00|1"
 )
 """The E31, the E41 and the E43 of June, each annotated by its type; the E43
-names no vendor and is filed under the reporter's RNC. The E32 is a consumo
-under RD$250,000."""
+names no vendor and is filed under the reporter's RNC, its read modified
+e-NCF dropped from column 5. The E32 is a consumo under RD$250,000."""
 
 ECF_OUTPUT = "\n".join(
     [
@@ -337,10 +339,12 @@ ECF_OUTPUT = "\n".join(
         "Reading, 1 of 1 monthly files written",
         "  202606  3 rows",
         "  left out  202606  1 document, consumo of RD$250,000.00 or less",
+        "  modified NCF dropped  202606  1 document, not a debit or credit note",
         "",
         "Labels control, 1 of 1 monthly files written",
         "  202606  3 rows",
         "  left out  202606  1 document, consumo of RD$250,000.00 or less",
+        "  modified NCF dropped  202606  1 document, not a debit or credit note",
         "",
     ]
 )

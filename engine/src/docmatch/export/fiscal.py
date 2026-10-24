@@ -83,6 +83,16 @@ contribuyente que reporta" (discussion "gastos menores B13", read 2026-10-23,
 https://ayuda.dgii.gov.do/conversations/discusiones/gastos-menores-b13/62a0f1d14c24491a89e9ee5a).
 That E43 follows B13 is inferred, and so is its Tipo Id: the instructivo gives
 1 for an RNC (unverified for E43).
+
+Modified NCF, column 5
+----------------------
+
+Column 5, "NCF o Documento Modificado", takes "el número completo de
+comprobante fiscal afectado por una nota de débito o crédito" (the same
+instructivo, read 2026-10-23), so it is written only for a debit or credit
+note: B03, B04, E33 and E34. The pre-validator (MSI 2.6) refuses a modified
+NCF on an E31 and an E43 with "No permitido para enviar NCF MODIFICADO"
+(#231). The full list of types it allows is unverified beyond the notes.
 """
 
 from dataclasses import dataclass
@@ -106,6 +116,15 @@ GASTOS_MENORES_TYPES = ("B13", "E43")
 def is_gastos_menores(ncf: str) -> bool:
     """Whether a compacted NCF or e-NCF is a gastos menores: B13 or E43."""
     return ncf[:3] in GASTOS_MENORES_TYPES
+
+
+NOTE_TYPES = ("B03", "B04", "E33", "E34")
+
+
+def is_note(ncf: str) -> bool:
+    """Whether a compacted NCF or e-NCF is a debit or credit note: B03, B04,
+    E33 or E34."""
+    return ncf[:3] in NOTE_TYPES
 
 
 @dataclass(frozen=True)

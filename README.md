@@ -1216,8 +1216,13 @@ failure; the threshold is a DGII help answer, its "monto" read as the net plus
 taxes and tip is unverified, and the pre-validator itself rejects a consumo at
 any amount. A B13 or E43, which name no vendor, writes the reporter's RNC in
 column 1 (Tipo Id from its kind: 1 for an RNC, 2 for a cedula), per DGII's help
-answers; that E43 follows B13 is inferred, unverified. The report prints counts and reasons only, never a number or a name
-from a comprobante. CI's `Regional` step exports the made-up set's saved run.
+answers; that E43 follows B13 is inferred, unverified. Column 5, the modified
+NCF, is written only for a B03, B04, E33 or E34 (the instructivo: the
+comprobante "afectado por una nota de débito o crédito"); on any other type a
+read one is dropped, the document still filed and the export listing the drop,
+since the pre-validator refuses it on an E31 and an E43. The report prints
+counts and reasons only, never a number or a name from a comprobante. CI's
+`Regional` step exports the made-up set's saved run.
 
 ```bash
 uv run docmatch prevalidate 606 --export data/exports/606/do-gemini \
@@ -2085,8 +2090,13 @@ failure; the threshold is a DGII help answer, its "monto" read as the net plus
 taxes and tip is unverified, and the pre-validator itself rejects a consumo at
 any amount. A B13 or E43, which name no vendor, writes the reporter's RNC in
 column 1 (Tipo Id from its kind: 1 for an RNC, 2 for a cedula), per DGII's help
-answers; that E43 follows B13 is inferred, unverified. The report prints counts and reasons only, never a number or a name
-from a comprobante. CI's `Regional` step exports the made-up set's saved run.
+answers; that E43 follows B13 is inferred, unverified. Column 5, the modified
+NCF, is written only for a B03, B04, E33 or E34 (the instructivo: the
+comprobante "afectado por una nota de débito o crédito"); on any other type a
+read one is dropped, the document still filed and the export listing the drop,
+since the pre-validator refuses it on an E31 and an E43. The report prints
+counts and reasons only, never a number or a name from a comprobante. CI's
+`Regional` step exports the made-up set's saved run.
 
 ```bash
 uv run docmatch prevalidate 606 --export data/exports/606/do-gemini \

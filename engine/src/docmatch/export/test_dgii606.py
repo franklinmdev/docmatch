@@ -13,6 +13,7 @@ import pytest
 from docmatch.export.dgii606 import (
     NO_MONTH,
     REGION,
+    DroppedModified,
     Failure,
     LeftOut,
     RateDate,
@@ -77,7 +78,8 @@ def test_read_amounts_and_the_filing_annotation_fill_every_other_column() -> Non
     """A mixed E31 to cost, paid by transfer, retentions printed on it, with a
     tip, selective and other taxes: what was read lands in its column, the
     annotation in its own, and code computes the split's goods, the total and
-    the ITBIS por adelantar."""
+    the ITBIS por adelantar. The E31's modified NCF is not a note's and is
+    dropped (#251)."""
     reading = comprobante(
         vendor_tax_id=PERSON,
         document_id="E310000000052",
@@ -110,7 +112,7 @@ def test_read_amounts_and_the_filing_annotation_fill_every_other_column() -> Non
         "2",
         "02",
         "E310000000052",
-        "B0100000417",
+        "",
         "20260521",
         "20260530",
         "6000.00",
@@ -272,7 +274,10 @@ def test_an_unreadable_amount_fails_rather_than_being_written_as_zero() -> None:
         ({"document_id": "B01000004170"}, "NCF invalid"),
         ({"document_id": "B01|00000417"}, "NCF invalid"),
         ({"document_id": "B01000004ñ7"}, "NCF invalid"),
-        ({"document_id_modified": "B0100000|17"}, "modified NCF invalid"),
+        (
+            {"document_id": "B0400000009", "document_id_modified": "B0100000|17"},
+            "modified NCF invalid",
+        ),
     ],
 )
 def test_an_identifier_stdnum_refuses_fails_its_month(
@@ -700,3 +705,70 @@ def test_a_gastos_menores_under_a_cedula_reporter_takes_tipo_id_2() -> None:
 
     [content] = exported.reading.files().values()
     assert content.split("\r\n")[1].startswith(f"{PERSON}|2|")
+
+
+@pytest.mark.parametrize(
+    "note", ["B0300000004", "B0400000009", "E330000000001", "E340000000001"]
+)
+def test_a_debit_or_credit_note_keeps_its_modified_ncf_in_column_5(note: str) -> None:
+    reading = comprobante(document_id=note, document_id_modified="B0100000417")
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": GOODS})
+
+    [content] = exported.reading.files().values()
+    assert content.split("\r\n")[1].split("|")[3:5] == [note, "B0100000417"]
+    assert exported.reading.dropped_modified == ()
+
+
+@pytest.mark.parametrize(
+    "ncf", ["B0100000417", "B0200000001", "E310000000001", "E430000000001"]
+)
+def test_a_modified_ncf_on_any_other_type_is_dropped_and_listed(ncf: str) -> None:
+    """DGII's pre-validator refuses it on an E31 and an E43 (#231); the
+    instructivo asks for it only for a debit or credit note (#251). The
+    document is still filed, with column 5 empty."""
+    reading = comprobante(
+        document_id=ncf,
+        document_id_modified="B0100000013",
+        amount_total_net="300000.00",
+    )
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": GOODS})
+
+    [content] = exported.reading.files().values()
+    assert content.split("\r\n")[1].split("|")[3:5] == [ncf, ""]
+    assert exported.reading.dropped_modified == (DroppedModified("a", "202603"),)
+
+
+def test_a_document_with_no_modified_ncf_lists_no_drop() -> None:
+    exported = export_606(REPORTER, {"a": comprobante()}, {}, {"a": GOODS})
+
+    assert exported.reading.dropped_modified == ()
+
+
+def test_an_invalid_modified_ncf_on_a_non_note_is_dropped_and_the_month_passes() -> (
+    None
+):
+    """A stray read value never fails the file (#251): only a note's modified
+    NCF is checked."""
+    reading = comprobante(document_id_modified="B0100000|17")
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": GOODS})
+
+    assert exported.reading.failed == ()
+    [content] = exported.reading.files().values()
+    assert content.split("\r\n")[1].split("|")[3:5] == ["B0100000417", ""]
+    assert exported.reading.dropped_modified == (DroppedModified("a", "202603"),)
+
+
+def test_a_dropped_modified_ncf_is_not_listed_when_the_month_fails() -> None:
+    """The drop is listed only for a document whose line is written: its own
+    NCF unreadable fails the month, so there is no line to drop it from."""
+    reading = comprobante(
+        document_id="B01|00000417", document_id_modified="B0100000013"
+    )
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": GOODS})
+
+    assert [month.is_failed for month in exported.reading.months] == [True]
+    assert exported.reading.dropped_modified == ()
