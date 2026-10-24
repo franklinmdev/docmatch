@@ -70,7 +70,10 @@ an amount that does not read, any negative amount, a services split above
 the net amount, and an ITBIS retention, proportional share or share to cost
 above the ITBIS, the last also what would make column 15 negative. The
 instructivo names no sign convention, for a nota de credito or anything else,
-so nothing is ever written negative. No reason quotes a value.
+so nothing is ever written negative. A read buyer RNC or cedula that differs
+from the reporter's, once separators are compacted, also fails the month
+("buyer is not the reporter", #253): the 606 lists the reporter's own
+purchases. An absent buyer files as before. No reason quotes a value.
 
 A comprobante's date is read day first, `DD/MM/YYYY`, as Dominican
 comprobantes print it, unless it starts with a four-digit year; the scorer's
@@ -346,6 +349,9 @@ def _line(reporter: str, values: FieldValues | None, filing: Filing) -> _Outcome
         )
         if tipo_id is None:
             reasons.append("RNC or cedula invalid")
+    buyer = _value(values, "customer_tax_id")
+    if buyer is not None and rnc.compact(buyer) != rnc.compact(reporter):
+        reasons.append("buyer is not the reporter")
     read_modified = _value(values, "document_id_modified") is not None
     keeps_modified = number is not None and is_note(number)
     modified = (

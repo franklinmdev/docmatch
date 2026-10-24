@@ -772,3 +772,23 @@ def test_a_dropped_modified_ncf_is_not_listed_when_the_month_fails() -> None:
 
     assert [month.is_failed for month in exported.reading.months] == [True]
     assert exported.reading.dropped_modified == ()
+
+
+def test_a_buyer_that_is_not_the_reporter_fails_its_month_by_each_sides_value() -> None:
+    """The 606 lists the reporter's purchases: a read buyer RNC that differs
+    from the reporter's, after compacting separators, fails the month, on the
+    side that read it. An equal buyer, however written, or none, files."""
+    other = comprobante(customer_tax_id="130-99002-1")
+    same = comprobante(customer_tax_id="1-30-99002-6")
+    absent = comprobante()
+
+    exported = export_606(
+        REPORTER,
+        {"a.png": other, "b.png": same, "c.png": absent},
+        {"a.png": same, "b.png": same, "c.png": same},
+        {"a.png": GOODS, "b.png": GOODS, "c.png": GOODS},
+    )
+
+    [march] = exported.reading.failed
+    assert march.failures == (Failure("a.png", ("buyer is not the reporter",)),)
+    assert exported.control.failed == ()
