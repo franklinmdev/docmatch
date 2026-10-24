@@ -30,11 +30,6 @@
       <MontoItem>350.00</MontoItem>
     </Item>
   </DetallesItems>
-  <InformacionReferencia>
-    <NCFModificado>E430000000000</NCFModificado>
-    <FechaNCFModificado>12-06-2026</FechaNCFModificado>
-    <CodigoModificacion>4</CodigoModificacion>
-  </InformacionReferencia>
   <FechaHoraFirma>10-06-2026 10:00:00</FechaHoraFirma>
   <Signature xmlns="http://www.w3.org/2000/09/xmldsig#" />
 </ECF>

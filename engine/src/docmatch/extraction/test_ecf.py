@@ -118,7 +118,7 @@ def test_the_parser_reads_no_line_item() -> None:
             for amount in ("NaN", "Infinity", "1E+3", "13,650.00", "-1.00")
         ),
         (
-            to_xml(by_type(43)).replace(
+            to_xml(by_type(32)).replace(
                 b"</InformacionReferencia>",
                 b"<NCFModificado>B0100000013</NCFModificado></InformacionReferencia>",
             ),

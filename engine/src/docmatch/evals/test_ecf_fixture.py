@@ -171,7 +171,7 @@ def test_the_fixture_annotates_once_per_type_and_declares_it(tmp_path: Path) -> 
         True,
         True,
         True,
-        False,
+        True,
     ]
     assert filing["ecf0001.xml"].purchase_type == 9
 
