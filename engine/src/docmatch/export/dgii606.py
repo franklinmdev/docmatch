@@ -322,8 +322,9 @@ def _line(reporter: str, values: FieldValues | None, filing: Filing) -> _Outcome
 
     The checks that make the reading itself wrong run first and fail the
     month even for a small consumo: no reading, the NCF, the RNC or cedula,
-    the date, the amounts and their bounds. Then the consumo rule leaves a
-    small B02 or E32 out. Only after it comes the retention, which needs a
+    the date, the buyer (a read buyer RNC or cedula other than the reporter's,
+    compacted on both sides), the amounts and their bounds. Then the consumo
+    rule leaves a small B02 or E32 out. Only after it comes the retention, which needs a
     rate: a document the 606 does not carry never fails for a filing detail
     it does not use."""
     if values is None:

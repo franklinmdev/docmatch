@@ -794,3 +794,33 @@ def test_a_buyer_that_is_not_the_reporter_fails_its_month_by_each_sides_value() 
     assert march.failures == (Failure("a.png", ("buyer is not the reporter",)),)
     [control_march] = exported.control.failed
     assert control_march.failures == (Failure("b.png", ("buyer is not the reporter",)),)
+
+
+def test_a_small_consumo_with_a_foreign_buyer_fails_its_month_and_is_not_left_out() -> (
+    None
+):
+    """The buyer check runs before the consumo rule, like the other checks
+    that make the reading wrong."""
+    foreign = consumo("B0200000001", "700.00", customer_tax_id="130990018")
+
+    exported = export_606(REPORTER, {"a": foreign}, {}, {"a": GOODS})
+
+    assert exported.reading.left_out == ()
+    [march] = exported.reading.failed
+    assert march.failures == (Failure("a", ("buyer is not the reporter",)),)
+
+
+def test_a_reporter_written_with_dashes_still_matches_its_own_buyer() -> None:
+    buyer = comprobante(customer_tax_id=REPORTER)
+
+    exported = export_606("1-30-99002-6", {"a": buyer}, {}, {"a": GOODS})
+
+    assert exported.reading.failed == ()
+
+
+def test_a_cedula_buyer_against_an_rnc_reporter_fails_its_month() -> None:
+    buyer = comprobante(customer_tax_id=PERSON)
+
+    [march] = export_606(REPORTER, {"a": buyer}, {}, {"a": GOODS}).reading.failed
+
+    assert march.failures == (Failure("a", ("buyer is not the reporter",)),)

@@ -7,10 +7,11 @@ crédito fiscal carrying the legal tip, a selective and another additional tax;
 an E32 consumo to nobody, whose `Comprador` is empty and which prints no
 exempt amount, the missing optional elements; an E41 compras whose retentions
 are printed on its lines only; and an E43 gastos menores, which names no
-buyer. The E31 names the reporter as its buyer and the reporter issues the E41
-and the E43, which the reading files as their buyer (#253). The E43
-carries a modified e-NCF, which the 606 drops because only a
-debit or credit note writes one (#251; DGII's pre-validator refuses it on an
+buyer. The 606 fails a comprobante whose buyer is not the reporter (#253), so
+the E31 names the reporter as its buyer, and the reporter issues the E41 and
+the E43, whose issuer the parser reads as the buyer. The E43 carries a
+modified e-NCF, which the 606 drops because only a debit or credit note
+writes one (#251; DGII's pre-validator refuses it on an
 E43, #231), so the fixture exercises the drop. Every name, number
 and amount is made up, and the amounts are not computed at any tax rate the
 fixture would be stating: the rates the XSD requires beside an additional tax are
