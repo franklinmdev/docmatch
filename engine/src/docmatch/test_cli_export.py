@@ -325,7 +325,7 @@ ECF_JUNE_CONTENT = (
 )
 """The E31, the E41 and the E43 of June, each annotated by its type; the E43
 names no vendor and is filed under the reporter's RNC, its read modified
-e-NCF dropped from column 4. The E32 is a consumo under RD$250,000."""
+e-NCF dropped from column 5. The E32 is a consumo under RD$250,000."""
 
 ECF_OUTPUT = "\n".join(
     [

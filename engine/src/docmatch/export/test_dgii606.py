@@ -707,7 +707,7 @@ def test_a_gastos_menores_under_a_cedula_reporter_takes_tipo_id_2() -> None:
 @pytest.mark.parametrize(
     "note", ["B0300000004", "B0400000009", "E330000000001", "E340000000001"]
 )
-def test_a_debit_or_credit_note_keeps_its_modified_ncf_in_column_4(note: str) -> None:
+def test_a_debit_or_credit_note_keeps_its_modified_ncf_in_column_5(note: str) -> None:
     reading = comprobante(document_id=note, document_id_modified="B0100000417")
 
     exported = export_606(REPORTER, {"a": reading}, {}, {"a": GOODS})
@@ -723,7 +723,7 @@ def test_a_debit_or_credit_note_keeps_its_modified_ncf_in_column_4(note: str) ->
 def test_a_modified_ncf_on_any_other_type_is_dropped_and_listed(ncf: str) -> None:
     """DGII's pre-validator refuses it on an E31 and an E43 (#231); the
     instructivo asks for it only for a debit or credit note (#251). The
-    document is still filed, with column 4 empty."""
+    document is still filed, with column 5 empty."""
     reading = comprobante(
         document_id=ncf,
         document_id_modified="B0100000013",

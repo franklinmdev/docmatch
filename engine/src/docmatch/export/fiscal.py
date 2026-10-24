@@ -84,10 +84,10 @@ https://ayuda.dgii.gov.do/conversations/discusiones/gastos-menores-b13/62a0f1d14
 That E43 follows B13 is inferred, and so is its Tipo Id: the instructivo gives
 1 for an RNC (unverified for E43).
 
-Modified NCF, column 4
+Modified NCF, column 5
 ----------------------
 
-Column 4, "NCF o Documento Modificado", takes "el número completo de
+Column 5, "NCF o Documento Modificado", takes "el número completo de
 comprobante fiscal afectado por una nota de débito o crédito" (the same
 instructivo, read 2026-10-23), so it is written only for a debit or credit
 note: B03, B04, E33 and E34. The pre-validator (MSI 2.6) refuses a modified

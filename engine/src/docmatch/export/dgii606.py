@@ -149,7 +149,7 @@ class LeftOut:
 
 @dataclass(frozen=True)
 class DroppedModified:
-    """A document that read a modified NCF its type does not carry: column 4
+    """A document that read a modified NCF its type does not carry: column 5
     is left empty and the document is still filed (#251)."""
 
     filename: str
