@@ -759,3 +759,16 @@ def test_an_invalid_modified_ncf_on_a_non_note_is_dropped_and_the_month_passes()
     [content] = exported.reading.files().values()
     assert content.split("\r\n")[1].split("|")[3:5] == ["B0100000417", ""]
     assert exported.reading.dropped_modified == (DroppedModified("a", "202603"),)
+
+
+def test_a_dropped_modified_ncf_is_not_listed_when_the_month_fails() -> None:
+    """The drop is listed only for a document whose line is written: its own
+    NCF unreadable fails the month, so there is no line to drop it from."""
+    reading = comprobante(
+        document_id="B01|00000417", document_id_modified="B0100000013"
+    )
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": GOODS})
+
+    assert [month.is_failed for month in exported.reading.months] == [True]
+    assert exported.reading.dropped_modified == ()

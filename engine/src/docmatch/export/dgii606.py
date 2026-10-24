@@ -25,9 +25,9 @@ Columns, by source (#215 decision 3):
   the reporter's own for a B13 or E43, which name no vendor; `export.fiscal`),
   4 NCF (`document_id`), 5 modified NCF (only on a debit or credit note,
   dropped and listed on any other type; `export.fiscal`), 6 date, the net
-  amount the split divides, 11 ITBIS (`amount_total_tax`), 12 and 18 the ITBIS and ISR
-  retentions where the comprobante prints them, 20 selective tax, 21 other
-  taxes, 22 legal tip. A column 12 not printed is 0: the annotation has no
+  amount the split divides, 11 ITBIS (`amount_total_tax`), 12 and 18 the
+  ITBIS and ISR retentions where the comprobante prints them, 20 selective
+  tax, 21 other taxes, 22 legal tip. A column 12 not printed is 0: the annotation has no
   ITBIS retention to compute it from. A column 18 not printed is computed
   when the annotation names an ISR retention type (`export.fiscal`).
 - **Computed**: 2 Tipo Id, 1 for a number python-stdnum 2.2 validates as an
@@ -385,7 +385,7 @@ def _line(reporter: str, values: FieldValues | None, filing: Filing) -> _Outcome
             identifier=identifier,
             tipo_id=tipo_id,
             ncf=number,
-            modified=modified if modified is not None and keeps_modified else "",
+            modified="" if modified is None else modified,
             day=day,
             amounts=amounts,
         ),
@@ -452,8 +452,8 @@ def _ncf(
     values: FieldValues, fieldtype: str, name: str, reasons: list[str]
 ) -> str | None:
     """The fieldtype's NCF or e-NCF compacted, or None with the reason why
-    not; a modified NCF is optional, so only its absence is not a reason. Callers check a modified NCF only on a
-    note (#251)."""
+    not; a modified NCF is optional, so only its absence is not a reason.
+    Callers check a modified NCF only on a note (#251)."""
     text = _value(values, fieldtype)
     if text is None:
         if fieldtype == "document_id":
