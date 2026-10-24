@@ -22,7 +22,8 @@ type, the type being the `E` and two digits of the document's labeled e-NCF
 - `split`: `services`, `goods`, or the services amount of a mixed document,
   the rest of the read net amount being goods.
 - `payment_date`: empty, or the day paid as `YYYY-MM-DD`; written as the
-  606's column 7.
+  606's column 7. It picks the ISR retention rate; empty, the comprobante
+  date does (#249).
 - `payment_method`: the 606's column 23, 1 to 7.
 - `itbis_proportional`, `itbis_to_cost`: empty for none, `all` for the whole
   ITBIS the document carries, or an amount; the 606's columns 13 and 14.

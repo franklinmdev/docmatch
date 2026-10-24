@@ -41,7 +41,7 @@ invoicing only the service
 (https://dgii.gov.do/legislacion/normasGenerales/Documents/NG%20sobre%20(ITBIS),%20NG%20sobre%20(ISR),%20NG%20sobre%20Comprobantes%20Fiscales/norma07-07.pdf).
 Ley 30-26's own text was not read (unverified).
 
-The date that picks the rate is the payment date, not the comprobante's:
+The date that picks the rate is the payment date when there is one:
 "la fecha que deberá tomar en cuenta para determinar el porcentaje de
 retención a aplicar es la fecha del pago", discussion "Retenciones 15%
 honorarios profesionales", question dated 2026-07-20, read 2026-10-23
