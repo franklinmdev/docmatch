@@ -17,7 +17,7 @@
   "digests": {
     "do0001.png": "7e63530977e3c9382024fecb4a42b610b418a2be3c7d48d170c766b9c50042c5",
     "do0002.png": "62aff9dace3abe0e8f82e227c6abc9ad36083c371fb2822c244939b6c4a59cd0",
-    "do0003.png": "00ca24116c5de8d73d0a99c2a7798e4a05d83cfb57a497a691fdf0de3c565252",
+    "do0003.png": "c65b843fd5ec7adb5e1cce991b2c999b74afbef1736ce56ae21bee0e3680cbe1",
     "do0004.png": "ed83b77f92360b00abf92cf4ee1e421946b76698bba6932abda772f9f9db2f67",
     "do0005.png": "51615ec378c03b23205b7d42d32a5e5e08fce472fe3f3590acb647f225e1e8bb",
     "do0006.png": "4229e585fc54e72ebb3b1e1f9d5adca4a6217935194c9eeb79762e4e2e9fd1d4",
@@ -42,7 +42,7 @@
     "amount_retention_isr"
   ],
   "files": {
-    "labels.csv": "696c155005a1e6567efbb14e117ca68ac52ea1c0135414ebfaa1c669e3050455",
+    "labels.csv": "b50fc1b228b0be82624d7d534d015b9dd88959063c3b370d2bd1c13d0b105974",
     "filing.csv": "506c655db8e3a8cfed49c3608870dca47a141869e64be4846d8fb7d7521fc7ba"
   },
   "reporter": "130990026"

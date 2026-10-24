@@ -7,7 +7,9 @@ crédito fiscal carrying the legal tip, a selective and another additional tax;
 an E32 consumo to nobody, whose `Comprador` is empty and which prints no
 exempt amount, the missing optional elements; an E41 compras whose retentions
 are printed on its lines only; and an E43 gastos menores, which names no
-buyer. The E43 carries a modified e-NCF, which the 606 drops because only a
+buyer. The E31 names the reporter as its buyer and the reporter issues the E41
+and the E43, which the reading files as their buyer (#253). The E43
+carries a modified e-NCF, which the 606 drops because only a
 debit or credit note writes one (#251; DGII's pre-validator refuses it on an
 E43, #231), so the fixture exercises the drop. Every name, number
 and amount is made up, and the amounts are not computed at any tax rate the
@@ -149,7 +151,7 @@ ECFS = (
         issuer_rnc=_rnc("13099005"),
         issuer_name="Distribuidora Ficticia del Cibao SRL",
         issued="10-06-2026",
-        buyer_rnc=_rnc("13099006"),
+        buyer_rnc=REPORTER,
         buyer_name="Hotel Imaginario Playa SRL",
         taxed="10000.00",
         exempt="500.00",
@@ -182,7 +184,7 @@ ECFS = (
             date_issue="2026-06-10",
             vendor_name="Distribuidora Ficticia del Cibao SRL",
             vendor_tax_id="130990052",
-            customer_tax_id="130990069",
+            customer_tax_id=REPORTER,
             amount_total_net="10500.00",
             amount_total_tax="1800.00",
             amount_total_gross="13650.00",
@@ -218,7 +220,7 @@ ECFS = (
         filename="ecf0003.xml",
         kind=41,
         encf="E410000000001",
-        issuer_rnc=_rnc("13099008"),
+        issuer_rnc=REPORTER,
         issuer_name="Constructora Ficticia del Sur SRL",
         issued="12-06-2026",
         buyer_rnc=_cedula("0009900002"),
@@ -251,7 +253,7 @@ ECFS = (
             date_issue="2026-06-12",
             vendor_name="Juan Ejemplo",
             vendor_tax_id="00099000028",
-            customer_tax_id="130990085",
+            customer_tax_id=REPORTER,
             amount_total_net="5000.00",
             amount_total_tax="900.00",
             amount_total_gross="5900.00",
@@ -263,7 +265,7 @@ ECFS = (
         filename="ecf0004.xml",
         kind=43,
         encf="E430000000001",
-        issuer_rnc=_rnc("13099008"),
+        issuer_rnc=REPORTER,
         issuer_name="Constructora Ficticia del Sur SRL",
         issued="13-06-2026",
         exempt="350.00",
@@ -284,7 +286,7 @@ ECFS = (
         labels=labeled(
             document_id="E430000000001",
             date_issue="2026-06-13",
-            customer_tax_id="130990085",
+            customer_tax_id=REPORTER,
             amount_total_net="350.00",
             amount_total_gross="350.00",
             document_id_modified="E430000000000",
