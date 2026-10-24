@@ -27,7 +27,7 @@ def test_an_e31_reads_into_every_covered_fieldtype_it_carries() -> None:
         "date_issue": "2026-06-10",
         "vendor_name": "Distribuidora Ficticia del Cibao SRL",
         "vendor_tax_id": "130990052",
-        "customer_tax_id": "130990069",
+        "customer_tax_id": "130990026",
         "amount_total_net": "10500.00",
         "amount_total_tax": "1800.00",
         "amount_total_gross": "13650.00",
