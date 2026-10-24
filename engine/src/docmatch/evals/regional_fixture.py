@@ -45,12 +45,11 @@ from PIL import Image, ImageDraw, ImageFont
 from stdnum import luhn
 from stdnum.do import rnc
 
-from docmatch.evals.manifest import Manifest, write
+from docmatch.evals.manifest import FILING_FILE, Manifest, write
 from docmatch.evals.public import digest
 from docmatch.evals.regional import FILENAME, LABELS_FILE, PAPER
 from docmatch.evals.run import MANIFEST_FILE, PREDICTIONS_FILE, RECORD_FILE
 from docmatch.export.filing import COLUMNS as FILING_COLUMNS
-from docmatch.export.filing import FILING_FILE
 from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 
 FIXTURE = Path(__file__).parents[3] / "tests" / "evals" / "regional"

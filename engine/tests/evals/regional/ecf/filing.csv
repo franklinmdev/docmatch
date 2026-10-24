@@ -1,0 +1,5 @@
+ecf_type,reported,purchase_type,split,payment_date,payment_method,itbis_proportional,itbis_to_cost,isr_retention_type
+E31,yes,09,goods,,1,,,
+E32,yes,09,goods,,1,,,
+E41,yes,02,services,2026-06-20,2,,,2
+E43,no,,,,,,,

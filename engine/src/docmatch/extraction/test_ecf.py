@@ -34,7 +34,7 @@ def test_an_e31_reads_into_every_covered_fieldtype_it_carries() -> None:
         "amount_tip": "1000.00",
         "amount_tax_selective": "150.00",
         "amount_tax_other": "200.00",
-        "document_id_modified": "B0100000005",
+        "document_id_modified": None,
         "amount_retention_itbis": None,
         "amount_retention_isr": None,
     }
@@ -118,7 +118,7 @@ def test_the_parser_reads_no_line_item() -> None:
             for amount in ("NaN", "Infinity", "1E+3", "13,650.00", "-1.00")
         ),
         (
-            to_xml(by_type(31)).replace(
+            to_xml(by_type(43)).replace(
                 b"</InformacionReferencia>",
                 b"<NCFModificado>B0100000013</NCFModificado></InformacionReferencia>",
             ),

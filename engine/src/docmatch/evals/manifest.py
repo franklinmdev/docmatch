@@ -89,6 +89,9 @@ SEED = 20260912
 """The seed that drew the committed subset. Changing it draws a new benchmark."""
 
 MANIFEST = Path(__file__).parent / "subset.json"
+FILING_FILE = "filing.csv"
+"""A regional set's filing annotation, beside its `labels.csv`. It lives here
+because the manifest checks for it and `evals.regional` imports this module."""
 """The committed manifest, beside the code that reads it rather than in `data/`,
 which is ignored."""
 
@@ -135,6 +138,10 @@ class Manifest(BaseModel):
     reporter: str | None = None
     """The RNC or cedula of the taxpayer a regional set's documents are filed
     by, which a report's header names; None for a set never filed."""
+    filing_per: Literal["ecf_type"] | None = None
+    """What a row of the set's `filing.csv` annotates: None, a document, one
+    row per filename; `ecf_type`, every document of an e-CF type, one row per
+    type (E31, E32...), for an e-CF set (#231)."""
 
     @model_validator(mode="after")
     def _a_consistent_pin(self) -> "Manifest":
@@ -156,6 +163,8 @@ class Manifest(BaseModel):
             )
         if self.coverage is not None:
             _check_coverage(self.coverage)
+        if self.filing_per is not None and FILING_FILE not in self.files:
+            raise ValueError("filing_per is declared but no filing.csv is pinned")
         if self.reporter is not None and not (
             rnc.is_valid(self.reporter) or cedula.is_valid(self.reporter)
         ):
@@ -306,7 +315,7 @@ def _first_problem(error: ValidationError) -> str:
     return f"{named}: {first['msg'].lower()}."
 
 
-REGIONAL_KEYS = ("region", "coverage", "files", "reporter")
+REGIONAL_KEYS = ("region", "coverage", "files", "reporter", "filing_per")
 """What only a regional set declares, left out of a manifest that declares none."""
 
 

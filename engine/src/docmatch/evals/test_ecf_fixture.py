@@ -18,6 +18,7 @@ from docmatch.evals.ecf_fixture import (
     SET,
     XSD_DIGESTS,
     XSD_TYPOS,
+    filing_csv,
     to_xml,
     write_fixture_set,
     write_run,
@@ -26,7 +27,9 @@ from docmatch.evals.manifest import load
 from docmatch.evals.public import digest
 from docmatch.evals.regional import read_labels
 from docmatch.evals.regional_fixture import COVERAGE as PAPER_COVERAGE
+from docmatch.evals.regional_fixture import REPORTER
 from docmatch.evals.run import read_run_record
+from docmatch.export.filing import read_filing
 from docmatch.extraction.ecf import COVERAGE, ECFError
 from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 
@@ -154,3 +157,47 @@ def test_pinning_refuses_a_file_that_is_not_an_e_cf_and_writes_nothing(
 def test_pinning_an_empty_directory_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ECFError, match="no .xml"):
         pin(tmp_path)
+
+
+def test_the_fixture_annotates_once_per_type_and_declares_it(tmp_path: Path) -> None:
+    manifest = write_fixture_set(tmp_path)
+
+    filing = read_filing(manifest, tmp_path)
+
+    assert manifest.filing_per == "ecf_type"
+    assert manifest.reporter == REPORTER
+    assert sorted(filing) == [each.filename for each in ECFS]
+    assert [filing[each.filename].reported for each in ECFS] == [
+        True,
+        True,
+        True,
+        False,
+    ]
+    assert filing["ecf0001.xml"].purchase_type == 9
+
+
+def test_pinning_a_directory_with_a_filing_annotation_pins_it_and_declares_it(
+    tmp_path: Path,
+) -> None:
+    for each in ECFS:
+        (tmp_path / each.filename).write_bytes(to_xml(each))
+    (tmp_path / "filing.csv").write_bytes(filing_csv())
+
+    manifest = pin(tmp_path, reporter=REPORTER)
+
+    assert manifest.filing_per == "ecf_type"
+    assert manifest.reporter == REPORTER
+    assert manifest.files["filing.csv"] == digest(filing_csv())
+    assert len(read_filing(manifest, tmp_path)) == len(ECFS)
+
+
+def test_pinning_a_directory_with_no_filing_annotation_declares_none(
+    tmp_path: Path,
+) -> None:
+    for each in ECFS:
+        (tmp_path / each.filename).write_bytes(to_xml(each))
+
+    manifest = pin(tmp_path)
+
+    assert manifest.filing_per is None
+    assert list(manifest.files) == ["labels.csv"]

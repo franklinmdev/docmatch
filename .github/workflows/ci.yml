@@ -166,11 +166,20 @@ jobs:
       # The e-CF set's report: four made-up e-CFs, one of each type the
       # parser reads, with their hand-written labels and the parser's saved
       # run. Its F1 is parsing, not reading a page, and the report says so.
+      # Then the same run's 606, annotated once per e-CF type, and DGII's
+      # pre-validator over it as for the paper set above (#231).
       - name: Regional e-CF
-        run: >-
-          uv run docmatch eval
-          --manifest engine/tests/evals/regional/ecf/manifest.json
-          --predictions engine/tests/evals/regional/ecf-run/predictions.json
+        run: |
+          uv run docmatch eval \
+            --manifest engine/tests/evals/regional/ecf/manifest.json \
+            --predictions engine/tests/evals/regional/ecf-run/predictions.json
+          uv run docmatch export 606 \
+            --manifest engine/tests/evals/regional/ecf/manifest.json \
+            --run engine/tests/evals/regional/ecf-run \
+            --out ${{ runner.temp }}/606-ecf
+          uv run docmatch prevalidate 606 \
+            --export ${{ runner.temp }}/606-ecf \
+            --binary ${{ runner.temp }}/dgii-prevalidator/Pre_Validado.zip
 
       # The matching report on the same synthetic subset: cases generated
       # from its labels at the real sizes, matched and scored, then matched

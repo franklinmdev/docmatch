@@ -255,3 +255,59 @@ def test_a_binary_of_another_hash_stops_the_command_before_any_run(
     assert main(prevalidating(export, binary)) == 1
 
     assert f"pinned at {BINARY_SHA256}" in capsys.readouterr().err
+
+
+ECF_SET = REGIONAL / "ecf" / "manifest.json"
+ECF_RUN = REGIONAL / "ecf-run"
+
+
+def test_prevalidate_reports_the_e_cf_export_for_the_reading_and_the_control(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    export = tmp_path / "606"
+    assert (
+        main(
+            [
+                "export",
+                "606",
+                "--manifest",
+                str(ECF_SET),
+                "--run",
+                str(ECF_RUN),
+                "--out",
+                str(export),
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    asked: list[tuple[str, str, str]] = []
+    answering(monkeypatch, asked)
+
+    exit_code = main(prevalidating(export, tmp_path / "Pre_Validado.zip"))
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == "\n".join(
+        [
+            "606 pre-validation",
+            f"  export        {export}",
+            f"  binary        Pre_Validado.zip sha256 {BINARY_SHA256}",
+            "  version       MSI 2.6, exe 4.0.0.9",
+            "  runtime       Mono 6.12.0.182, a pass uncompared with one on Windows",
+            "  not reported  1 (annotated not reported)",
+            "",
+            "Reading, 1 of 1 monthly files with zero errors, 0 of 2 rows with an error",
+            "  202606  0 errors, 2 rows",
+            "",
+            "Labels control, 1 of 1 monthly files with zero errors, "
+            "0 of 2 rows with an error",
+            "  202606  0 errors, 2 rows",
+            "",
+        ]
+    )
+    assert asked == [
+        ("reading/DGII_F_606_130990026_202606.TXT", "130990026", "202606"),
+        ("control/DGII_F_606_130990026_202606.TXT", "130990026", "202606"),
+    ]
