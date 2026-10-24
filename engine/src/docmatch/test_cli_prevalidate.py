@@ -30,14 +30,18 @@ EXPECTED_OUTPUT = "\n".join(
         "",
         # May never reached the pre-validator: the export failed it, and its
         # one document is a row with an error.
-        "Reading, 1 of 2 monthly files with zero errors, 1 of 3 rows with an error",
+        "Reading, 3 of 4 monthly files with zero errors, 1 of 6 rows with an error",
         "  202603  0 errors, 2 rows",
+        "  202604  0 errors, 1 row",
         "  202605  failed by the export, 1 document: ITBIS retention above the ITBIS",
+        "  202606  0 errors, 2 rows",
         "",
-        "Labels control, 2 of 2 monthly files with zero errors, "
-        "0 of 3 rows with an error",
+        "Labels control, 4 of 4 monthly files with zero errors, "
+        "0 of 5 rows with an error",
         "  202603  0 errors, 2 rows",
+        "  202604  0 errors, 1 row",
         "  202605  0 errors, 1 row",
+        "  202606  0 errors, 1 row",
         "",
     ]
 )
@@ -116,8 +120,12 @@ def test_only_the_files_the_export_wrote_are_run_typed_with_their_header(
 
     assert asked == [
         ("reading/DGII_F_606_130990026_202603.TXT", "130990026", "202603"),
+        ("reading/DGII_F_606_130990026_202604.TXT", "130990026", "202604"),
+        ("reading/DGII_F_606_130990026_202606.TXT", "130990026", "202606"),
         ("control/DGII_F_606_130990026_202603.TXT", "130990026", "202603"),
+        ("control/DGII_F_606_130990026_202604.TXT", "130990026", "202604"),
         ("control/DGII_F_606_130990026_202605.TXT", "130990026", "202605"),
+        ("control/DGII_F_606_130990026_202606.TXT", "130990026", "202606"),
     ]
 
 
@@ -137,7 +145,7 @@ def test_an_error_fails_its_file_and_its_row_with_no_value_printed(
 
     output = capsys.readouterr().out
     assert (
-        "Reading, 0 of 2 monthly files with zero errors, 2 of 3 rows with an error"
+        "Reading, 2 of 4 monthly files with zero errors, 2 of 6 rows with an error"
         in output
     )
     assert "  202603  1 error on 1 of 2 rows: NCF Invalido !" in output
@@ -159,8 +167,8 @@ def test_an_error_on_the_header_alone_fails_its_file_with_no_row_named(
 
     output = capsys.readouterr().out
     assert (
-        "Labels control, 1 of 2 monthly files with zero errors, "
-        "0 of 3 rows with an error" in output
+        "Labels control, 3 of 4 monthly files with zero errors, "
+        "0 of 5 rows with an error" in output
     )
     assert (
         "  202603  1 error on the header, none on its 2 rows: Encabezado:Cantidad "

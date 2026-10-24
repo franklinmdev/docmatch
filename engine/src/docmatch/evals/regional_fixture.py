@@ -12,7 +12,10 @@ accepts (its `stdnum.do.rnc`,
 number can still be someone's: the bases below were picked by hand and the
 cedula's `000` office prefix was chosen as one no office issues (unverified).
 The amounts are not computed at any tax rate; the fixture states no fiscal
-rule.
+rule. The last four exercise the 606's two rules (#230): a B02 and an E32
+under RD$250,000, the E32 misread in the run as an E31 so the reading files
+it and the control leaves it out, and two fees and rent without a printed
+retention, one paid before 2026-07-01 and one, dated in June, paid after it.
 
 Each image is drawn with Pillow 12.3's built-in bitmap font,
 `ImageFont.load_default_imagefont()`, which needs no FreeType and draws the
@@ -169,6 +172,66 @@ COMPROBANTES = (
         filing="yes,09,goods,,6,,75.00,",
         customer_name="Constructora Arenal SRL",
     ),
+    Comprobante(
+        filename="do0005.png",
+        labels=labeled(
+            vendor_name="Colmado Dona Rosa",
+            vendor_tax_id=_rnc("13099005"),
+            document_id="B0200001301",
+            date_issue="05/03/2026",
+            amount_total_net="250.00",
+            amount_total_tax="45.00",
+            amount_total_gross="295.00",
+        ),
+        paper="thermal",
+        filing="yes,09,goods,,1,,,",
+    ),
+    Comprobante(
+        filename="do0006.png",
+        labels=labeled(
+            vendor_name="Cafeteria El Faro",
+            vendor_tax_id=_rnc("13099006"),
+            document_id="E320000000019",
+            date_issue="10/06/2026",
+            amount_total_net="400.00",
+            amount_total_tax="72.00",
+            amount_total_gross="472.00",
+        ),
+        paper="thermal",
+        filing="yes,09,goods,,1,,,",
+    ),
+    Comprobante(
+        filename="do0007.png",
+        labels=labeled(
+            vendor_name="Luis Mena Contador",
+            vendor_tax_id=_cedula("0009900002"),
+            customer_tax_id=_rnc("13099002"),
+            document_id="B0100000500",
+            date_issue="12/04/2026",
+            amount_total_net="5,000.00",
+            amount_total_tax="0.00",
+            amount_total_gross="5,000.00",
+        ),
+        paper="letter",
+        filing="yes,02,services,2026-06-20,2,,,2",
+        customer_name="Constructora Arenal SRL",
+    ),
+    Comprobante(
+        filename="do0008.png",
+        labels=labeled(
+            vendor_name="Marta Diaz Inmuebles",
+            vendor_tax_id=_cedula("0009900003"),
+            customer_tax_id=_rnc("13099002"),
+            document_id="B0100000501",
+            date_issue="25/06/2026",
+            amount_total_net="6,000.00",
+            amount_total_tax="0.00",
+            amount_total_gross="6,000.00",
+        ),
+        paper="letter",
+        filing="yes,03,services,2026-07-15,2,,,1",
+        customer_name="Constructora Arenal SRL",
+    ),
 )
 
 
@@ -282,26 +345,33 @@ def write_set(directory: Path) -> Manifest:
 
 def readings() -> dict[str, dict[str, object]]:
     """The saved run's made-up readings, keyed by filename."""
-    right, misread, untaxed, credit = (dict(each.labels) for each in COMPROBANTES)
+    by_name = {each.filename: dict(each.labels) for each in COMPROBANTES}
+    right = by_name["do0001.png"]
+    misread = by_name["do0002.png"]
+    untaxed = by_name["do0003.png"]
     right["vendor_email"] = "ventas@example.do"
     misread["document_id"] = "B0200001238"
     del untaxed["amount_total_tax"]
+    by_name["do0006.png"]["document_id"] = "E310000000019"
+    fields = {
+        name: {key: value or None for key, value in labels.items()}
+        for name, labels in by_name.items()
+    }
     return {
-        COMPROBANTES[0].filename: {
-            "fields": {key: value or None for key, value in right.items()},
-            "line_items": [
-                {"line_item_description": "Cemento gris", "line_item_quantity": "10"}
-            ],
-        },
-        COMPROBANTES[1].filename: {
-            "fields": {key: value or None for key, value in misread.items()}
-        },
-        COMPROBANTES[2].filename: {
-            "fields": {key: value or None for key, value in untaxed.items()}
-        },
-        COMPROBANTES[3].filename: {
-            "fields": {key: value or None for key, value in credit.items()}
-        },
+        name: {"fields": values}
+        | (
+            {
+                "line_items": [
+                    {
+                        "line_item_description": "Cemento gris",
+                        "line_item_quantity": "10",
+                    }
+                ]
+            }
+            if name == "do0001.png"
+            else {}
+        )
+        for name, values in fields.items()
     }
 
 

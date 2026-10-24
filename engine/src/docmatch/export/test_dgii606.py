@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import pytest
 
-from docmatch.export.dgii606 import NO_MONTH, REGION, Failure, export_606
+from docmatch.export.dgii606 import NO_MONTH, REGION, Failure, LeftOut, export_606
 from docmatch.export.filing import ALL, Filing, Share
 from docmatch.metrics.fields import FieldValues
 from docmatch.metrics.normalization import read_date, reads_day_first
@@ -382,3 +382,214 @@ def test_a_services_amount_above_the_read_net_fails_rather_than_goods_below_zero
     assert march.failures == (
         Failure("a.png", ("services split above the net amount",)),
     )
+
+
+FEES = replace(
+    GOODS,
+    purchase_type=2,
+    split="services",
+    payment_date=date(2026, 6, 30),
+    isr_retention_type=2,
+)
+
+
+def retention_column(content: str) -> str:
+    """Column 18, the ISR retention, of the file's only line."""
+    return content.split("\r\n")[1].split("|")[17]
+
+
+def test_an_unprinted_isr_retention_is_computed_at_the_rate_in_force() -> None:
+    """Honorarios, 5,000.00 of services: 10 percent paid on 2026-06-30, 15
+    percent paid on 2026-07-01, the day Ley 30-26 takes effect."""
+    reading = comprobante(amount_total_net="5,000.00", amount_total_tax="0.00")
+    paid_before = FEES
+    paid_after = replace(FEES, payment_date=date(2026, 7, 1))
+
+    before = export_606(REPORTER, {"a": reading}, {}, {"a": paid_before})
+    after = export_606(REPORTER, {"a": reading}, {}, {"a": paid_after})
+
+    [before_file] = before.reading.files().values()
+    [after_file] = after.reading.files().values()
+    assert retention_column(before_file) == "500.00"
+    assert retention_column(after_file) == "750.00"
+
+
+def test_the_rate_follows_the_payment_date_not_the_comprobante_date() -> None:
+    """A comprobante dated in June and paid in July is retained at the July
+    rate (DGII: the payment date picks the percentage)."""
+    reading = comprobante(
+        date_issue="25/06/2026", amount_total_net="6,000.00", amount_total_tax="0.00"
+    )
+    rent = replace(FEES, isr_retention_type=1, payment_date=date(2026, 7, 15))
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": rent})
+
+    assert list(exported.reading.files()) == ["DGII_F_606_130990026_202606.TXT"]
+    [content] = exported.reading.files().values()
+    assert retention_column(content) == "900.00"
+
+
+def test_the_computed_retention_is_over_the_services_of_a_mixed_document() -> None:
+    reading = comprobante(amount_total_net="8,000.00", amount_total_tax="0.00")
+    mixed = replace(FEES, split=Decimal("2000.00"))
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": mixed})
+
+    [content] = exported.reading.files().values()
+    assert retention_column(content) == "200.00"
+
+
+def test_a_printed_isr_retention_is_read_and_never_recomputed() -> None:
+    reading = comprobante(
+        amount_total_net="5,000.00",
+        amount_total_tax="0.00",
+        amount_retention_isr="123.45",
+    )
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": FEES})
+
+    [content] = exported.reading.files().values()
+    assert retention_column(content) == "123.45"
+
+
+def test_without_a_retention_type_the_isr_retention_is_zero() -> None:
+    exported = export_606(REPORTER, {"a": comprobante()}, {}, {"a": GOODS})
+
+    [content] = exported.reading.files().values()
+    assert retention_column(content) == "0.00"
+
+
+def test_a_retention_type_with_no_stated_rate_fails_its_month() -> None:
+    other = replace(FEES, isr_retention_type=3)
+
+    exported = export_606(REPORTER, {"a": comprobante()}, {}, {"a": other})
+
+    assert exported.reading.files() == {}
+    [month] = exported.reading.failed
+    assert month.failures == (Failure("a", ("no ISR rate for retention type 3",)),)
+
+
+def test_a_retention_to_compute_without_a_payment_date_fails_its_month() -> None:
+    undated = replace(FEES, payment_date=None)
+
+    exported = export_606(REPORTER, {"a": comprobante()}, {}, {"a": undated})
+
+    [month] = exported.reading.failed
+    assert month.failures == (
+        Failure("a", ("ISR retention to compute without a payment date",)),
+    )
+
+
+def consumo(ncf: str, net: str, tax: str = "0.00", **changes: str) -> FieldValues:
+    return comprobante(
+        document_id=ncf, amount_total_net=net, amount_total_tax=tax, **changes
+    )
+
+
+def test_a_b02_at_or_under_250000_is_left_out_and_listed_with_its_reason() -> None:
+    """The amount is the comprobante's total: net, ITBIS, other taxes and
+    tip. 250,000.00 exactly does not exceed the threshold."""
+    at = consumo("B0200000001", "200,000.00", "45,000.00", amount_tip="5,000.00")
+
+    exported = export_606(REPORTER, {"a": at}, {}, {"a": GOODS})
+
+    assert exported.reading.files() == {}
+    assert exported.reading.failed == ()
+    assert exported.reading.left_out == (
+        LeftOut("a", "202603", "consumo of RD$250,000.00 or less"),
+    )
+
+
+def test_a_b02_over_250000_is_filed_like_any_other() -> None:
+    over = consumo("B0200000001", "250,000.01")
+
+    exported = export_606(REPORTER, {"a": over}, {}, {"a": GOODS})
+
+    assert list(exported.reading.files()) == ["DGII_F_606_130990026_202603.TXT"]
+    assert exported.reading.left_out == ()
+
+
+def test_an_e32_under_the_threshold_is_left_out() -> None:
+    exported = export_606(
+        REPORTER, {"a": consumo("E320000000019", "400.00", "72.00")}, {}, {"a": GOODS}
+    )
+
+    assert exported.reading.files() == {}
+    assert [each.filename for each in exported.reading.left_out] == ["a"]
+
+
+def test_each_side_decides_by_its_own_ncf_type() -> None:
+    """A B02 misread as a B01 is filed on the reading side and left out of the
+    control's: the misread type shows as a difference."""
+    read = consumo("B0100000417", "700.00")
+    label = consumo("B0200001288", "700.00")
+
+    exported = export_606(REPORTER, {"a": read}, {"a": label}, {"a": GOODS})
+
+    assert list(exported.reading.files()) == ["DGII_F_606_130990026_202603.TXT"]
+    assert exported.control.files() == {}
+    assert len(exported.control.left_out) == 1
+
+
+def test_a_left_out_consumo_does_not_hide_the_month_s_other_rows() -> None:
+    values = {"a": consumo("B0200000001", "700.00"), "b": comprobante()}
+    filing = {"a": GOODS, "b": GOODS}
+
+    exported = export_606(REPORTER, values, {}, filing)
+
+    [content] = exported.reading.files().values()
+    assert content.startswith("606|130990026|202603|1\r\n")
+
+
+def test_a_consumo_that_fails_for_another_reason_still_fails() -> None:
+    broken = consumo("B0200000001", "700.00", date_issue="")
+
+    exported = export_606(REPORTER, {"a": broken}, {}, {"a": GOODS})
+
+    assert exported.reading.left_out == ()
+    assert exported.reading.failed[0].period == NO_MONTH
+
+
+def test_a_printed_zero_isr_retention_is_read_and_not_computed() -> None:
+    reading = comprobante(
+        amount_total_net="5,000.00",
+        amount_total_tax="0.00",
+        amount_retention_isr="0.00",
+    )
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": FEES})
+
+    [content] = exported.reading.files().values()
+    assert retention_column(content) == "0.00"
+
+
+def test_a_goods_document_with_a_retention_type_needs_no_rate_or_payment_date() -> None:
+    """The services base is 0, so the retention is 0 whatever the type or date."""
+    goods = replace(GOODS, isr_retention_type=3, split="goods", payment_date=None)
+
+    exported = export_606(REPORTER, {"a": comprobante()}, {}, {"a": goods})
+
+    assert exported.reading.failed == ()
+    [content] = exported.reading.files().values()
+    assert retention_column(content) == "0.00"
+
+
+def test_a_small_consumo_is_left_out_before_any_payment_date_or_rate_check() -> None:
+    undated = replace(FEES, payment_date=None, isr_retention_type=3)
+    small = consumo("B0200000001", "700.00")
+
+    exported = export_606(REPORTER, {"a": small}, {}, {"a": undated})
+
+    assert exported.reading.failed == ()
+    assert exported.reading.left_out == (
+        LeftOut("a", "202603", "consumo of RD$250,000.00 or less"),
+    )
+
+
+def test_a_small_consumo_with_a_bad_ncf_still_fails() -> None:
+    small = consumo("B0200000001", "700.00", vendor_tax_id="123")
+
+    exported = export_606(REPORTER, {"a": small}, {}, {"a": GOODS})
+
+    assert exported.reading.left_out == ()
+    assert exported.reading.failed != ()

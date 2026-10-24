@@ -25,8 +25,9 @@ Columns, by source (#215 decision 3):
   4 NCF (`document_id`), 5 modified NCF, 6 date, the net amount the split
   divides, 11 ITBIS (`amount_total_tax`), 12 and 18 the ITBIS and ISR
   retentions where the comprobante prints them, 20 selective tax, 21 other
-  taxes, 22 legal tip. A retention not printed is 0 here; computing it from
-  the annotation at the rate in force is #230's.
+  taxes, 22 legal tip. A column 12 not printed is 0: the annotation has no
+  ITBIS retention to compute it from. A column 18 not printed is computed
+  when the annotation names an ISR retention type (`export.fiscal`).
 - **Computed**: 2 Tipo Id, 1 for a number python-stdnum 2.2 validates as an
   RNC and 2 for one it validates as a cedula, 8 and 9 the services and goods
   split of the net amount, 10 their total, 15 ITBIS por adelantar (11 less
@@ -38,6 +39,15 @@ Columns 16 and 19, ITBIS and ISR percibido, are disabled until a norm sets a
 perception regime (instructivo pp. 7 and 8) and are written 0.00. Amounts
 are written with a dot and two decimals, as the instructivo asks (p. 9,
 "RD$10.18"); it names no rounding, so a third decimal rounds half up.
+
+Rules left out
+--------------
+
+A B02 or E32 whose amount does not exceed RD$250,000 is not reported
+(`export.fiscal`): it is left out of the side's files and listed with its
+reason, and it never fails a month. Each side decides by its own NCF type and
+amount, so a misread type shows as a difference. A document that fails for
+another reason fails as usual.
 
 Failures
 --------
@@ -76,6 +86,11 @@ from pathlib import Path
 from stdnum.do import cedula, ncf, rnc
 
 from docmatch.export.filing import ALL, Filing, Share
+from docmatch.export.fiscal import (
+    CONSUMO_THRESHOLD,
+    is_consumo,
+    isr_retention_rate,
+)
 from docmatch.metrics.fields import FieldValues
 from docmatch.metrics.normalization import read_date, read_number, reads_day_first
 
@@ -90,6 +105,9 @@ NOT_REPORTED = "annotated not reported"
 
 NO_MONTH = "no month"
 """The row of documents whose date is missing or unreadable."""
+
+LEFT_OUT_CONSUMO = f"consumo of RD${CONSUMO_THRESHOLD:,.2f} or less"
+"""Why a B02 or E32 is in neither file (#230)."""
 
 CENT = Decimal("0.01")
 ZERO = Decimal("0")
@@ -116,6 +134,15 @@ class Failure:
 
 
 @dataclass(frozen=True)
+class LeftOut:
+    """A document the 606 does not carry by rule, and why."""
+
+    filename: str
+    period: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class Month:
     """One period of one side: its lines, or the documents that failed it."""
 
@@ -136,6 +163,9 @@ class Side:
     reporter: str
     months: tuple[Month, ...]
     """In order of period, the no month row last."""
+    left_out: tuple[LeftOut, ...] = ()
+    """Documents a rule leaves out of this side's files, in filing order. A
+    month holding only such documents has no file and is not a month."""
 
     @property
     def failed(self) -> tuple[Month, ...]:
@@ -201,15 +231,20 @@ def _side(
 ) -> Side:
     lines: dict[str, list[str]] = {}
     failures: dict[str, list[Failure]] = {}
+    left_out: list[LeftOut] = []
     for name in documents:
-        period, line, reasons = _line(values.get(name), filing[name])
+        outcome = _line(values.get(name), filing[name])
+        period = outcome.period
+        if outcome.left_out_reason is not None:
+            left_out.append(LeftOut(name, period, outcome.left_out_reason))
+            continue
         lines.setdefault(period, [])
         failures.setdefault(period, [])
-        if reasons:
-            failures[period].append(Failure(name, reasons))
+        if outcome.reasons:
+            failures[period].append(Failure(name, outcome.reasons))
         else:
-            assert line is not None
-            lines[period].append(line)
+            assert outcome.line is not None
+            lines[period].append(outcome.line)
     periods = sorted(lines, key=lambda period: (period == NO_MONTH, period))
     return Side(
         reporter=reporter,
@@ -217,15 +252,32 @@ def _side(
             Month(period, tuple(lines[period]), tuple(failures[period]))
             for period in periods
         ),
+        left_out=tuple(left_out),
     )
 
 
-def _line(
-    values: FieldValues | None, filing: Filing
-) -> tuple[str, str | None, tuple[str, ...]]:
-    """A document's period, and its line or the reasons it has none."""
+@dataclass(frozen=True)
+class _Outcome:
+    """What a document becomes: a line, the reasons it has none, or the
+    reason a rule leaves it out."""
+
+    period: str
+    line: str | None = None
+    reasons: tuple[str, ...] = ()
+    left_out_reason: str | None = None
+
+
+def _line(values: FieldValues | None, filing: Filing) -> _Outcome:
+    """A document's period and its line, its failures, or why it is left out.
+
+    The checks that make the reading itself wrong run first and fail the
+    month even for a small consumo: no reading, the NCF, the RNC or cedula,
+    the date, the amounts and their bounds. Then the consumo rule leaves a
+    small B02 or E32 out. Only after it comes the retention, which needs the
+    payment date and a rate: a document the 606 does not carry never fails
+    for a filing detail it does not use."""
     if values is None:
-        return NO_MONTH, None, ("no reading",)
+        return _Outcome(NO_MONTH, reasons=("no reading",))
     reasons: list[str] = []
     number = _ncf(values, "document_id", "NCF", reasons)
     identifier = _value(values, "vendor_tax_id")
@@ -262,13 +314,16 @@ def _line(
             amounts[fieldtype] = amount
     reasons.extend(_beyond_bounds(amounts, filing))
     period = NO_MONTH if day is None else f"{day:%Y%m}"
+    if not reasons and number is not None and _is_small_consumo(number, amounts):
+        return _Outcome(period, left_out_reason=LEFT_OUT_CONSUMO)
+    _retain_isr(values, amounts, filing, reasons)
     if reasons:
-        return period, None, tuple(reasons)
+        return _Outcome(period, reasons=tuple(reasons))
     assert number is not None and identifier is not None and tipo_id is not None
     assert day is not None
-    return (
+    return _Outcome(
         period,
-        _fields(
+        line=_fields(
             filing,
             identifier=identifier,
             tipo_id=tipo_id,
@@ -277,8 +332,53 @@ def _line(
             day=day,
             amounts=amounts,
         ),
-        (),
     )
+
+
+def _is_small_consumo(number: str, amounts: Mapping[str, Decimal]) -> bool:
+    """Whether a comprobante is a B02 or E32 whose amount, the net with its
+    taxes and tip, does not exceed the threshold."""
+    total = sum(
+        (
+            amounts[each]
+            for each in (
+                "amount_total_net",
+                "amount_total_tax",
+                "amount_tax_selective",
+                "amount_tax_other",
+                "amount_tip",
+            )
+        ),
+        ZERO,
+    )
+    return is_consumo(number) and total <= CONSUMO_THRESHOLD
+
+
+def _retain_isr(
+    values: FieldValues,
+    amounts: dict[str, Decimal],
+    filing: Filing,
+    reasons: list[str],
+) -> None:
+    """Fill column 18 when the comprobante does not print it: the services
+    amount at the rate in force on the payment date for the annotation's
+    retention type. Nothing is computed without a type; a retention the
+    comprobante prints is read as it is."""
+    net = amounts.get("amount_total_net")
+    type_ = filing.isr_retention_type
+    if type_ is None or net is None or _value(values, "amount_retention_isr"):
+        return
+    if _services(filing, net) == ZERO:
+        amounts["amount_retention_isr"] = ZERO
+        return
+    if filing.payment_date is None:
+        reasons.append("ISR retention to compute without a payment date")
+        return
+    rate = isr_retention_rate(type_, filing.payment_date)
+    if rate is None:
+        reasons.append(f"no ISR rate for retention type {type_}")
+        return
+    amounts["amount_retention_isr"] = _services(filing, net) * rate
 
 
 def _ncf(
@@ -334,14 +434,7 @@ def _fields(
     assert filing.purchase_type is not None and filing.payment_method is not None
     net = amounts["amount_total_net"]
     itbis = amounts["amount_total_tax"]
-    services = (
-        net
-        if filing.split == "services"
-        else ZERO
-        if filing.split == "goods"
-        else filing.split
-    )
-    assert services is not None
+    services = _services(filing, net)
     goods = net - services
     to_cost = _share(filing.itbis_to_cost, itbis)
     fields = (
@@ -370,6 +463,19 @@ def _fields(
         str(filing.payment_method),
     )
     return "|".join(fields)
+
+
+def _services(filing: Filing, net: Decimal) -> Decimal:
+    """The part of the net amount that is services, 606 column 8."""
+    services = (
+        net
+        if filing.split == "services"
+        else ZERO
+        if filing.split == "goods"
+        else filing.split
+    )
+    assert services is not None
+    return services
 
 
 def _share(share: Share, itbis: Decimal) -> Decimal:
@@ -411,6 +517,10 @@ def write_export(exported: Export, out: Path, manifest: Path, run: Path) -> None
     }
     for directory, _, side in exported.sides():
         (out / directory).mkdir(parents=True)
+        listed[f"{directory}_left_out"] = [
+            {"filename": each.filename, "period": each.period, "reason": each.reason}
+            for each in side.left_out
+        ]
         for name, content in side.files().items():
             (out / directory / name).write_bytes(content.encode("ascii"))
         listed[directory] = [
@@ -435,7 +545,7 @@ def render_export(exported: Export, out: Path, manifest: Path, run: Path) -> str
     filename from a comprobante, so the owner's report can be shown."""
     documents = sum(
         len(month.lines) + len(month.failures) for month in exported.reading.months
-    )
+    ) + len(exported.reading.left_out)
     lines = [
         "606 export",
         f"  manifest      {manifest}",
@@ -453,8 +563,19 @@ def render_export(exported: Export, out: Path, manifest: Path, run: Path) -> str
         width = max(len(month.period) for month in side.months) if side.months else 0
         for month in side.months:
             lines.append(f"  {month.period:<{width}}  {_month(month)}")
+        lines.extend(_left_out(side))
         lines.append("")
     return "\n".join(lines)
+
+
+def _left_out(side: Side) -> list[str]:
+    """One line per period and reason of the documents a rule left out."""
+    tally = Counter((each.period, each.reason) for each in side.left_out)
+    return [
+        f"  left out  {period}  {count} {'document' if count == 1 else 'documents'}, "
+        f"{reason}"
+        for (period, reason), count in sorted(tally.items())
+    ]
 
 
 def _month(month: Month) -> str:
