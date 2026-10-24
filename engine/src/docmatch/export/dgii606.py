@@ -346,7 +346,13 @@ def _line(reporter: str, values: FieldValues | None, filing: Filing) -> _Outcome
         )
         if tipo_id is None:
             reasons.append("RNC or cedula invalid")
-    modified = _ncf(values, "document_id_modified", "modified NCF", reasons)
+    read_modified = _value(values, "document_id_modified") is not None
+    keeps_modified = number is not None and is_note(number)
+    modified = (
+        _ncf(values, "document_id_modified", "modified NCF", reasons)
+        if keeps_modified
+        else None
+    )
     date_text = _value(values, "date_issue")
     day = None if date_text is None else read_date(date_text, day_first=DAY_FIRST)
     if date_text is None:
@@ -372,7 +378,6 @@ def _line(reporter: str, values: FieldValues | None, filing: Filing) -> _Outcome
         return _Outcome(period, reasons=tuple(reasons))
     assert number is not None and identifier is not None and tipo_id is not None
     assert day is not None
-    keeps_modified = is_note(number)
     return _Outcome(
         period,
         line=_fields(
@@ -385,7 +390,7 @@ def _line(reporter: str, values: FieldValues | None, filing: Filing) -> _Outcome
             amounts=amounts,
         ),
         rate_source=rate_source,
-        modified_dropped=modified is not None and not keeps_modified,
+        modified_dropped=read_modified and not keeps_modified,
     )
 
 
@@ -447,7 +452,8 @@ def _ncf(
     values: FieldValues, fieldtype: str, name: str, reasons: list[str]
 ) -> str | None:
     """The fieldtype's NCF or e-NCF compacted, or None with the reason why
-    not; a modified NCF is optional, so only its absence is not a reason."""
+    not; a modified NCF is optional, so only its absence is not a reason. Callers check a modified NCF only on a
+    note (#251)."""
     text = _value(values, fieldtype)
     if text is None:
         if fieldtype == "document_id":

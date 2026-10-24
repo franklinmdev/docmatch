@@ -274,7 +274,10 @@ def test_an_unreadable_amount_fails_rather_than_being_written_as_zero() -> None:
         ({"document_id": "B01000004170"}, "NCF invalid"),
         ({"document_id": "B01|00000417"}, "NCF invalid"),
         ({"document_id": "B01000004ñ7"}, "NCF invalid"),
-        ({"document_id_modified": "B0100000|17"}, "modified NCF invalid"),
+        (
+            {"document_id": "B0400000009", "document_id_modified": "B0100000|17"},
+            "modified NCF invalid",
+        ),
     ],
 )
 def test_an_identifier_stdnum_refuses_fails_its_month(
@@ -741,3 +744,18 @@ def test_a_document_with_no_modified_ncf_lists_no_drop() -> None:
     exported = export_606(REPORTER, {"a": comprobante()}, {}, {"a": GOODS})
 
     assert exported.reading.dropped_modified == ()
+
+
+def test_an_invalid_modified_ncf_on_a_non_note_is_dropped_and_the_month_passes() -> (
+    None
+):
+    """A stray read value never fails the file (#251): only a note's modified
+    NCF is checked."""
+    reading = comprobante(document_id_modified="B0100000|17")
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": GOODS})
+
+    assert exported.reading.failed == ()
+    [content] = exported.reading.files().values()
+    assert content.split("\r\n")[1].split("|")[3:5] == ["B0100000417", ""]
+    assert exported.reading.dropped_modified == (DroppedModified("a", "202603"),)
