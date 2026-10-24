@@ -548,3 +548,16 @@ def test_a_consumo_that_fails_for_another_reason_still_fails() -> None:
 
     assert exported.reading.left_out == ()
     assert exported.reading.failed[0].period == NO_MONTH
+
+
+def test_a_printed_zero_isr_retention_is_read_and_not_computed() -> None:
+    reading = comprobante(
+        amount_total_net="5,000.00",
+        amount_total_tax="0.00",
+        amount_retention_isr="0.00",
+    )
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": FEES})
+
+    [content] = exported.reading.files().values()
+    assert retention_column(content) == "0.00"
