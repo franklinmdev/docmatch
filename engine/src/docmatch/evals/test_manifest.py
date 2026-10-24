@@ -430,3 +430,10 @@ def test_a_reporter_that_is_neither_an_rnc_nor_a_cedula_is_refused() -> None:
     """A typo in the reporter would put every 606 under someone else's number."""
     with pytest.raises(ValidationError, match="130990027"):
         Manifest.model_validate({**regional().model_dump(), "reporter": "130990027"})
+
+
+def test_a_per_type_filing_annotation_needs_a_pinned_filing_csv() -> None:
+    with pytest.raises(ValueError, match="filing.csv"):
+        regional(filing_per="ecf_type").model_validate(
+            regional(filing_per="ecf_type").model_dump()
+        )

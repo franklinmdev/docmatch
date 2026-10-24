@@ -160,6 +160,8 @@ class Manifest(BaseModel):
             )
         if self.coverage is not None:
             _check_coverage(self.coverage)
+        if self.filing_per is not None and "filing.csv" not in self.files:
+            raise ValueError("filing_per is declared but no filing.csv is pinned")
         if self.reporter is not None and not (
             rnc.is_valid(self.reporter) or cedula.is_valid(self.reporter)
         ):

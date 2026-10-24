@@ -3,8 +3,9 @@
 DGII publishes the XSD of every e-CF type and no sample XML (#206), and no
 real e-CF may enter a commit (`CLAUDE.md` rule 6), so the e-CF set CI scores
 is four e-CFs invented here, one of each type the parser reads: an E31
-crédito fiscal carrying the legal tip, a selective and another additional tax; an E32 consumo to nobody, whose `Comprador` is empty
-and which prints no exempt amount, the missing optional elements; an E41 compras
+crédito fiscal carrying the legal tip, a selective and another additional tax;
+an E32 consumo to nobody, whose `Comprador` is empty and which prints no
+exempt amount, the missing optional elements; an E41 compras
 whose retentions are printed on its lines only; and an E43 gastos menores,
 which names no buyer and carries a modified e-NCF, since DGII's pre-validator
 refuses a modified NCF on any row of these types (#231), and an E43 the
