@@ -40,10 +40,10 @@ fieldtype:
   written inside an NCF fails.
 
 `check_dgii` and `search_dgii` are never called. A rule is admitted only when
-every label of the set it checks passes it (`admit`), so a stdnum edge case
-shows on the owner's own comprobantes before it moves a number; the regional
-`eval` prints each admission. A set with no region runs no regional rule, so
-its gate pass rates never move.
+the set it checks holds a label of its fieldtype and every one passes it
+(`admit`), so a stdnum edge case shows on the owner's own comprobantes before it
+moves a number; the regional `eval` prints each admission. A set with no region
+runs no regional rule, so its gate pass rates never move.
 
 Listed values
 -------------
@@ -155,7 +155,7 @@ class RuleAdmission:
 
     @property
     def admitted(self) -> bool:
-        return self.broken == 0
+        return self.labeled > 0 and self.broken == 0
 
 
 def _rnc_or_cedula(number: str) -> bool:
@@ -189,8 +189,8 @@ def admit(
     A rule on a fieldtype the labels do not cover is left out: nobody labeled
     it, so nothing says the rule holds.
 
-    A rule no label carries a value for breaks nothing and is admitted, with
-    its zero count printed beside it.
+    A rule no label carries a value for is not admitted, with its zero count
+    printed beside it: nothing says it holds.
     """
     documents = list(labeled)
     admissions = []

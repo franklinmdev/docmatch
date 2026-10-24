@@ -37,7 +37,7 @@ How well confidence predicts correctness: of the values a backend read at a give
 _Avoid_: accuracy (on its own), reliability
 
 **Gate**:
-The deterministic rules a reading must not break: its totals agree and its dates are in order, plus the rules of its region. A rule belongs to the gate only when the labels of the set it checks pass it. A reading passes when at least one rule could be checked and none failed, fails when any rule failed, and is not checked when no rule could be. A reading that fails is kept and scored as is.
+The deterministic rules a reading must not break: its totals agree and its dates are in order, plus the rules of its region. A rule belongs to the gate only when the set it checks holds at least one label of its fieldtype and the labels pass it. A reading passes when at least one rule could be checked and none failed, fails when any rule failed, and is not checked when no rule could be. A reading that fails is kept and scored as is.
 _Avoid_: validation (on its own), filter, guardrail
 
 **Region**:

@@ -296,7 +296,18 @@ def test_a_rule_is_admitted_when_no_label_breaks_it() -> None:
 
     assert admission["vendor RNC"].admitted
     assert (admission["vendor RNC"].labeled, admission["vendor RNC"].broken) == (1, 0)
-    assert admission["customer RNC"].labeled == 0
+
+
+def test_a_rule_with_no_label_of_its_fieldtype_is_not_admitted() -> None:
+    labels = [reading(vendor_tax_id=RNC), reading()]
+
+    admission = {each.rule.name: each for each in admit("do", labels)}
+
+    assert not admission["customer RNC"].admitted
+    assert (admission["customer RNC"].labeled, admission["customer RNC"].broken) == (
+        0,
+        0,
+    )
 
 
 def test_a_rule_a_label_breaks_is_not_admitted() -> None:
