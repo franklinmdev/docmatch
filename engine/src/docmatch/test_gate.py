@@ -289,23 +289,34 @@ def test_one_verdict_covers_neutral_and_regional_rules() -> None:
     assert result.verdict == "failed"
 
 
-def test_a_rule_is_admitted_when_no_label_breaks_it() -> None:
+def test_a_rule_is_admitted_when_a_label_exists_and_none_breaks_it() -> None:
     labels = [reading(vendor_tax_id=RNC, document_id="B0100000417"), reading()]
 
     admission = {each.rule.name: each for each in admit("do", labels)}
 
     assert admission["vendor RNC"].admitted
     assert (admission["vendor RNC"].labeled, admission["vendor RNC"].broken) == (1, 0)
-    assert admission["customer RNC"].labeled == 0
+
+
+def test_a_rule_with_no_label_of_its_fieldtype_is_not_admitted() -> None:
+    labels = [reading(vendor_tax_id=RNC), reading()]
+
+    admission = {each.rule.name: each for each in admit("do", labels)}
+
+    assert not admission["customer RNC"].admitted
+    assert (admission["customer RNC"].labeled, admission["customer RNC"].broken) == (
+        0,
+        0,
+    )
 
 
 def test_a_rule_a_label_breaks_is_not_admitted() -> None:
-    labels = [reading(vendor_tax_id=RNC), reading(vendor_tax_id="130990019")]
+    labels = [reading(vendor_tax_id="130990019")]
 
     admission = {each.rule.name: each for each in admit("do", labels)}
 
     assert not admission["vendor RNC"].admitted
-    assert (admission["vendor RNC"].labeled, admission["vendor RNC"].broken) == (2, 1)
+    assert (admission["vendor RNC"].labeled, admission["vendor RNC"].broken) == (1, 1)
 
 
 def test_a_neutral_region_admits_nothing() -> None:

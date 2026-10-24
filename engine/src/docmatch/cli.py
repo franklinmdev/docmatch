@@ -3105,13 +3105,14 @@ def _admission(admission: tuple[RuleAdmission, ...]) -> list[str]:
         return []
     return [
         "",
-        "Regional rules, admitted when no label breaks them",
+        "Regional rules, admitted when a label exists and none breaks them",
         *_rows(
             *(
                 (
                     each.rule.name,
                     f"{'admitted' if each.admitted else 'not admitted'}, "
-                    f"{each.labeled} labeled, {each.broken} broken",
+                    f"{each.labeled} labeled"
+                    + (f", {each.broken} broken" if each.labeled else ""),
                 )
                 for each in admission
             )
