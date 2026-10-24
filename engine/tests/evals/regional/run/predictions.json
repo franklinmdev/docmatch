@@ -76,5 +76,77 @@
       "amount_retention_itbis": null,
       "amount_retention_isr": null
     }
+  },
+  "do0005.png": {
+    "fields": {
+      "vendor_name": "Colmado Dona Rosa",
+      "vendor_tax_id": "130990052",
+      "customer_tax_id": null,
+      "document_id": "B0200001301",
+      "date_issue": "05/03/2026",
+      "amount_total_net": "250.00",
+      "amount_total_tax": "45.00",
+      "amount_total_gross": "295.00",
+      "amount_tip": null,
+      "amount_tax_selective": null,
+      "amount_tax_other": null,
+      "document_id_modified": null,
+      "amount_retention_itbis": null,
+      "amount_retention_isr": null
+    }
+  },
+  "do0006.png": {
+    "fields": {
+      "vendor_name": "Cafeteria El Faro",
+      "vendor_tax_id": "130990069",
+      "customer_tax_id": null,
+      "document_id": "E310000000019",
+      "date_issue": "10/06/2026",
+      "amount_total_net": "400.00",
+      "amount_total_tax": "72.00",
+      "amount_total_gross": "472.00",
+      "amount_tip": null,
+      "amount_tax_selective": null,
+      "amount_tax_other": null,
+      "document_id_modified": null,
+      "amount_retention_itbis": null,
+      "amount_retention_isr": null
+    }
+  },
+  "do0007.png": {
+    "fields": {
+      "vendor_name": "Luis Mena Contador",
+      "vendor_tax_id": "00099000028",
+      "customer_tax_id": "130990026",
+      "document_id": "B0100000500",
+      "date_issue": "12/04/2026",
+      "amount_total_net": "5,000.00",
+      "amount_total_tax": "0.00",
+      "amount_total_gross": "5,000.00",
+      "amount_tip": null,
+      "amount_tax_selective": null,
+      "amount_tax_other": null,
+      "document_id_modified": null,
+      "amount_retention_itbis": null,
+      "amount_retention_isr": null
+    }
+  },
+  "do0008.png": {
+    "fields": {
+      "vendor_name": "Marta Diaz Inmuebles",
+      "vendor_tax_id": "00099000036",
+      "customer_tax_id": "130990026",
+      "document_id": "B0100000501",
+      "date_issue": "25/06/2026",
+      "amount_total_net": "6,000.00",
+      "amount_total_tax": "0.00",
+      "amount_total_gross": "6,000.00",
+      "amount_tip": null,
+      "amount_tax_selective": null,
+      "amount_tax_other": null,
+      "document_id_modified": null,
+      "amount_retention_itbis": null,
+      "amount_retention_isr": null
+    }
   }
 }

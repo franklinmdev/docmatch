@@ -18,7 +18,9 @@ SET = REGIONAL / "do" / "manifest.json"
 RUN = REGIONAL / "run"
 
 MARCH = "DGII_F_606_130990026_202603.TXT"
+APRIL = "DGII_F_606_130990026_202604.TXT"
 MAY = "DGII_F_606_130990026_202605.TXT"
+JUNE = "DGII_F_606_130990026_202606.TXT"
 
 MARCH_CONTENT = (
     "606|130990026|202603|2\r\n"
@@ -34,27 +36,67 @@ MAY_LABELS = (
     "130990042|1|02|E310000000052||20260521|20260530|8000.00|0.00|8000.00|"
     "1000.00|750.00|1000.00|0.00|1000.00|0.00|02|800.00|0.00|0.00|0.00|0.00|2"
 )
+APRIL_CONTENT = (
+    "606|130990026|202604|1\r\n"
+    "00099000028|2|02|B0100000500||20260412|20260620|5000.00|0.00|5000.00|0.00|"
+    "0.00|0.00|0.00|0.00|0.00|02|500.00|0.00|0.00|0.00|0.00|2"
+)
+"""Fees paid 2026-06-20, retention not printed: 10 percent of the services."""
+
+RENT_LINE = (
+    "00099000036|2|03|B0100000501||20260625|20260715|6000.00|0.00|6000.00|0.00|"
+    "0.00|0.00|0.00|0.00|0.00|01|900.00|0.00|0.00|0.00|0.00|2"
+)
+"""Rent dated in June and paid 2026-07-15: 15 percent, the payment date's."""
+
+JUNE_LABELS = f"606|130990026|202606|1\r\n{RENT_LINE}"
+JUNE_READING = (
+    "606|130990026|202606|2\r\n"
+    "130990069|1|09|E310000000019||20260610||0.00|400.00|400.00|72.00|0.00|0.00|"
+    "0.00|72.00|0.00||0.00|0.00|0.00|0.00|0.00|1\r\n" + RENT_LINE
+)
+"""The reading misread the E32 as an E31, which the control leaves out."""
+
 EXPECTED_OUTPUT = "\n".join(
     [
         "606 export",
         "  manifest      {manifest}",
         "  run           {run}",
         "  out           {out}",
-        "  documents     4",
+        "  documents     8",
         "  not reported  1",
         "",
         # The reading left the E31's ITBIS out, which leaves its printed
         # ITBIS retention above an ITBIS of zero: its month is not filed.
-        "Reading, 1 of 2 monthly files written",
+        "Reading, 3 of 4 monthly files written",
         "  202603  2 rows",
+        "  202604  1 row",
         "  202605  failed, 1 document: ITBIS retention above the ITBIS",
+        "  202606  2 rows",
+        "  left out  202603  1 document, consumo of RD$250,000.00 or less",
         "",
-        "Labels control, 2 of 2 monthly files written",
+        "Labels control, 4 of 4 monthly files written",
         "  202603  2 rows",
+        "  202604  1 row",
         "  202605  1 row",
+        "  202606  1 row",
+        "  left out  202603  1 document, consumo of RD$250,000.00 or less",
+        "  left out  202606  1 document, consumo of RD$250,000.00 or less",
         "",
     ]
 )
+
+
+LEFT_OUT_B02 = {
+    "filename": "do0005.png",
+    "period": "202603",
+    "reason": "consumo of RD$250,000.00 or less",
+}
+LEFT_OUT_E32 = {
+    "filename": "do0006.png",
+    "period": "202606",
+    "reason": "consumo of RD$250,000.00 or less",
+}
 
 
 def exporting(out: Path, manifest: Path = SET, run: Path = RUN) -> list[str]:
@@ -86,8 +128,12 @@ def test_export_writes_one_606_per_month_for_the_reading_and_the_labels(
         for path in out.rglob("*.TXT")
     } == {
         f"reading/{MARCH}": MARCH_CONTENT,
+        f"reading/{APRIL}": APRIL_CONTENT,
+        f"reading/{JUNE}": JUNE_READING,
         f"control/{MARCH}": MARCH_CONTENT,
+        f"control/{APRIL}": APRIL_CONTENT,
         f"control/{MAY}": MAY_LABELS,
+        f"control/{JUNE}": JUNE_LABELS,
     }
 
 
@@ -108,6 +154,7 @@ def test_export_lists_every_month_and_document_in_export_json(
         ],
         "reading": [
             {"period": "202603", "file": f"reading/{MARCH}", "rows": 2, "failures": []},
+            {"period": "202604", "file": f"reading/{APRIL}", "rows": 1, "failures": []},
             {
                 "period": "202605",
                 "file": None,
@@ -119,11 +166,16 @@ def test_export_lists_every_month_and_document_in_export_json(
                     }
                 ],
             },
+            {"period": "202606", "file": f"reading/{JUNE}", "rows": 2, "failures": []},
         ],
         "control": [
             {"period": "202603", "file": f"control/{MARCH}", "rows": 2, "failures": []},
+            {"period": "202604", "file": f"control/{APRIL}", "rows": 1, "failures": []},
             {"period": "202605", "file": f"control/{MAY}", "rows": 1, "failures": []},
+            {"period": "202606", "file": f"control/{JUNE}", "rows": 1, "failures": []},
         ],
+        "reading_left_out": [LEFT_OUT_B02],
+        "control_left_out": [LEFT_OUT_B02, LEFT_OUT_E32],
     }
 
 
@@ -157,10 +209,14 @@ def test_a_document_never_read_fails_the_no_month_row_of_the_reading_only(
     assert main(exporting(out, run=run)) == 0
 
     output = capsys.readouterr().out
-    assert "Reading, 1 of 2 monthly files written" in output
+    assert "Reading, 3 of 4 monthly files written" in output
     assert "  no month  failed, 1 document: no reading" in output
-    assert "Labels control, 2 of 2 monthly files written" in output
-    assert sorted(path.name for path in (out / "reading").iterdir()) == [MARCH]
+    assert "Labels control, 4 of 4 monthly files written" in output
+    assert sorted(path.name for path in (out / "reading").iterdir()) == [
+        MARCH,
+        APRIL,
+        JUNE,
+    ]
 
 
 def test_a_month_with_a_document_missing_its_ncf_writes_no_file(

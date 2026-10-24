@@ -1192,8 +1192,15 @@ A document with no reading, or one missing its NCF, RNC or date, fails its
 month, which gets no file; one with no readable date, or no reading, fails a
 `no month` row. So does an RNC, cedula or NCF python-stdnum does not validate,
 a negative amount, and a split, retention or ITBIS share beyond what was read:
-nothing is written negative. A retention not printed is written as zero until
-#230 computes it at the rate in force. The report prints counts and reasons
+nothing is written negative. An ISR retention the comprobante does not print is
+computed over the services amount when `filing.csv` names a retention type: at
+the rate in force on the payment date, which DGII says picks the percentage
+(types 1 and 2, 10 percent, 15 percent from 2026-07-01, sources in
+`export/fiscal.py`); a type with no rate DGII states, or no payment date, fails
+the month. An ITBIS retention not printed is zero. A B02 or E32 of RD$250,000 or
+less is left out of the file, listed with its reason and never a failure; the
+threshold is a DGII help answer, and the pre-validator itself rejects a consumo
+at any amount. The report prints counts and reasons
 only, never a number or a name from a comprobante. CI's `Regional` step
 exports the made-up set's saved run.
 
@@ -2039,8 +2046,15 @@ A document with no reading, or one missing its NCF, RNC or date, fails its
 month, which gets no file; one with no readable date, or no reading, fails a
 `no month` row. So does an RNC, cedula or NCF python-stdnum does not validate,
 a negative amount, and a split, retention or ITBIS share beyond what was read:
-nothing is written negative. A retention not printed is written as zero until
-#230 computes it at the rate in force. The report prints counts and reasons
+nothing is written negative. An ISR retention the comprobante does not print is
+computed over the services amount when `filing.csv` names a retention type: at
+the rate in force on the payment date, which DGII says picks the percentage
+(types 1 and 2, 10 percent, 15 percent from 2026-07-01, sources in
+`export/fiscal.py`); a type with no rate DGII states, or no payment date, fails
+the month. An ITBIS retention not printed is zero. A B02 or E32 of RD$250,000 or
+less is left out of the file, listed with its reason and never a failure; the
+threshold is a DGII help answer, and the pre-validator itself rejects a consumo
+at any amount. The report prints counts and reasons
 only, never a number or a name from a comprobante. CI's `Regional` step
 exports the made-up set's saved run.
 
