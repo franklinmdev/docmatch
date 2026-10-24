@@ -506,6 +506,35 @@ def test_a_retention_with_a_payment_date_lists_the_payment_date_as_the_pick() ->
     assert exported.reading.rate_dates == (RateDate("a", "payment date"),)
 
 
+def test_with_neither_date_the_month_fails_on_the_date_and_lists_no_rate_source() -> (
+    None
+):
+    undated = replace(FEES, payment_date=None)
+    reading = comprobante(
+        date_issue="", amount_total_net="5,000.00", amount_total_tax="0.00"
+    )
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": undated})
+
+    [month] = exported.reading.failed
+    assert month.period == NO_MONTH
+    assert month.failures == (Failure("a", ("no date",)),)
+    assert exported.reading.rate_dates == ()
+
+
+def test_an_unreadable_comprobante_date_still_uses_the_payment_dates_rate() -> None:
+    """The month fails on the date alone: the payment date's rate is found, so
+    no retention reason joins it."""
+    reading = comprobante(
+        date_issue="not a date", amount_total_net="5,000.00", amount_total_tax="0.00"
+    )
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": FEES})
+
+    [month] = exported.reading.failed
+    assert month.failures == (Failure("a", ("date unreadable",)),)
+
+
 def test_a_printed_retention_or_a_goods_document_lists_no_rate_date() -> None:
     printed = comprobante(
         amount_total_net="5,000.00",

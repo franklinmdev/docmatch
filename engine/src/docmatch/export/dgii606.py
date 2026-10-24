@@ -82,6 +82,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
+from typing import Literal
 
 from stdnum.do import cedula, ncf, rnc
 
@@ -142,6 +143,10 @@ class LeftOut:
     reason: str
 
 
+RateSource = Literal["payment date", "comprobante date"]
+"""Which date picked a computed retention's rate."""
+
+
 @dataclass(frozen=True)
 class RateDate:
     """Which date picked the ISR retention rate of a document whose column 18
@@ -149,7 +154,7 @@ class RateDate:
     annotation has no payment date."""
 
     filename: str
-    source: str
+    source: RateSource
 
 
 @dataclass(frozen=True)
@@ -212,8 +217,8 @@ class Export:
         )
 
 
-PAYMENT_DATE = "payment date"
-COMPROBANTE_DATE = "comprobante date"
+PAYMENT_DATE: RateSource = "payment date"
+COMPROBANTE_DATE: RateSource = "comprobante date"
 
 
 def filename(reporter: str, period: str) -> str:
@@ -256,8 +261,8 @@ def _side(
         if outcome.left_out_reason is not None:
             left_out.append(LeftOut(name, period, outcome.left_out_reason))
             continue
-        if outcome.rate_date is not None:
-            rate_dates.append(RateDate(name, outcome.rate_date))
+        if outcome.rate_source is not None:
+            rate_dates.append(RateDate(name, outcome.rate_source))
         lines.setdefault(period, [])
         failures.setdefault(period, [])
         if outcome.reasons:
@@ -286,7 +291,7 @@ class _Outcome:
     line: str | None = None
     reasons: tuple[str, ...] = ()
     left_out_reason: str | None = None
-    rate_date: str | None = None
+    rate_source: RateSource | None = None
 
 
 def _line(values: FieldValues | None, filing: Filing) -> _Outcome:
@@ -296,8 +301,8 @@ def _line(values: FieldValues | None, filing: Filing) -> _Outcome:
     month even for a small consumo: no reading, the NCF, the RNC or cedula,
     the date, the amounts and their bounds. Then the consumo rule leaves a
     small B02 or E32 out. Only after it comes the retention, which needs a
-    rate: a document the 606 does not carry never fails
-    for a filing detail it does not use."""
+    rate: a document the 606 does not carry never fails for a filing detail
+    it does not use."""
     if values is None:
         return _Outcome(NO_MONTH, reasons=("no reading",))
     reasons: list[str] = []
@@ -338,7 +343,7 @@ def _line(values: FieldValues | None, filing: Filing) -> _Outcome:
     period = NO_MONTH if day is None else f"{day:%Y%m}"
     if not reasons and number is not None and _is_small_consumo(number, amounts):
         return _Outcome(period, left_out_reason=LEFT_OUT_CONSUMO)
-    rate_date = _retain_isr(values, amounts, filing, day, reasons)
+    rate_source = _retain_isr(values, amounts, filing, day, reasons)
     if reasons:
         return _Outcome(period, reasons=tuple(reasons))
     assert number is not None and identifier is not None and tipo_id is not None
@@ -354,7 +359,7 @@ def _line(values: FieldValues | None, filing: Filing) -> _Outcome:
             day=day,
             amounts=amounts,
         ),
-        rate_date=rate_date,
+        rate_source=rate_source,
     )
 
 
@@ -383,7 +388,7 @@ def _retain_isr(
     filing: Filing,
     day: date | None,
     reasons: list[str],
-) -> str | None:
+) -> RateSource | None:
     """Fill column 18 when the comprobante does not print it: the services
     amount at the rate in force on the payment date, or on the comprobante
     date when the annotation has none, for the annotation's retention type.
@@ -398,7 +403,7 @@ def _retain_isr(
         amounts["amount_retention_isr"] = ZERO
         return None
     picked: date | None = filing.payment_date
-    source = PAYMENT_DATE
+    source: RateSource = PAYMENT_DATE
     if picked is None:
         picked, source = day, COMPROBANTE_DATE
     if picked is None:
