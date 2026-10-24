@@ -186,11 +186,10 @@ def admit(
     """Each of a region's rules against a set's labels, one entry per rule, counted
     in documents.
 
-    A rule on a fieldtype the labels do not cover is left out: nobody labeled
-    it, so nothing says the rule holds.
+    A fieldtype outside `coverage` is left out of the report.
 
-    A rule no label carries a value for is not admitted, with its zero count
-    printed beside it: nothing says it holds.
+    A covered fieldtype with no label is not admitted and prints
+    `not admitted, 0 labeled`.
     """
     documents = list(labeled)
     admissions = []

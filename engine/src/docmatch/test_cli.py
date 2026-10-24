@@ -16,7 +16,13 @@ from pathlib import Path
 import pytest
 
 from docmatch import cli, regression
-from docmatch.cli import main, render_extract, render_pipeline, render_resolve
+from docmatch.cli import (
+    _admission,
+    main,
+    render_extract,
+    render_pipeline,
+    render_resolve,
+)
 from docmatch.conftest import TEST_SCHEMA, git
 from docmatch.docile.dataset import DocileDataset
 from docmatch.evals import manifest, public
@@ -32,6 +38,7 @@ from docmatch.extraction.run import DocumentRun, Run
 from docmatch.extraction.schema import REGIONAL_FIELDTYPES
 from docmatch.extraction.test_gemini import FakeInteractions, answer
 from docmatch.extraction.test_run import READING, FakeExtractor, a_subset
+from docmatch.gate import admit
 from docmatch.metrics.fields import Prediction
 from docmatch.metrics.line_items import labeled_line_items
 from docmatch.pipeline import labels
@@ -3447,9 +3454,6 @@ def test_extract_on_a_neutral_set_records_no_region(
 
 
 def test_a_rule_with_no_label_prints_not_admitted_with_zero_labeled() -> None:
-    from docmatch.cli import _admission
-    from docmatch.gate import admit
-
     lines = _admission(admit("do", [{"vendor_tax_id": ("101001577",)}]))
 
     assert any(
