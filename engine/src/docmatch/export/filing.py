@@ -9,8 +9,12 @@ credited and which ISR retention applies. It is the same whichever reading a
 scored, so the two files differ only in what was read.
 
 One row per pinned document, keyed by filename, pinned by the manifest's
-digest the way `labels.csv` is (`evals.regional.read_pinned_csv`). Every
-column below must be present and no other:
+digest the way `labels.csv` is (`evals.regional.read_pinned_csv`). An e-CF
+set whose manifest declares `filing_per: ecf_type` has one row per e-CF type
+instead, in an `ecf_type` column (`E31`), applied to every document of that
+type, the type being the first three characters of the document's labeled
+e-NCF (#213, #231). Every column below must be present
+and no other:
 
 - `reported`: `yes` or `no`. A document not reported is left out of both
   606 files and needs no other choice; the owner's comprobantes without an
@@ -41,9 +45,17 @@ from pathlib import Path
 from typing import Literal
 
 from docmatch.evals.manifest import Manifest
-from docmatch.evals.regional import FILENAME, RegionalError, read_pinned_csv
+from docmatch.evals.regional import (
+    FILENAME,
+    LABELS_FILE,
+    RegionalError,
+    read_labels,
+    read_pinned_csv,
+)
 
 FILING_FILE = "filing.csv"
+ECF_TYPE = "ecf_type"
+"""The column keying a per-type annotation, in place of the filename."""
 
 COLUMNS = (
     "reported",
@@ -91,15 +103,47 @@ def read_filing(manifest: Manifest, directory: Path) -> Mapping[str, Filing]:
     Raises `RegionalError` naming the first thing that keeps the file from
     being the set's pinned annotation, or a choice the 606 does not allow.
     """
-    _, rows = read_pinned_csv(manifest, directory, FILING_FILE, _check_columns)
     path = directory / FILING_FILE
-    return {
-        filename: _filing(row, f"{path}, {filename}") for filename, row in rows.items()
-    }
+    if manifest.filing_per is None:
+        _, rows = read_pinned_csv(manifest, directory, FILING_FILE, _check_columns)
+        return {
+            filename: _filing(row, f"{path}, {filename}")
+            for filename, row in rows.items()
+        }
+    types = _ecf_types(manifest, directory)
+    _, by_type = read_pinned_csv(
+        manifest,
+        directory,
+        FILING_FILE,
+        lambda header, where: _check_columns(header, where, ECF_TYPE),
+        key=ECF_TYPE,
+        keys=sorted(set(types.values())),
+    )
+    filings = {kind: _filing(row, f"{path}, {kind}") for kind, row in by_type.items()}
+    return {filename: filings[kind] for filename, kind in types.items()}
 
 
-def _check_columns(header: list[str], path: Path) -> None:
-    unknown = [each for each in header if each not in (FILENAME, *COLUMNS)]
+_ECF_TYPE = re.compile(r"\AE\d\d")
+
+
+def _ecf_types(manifest: Manifest, directory: Path) -> dict[str, str]:
+    """Each document's e-CF type, read from its labeled e-NCF."""
+    labels = read_labels(manifest, directory)
+    types: dict[str, str] = {}
+    for filename in manifest.document_ids:
+        numbers = labels.header(filename).get("document_id", ())
+        match = _ECF_TYPE.match(numbers[0]) if numbers else None
+        if match is None:
+            raise RegionalError(
+                f"{directory / LABELS_FILE}: the label of {filename} names no e-CF "
+                "type, an e-NCF starting E and two digits"
+            )
+        types[filename] = match.group()
+    return types
+
+
+def _check_columns(header: list[str], path: Path, key: str = FILENAME) -> None:
+    unknown = [each for each in header if each not in (key, *COLUMNS)]
     if unknown:
         raise RegionalError(
             f"{path} has the column {', '.join(unknown)}, which a filing "

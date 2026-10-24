@@ -1165,7 +1165,19 @@ nothing and calls no vendor; it reads the header only, never the line items,
 and never verifies the signature. A vision backend refuses an e-CF set and the
 parser refuses a set of images. The committed made-up e-CFs in
 `engine/tests/evals/regional/ecf/` validate against the XSDs in CI, which
-downloads them, and CI's `Regional e-CF` step scores the parser's saved run.
+downloads them, and CI's `Regional e-CF` step scores the parser's saved run, then
+exports its 606 and runs DGII's pre-validator over it.
+
+An e-CF set is filed like a paper set, with one difference in `filing.csv`: the
+owner annotates once per e-CF type, not per document. The file's first column is
+`ecf_type` (`E31`, `E32`, `E41`, `E43`), one row for each type the set holds, and
+the row applies to every document of that type, the type being the first three
+characters of the document's labeled e-NCF. The manifest declares it with
+`"filing_per": "ecf_type"`; a manifest that does not declare it is read with one
+row per filename, so a paper set cannot take the shape by accident. Put
+`filing.csv` in the directory before pinning and give the reporter as the second
+argument (`python -m docmatch.evals.ecf data/regional/do-ecf <RNC>`), and the pin
+digests the file and writes both keys.
 
 ### The 606
 
@@ -2019,7 +2031,19 @@ nothing and calls no vendor; it reads the header only, never the line items,
 and never verifies the signature. A vision backend refuses an e-CF set and the
 parser refuses a set of images. The committed made-up e-CFs in
 `engine/tests/evals/regional/ecf/` validate against the XSDs in CI, which
-downloads them, and CI's `Regional e-CF` step scores the parser's saved run.
+downloads them, and CI's `Regional e-CF` step scores the parser's saved run, then
+exports its 606 and runs DGII's pre-validator over it.
+
+An e-CF set is filed like a paper set, with one difference in `filing.csv`: the
+owner annotates once per e-CF type, not per document. The file's first column is
+`ecf_type` (`E31`, `E32`, `E41`, `E43`), one row for each type the set holds, and
+the row applies to every document of that type, the type being the first three
+characters of the document's labeled e-NCF. The manifest declares it with
+`"filing_per": "ecf_type"`; a manifest that does not declare it is read with one
+row per filename, so a paper set cannot take the shape by accident. Put
+`filing.csv` in the directory before pinning and give the reporter as the second
+argument (`python -m docmatch.evals.ecf data/regional/do-ecf <RNC>`), and the pin
+digests the file and writes both keys.
 
 ### The 606
 

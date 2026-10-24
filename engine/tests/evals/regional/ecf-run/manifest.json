@@ -11,10 +11,10 @@
   ],
   "rejected": {},
   "digests": {
-    "ecf0001.xml": "9813506f096859d8def4b965bdf46d3289a957b7a433340faf427a317507263e",
+    "ecf0001.xml": "5dfce93294998b7e3c97c37215d8c1f0a7ef9324150c63e6f0f5ab6c6c727f22",
     "ecf0002.xml": "8d86b949bf60d52b323ad1c7949059226e9f9625dcc9fdd554331c876f273839",
     "ecf0003.xml": "ddbbe5230b030593ecdb46b8ececdad61cb8c18c170b6e0ac379e0e75c7bd6e2",
-    "ecf0004.xml": "604eec73ff442673996ecfc4bb362bae98faa5103ec1f1ad939952f87fc98777"
+    "ecf0004.xml": "06c3f8ca6084cf5db5b0dfcdeb23d5070158c98ba155544346e1bc562d82a532"
   },
   "region": "do",
   "coverage": [
@@ -34,6 +34,9 @@
     "amount_retention_isr"
   ],
   "files": {
-    "labels.csv": "e79d639edc6c80fe0ec67e77d0bf2dabd0fda9ad1d4007564fecf837cfcb4ed8"
-  }
+    "labels.csv": "802610e4e52830e42a7c6c829090b812face997cbeb430eefb843f9bc1578159",
+    "filing.csv": "455fa7da4192e28c8ec7752c82cbe3f16b7460976361429923b683d1b41336ec"
+  },
+  "reporter": "130990026",
+  "filing_per": "ecf_type"
 }

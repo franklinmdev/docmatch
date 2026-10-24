@@ -297,3 +297,80 @@ def test_export_refuses_a_set_with_no_reporter(
     assert main(exporting(tmp_path / "606", manifest=manifest)) == 1
 
     assert "reporter" in capsys.readouterr().err
+
+
+ECF_SET = REGIONAL / "ecf" / "manifest.json"
+ECF_RUN = REGIONAL / "ecf-run"
+ECF_JUNE = "DGII_F_606_130990026_202606.TXT"
+ECF_JUNE_CONTENT = (
+    "606|130990026|202606|2\r\n"
+    "130990052|1|09|E310000000001||20260610||0.00|10500.00|10500.00|"
+    "1800.00|0.00|0.00|0.00|1800.00|0.00||0.00|0.00|150.00|200.00|1000.00|1\r\n"
+    "00099000028|2|02|E410000000001||20260612|20260620|5000.00|0.00|5000.00|"
+    "900.00|900.00|0.00|0.00|900.00|0.00|02|500.00|0.00|0.00|0.00|0.00|2"
+)
+"""The E31 and the E41 of June, each annotated by its type; the E32 is a
+consumo under RD$250,000 and the E43 is annotated not reported."""
+
+ECF_OUTPUT = "\n".join(
+    [
+        "606 export",
+        "  manifest      {manifest}",
+        "  run           {run}",
+        "  out           {out}",
+        "  documents     4",
+        "  not reported  1",
+        "",
+        "Reading, 1 of 1 monthly files written",
+        "  202606  2 rows",
+        "  left out  202606  1 document, consumo of RD$250,000.00 or less",
+        "",
+        "Labels control, 1 of 1 monthly files written",
+        "  202606  2 rows",
+        "  left out  202606  1 document, consumo of RD$250,000.00 or less",
+        "",
+    ]
+)
+
+
+def test_export_over_the_e_cf_run_writes_a_reading_and_a_control_from_one_row_per_type(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "606"
+
+    exit_code = main(exporting(out, manifest=ECF_SET, run=ECF_RUN))
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == ECF_OUTPUT.format(
+        manifest=ECF_SET, run=ECF_RUN, out=out
+    )
+    assert {
+        path.relative_to(out).as_posix(): path.read_bytes().decode()
+        for path in out.rglob("*.TXT")
+    } == {
+        f"reading/{ECF_JUNE}": ECF_JUNE_CONTENT,
+        f"control/{ECF_JUNE}": ECF_JUNE_CONTENT,
+    }
+
+
+def test_export_refuses_a_per_type_annotation_the_manifest_does_not_declare(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The loader reads `ecf_type` rows only for a set declaring them."""
+    for name in ("ecf", "ecf-run"):
+        shutil.copytree(REGIONAL / name, tmp_path / name)
+        path = tmp_path / name / "manifest.json"
+        manifest = json.loads(path.read_text())
+        del manifest["filing_per"]
+        path.write_text(json.dumps(manifest))
+
+    exit_code = main(
+        exporting(
+            tmp_path / "606",
+            manifest=tmp_path / "ecf" / "manifest.json",
+            run=tmp_path / "ecf-run",
+        )
+    )
+
+    assert exit_code == 1
+    assert "no filename column" in capsys.readouterr().err

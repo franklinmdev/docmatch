@@ -12,7 +12,7 @@
       "amount_tip": "1000.00",
       "amount_tax_selective": "150.00",
       "amount_tax_other": "200.00",
-      "document_id_modified": "B0100000005",
+      "document_id_modified": null,
       "amount_retention_itbis": null,
       "amount_retention_isr": null
     }
@@ -66,7 +66,7 @@
       "amount_tip": null,
       "amount_tax_selective": null,
       "amount_tax_other": null,
-      "document_id_modified": null,
+      "document_id_modified": "E430000000000",
       "amount_retention_itbis": null,
       "amount_retention_isr": null
     }

@@ -38,7 +38,7 @@ import csv
 import io
 import tempfile
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -113,13 +113,18 @@ def read_pinned_csv(
     directory: Path,
     name: str,
     check_columns: Callable[[list[str], Path], None],
+    *,
+    key: str = FILENAME,
+    keys: Sequence[str] | None = None,
 ) -> tuple[list[str], dict[str, dict[str, str]]]:
-    """A CSV of the set's own, `name` in `directory`, keyed by filename: its
-    header and each pinned document's row, the filename column left out.
+    """A CSV of the set's own, `name` in `directory`, keyed by `key` (the
+    filename unless the caller says what else a row annotates): its header and
+    each row, the key column left out.
 
     The file must match the digest the manifest pins for it, `check_columns`
-    must pass its header, and it must hold exactly one row for each pinned
-    document; `RegionalError` names the first thing that does not hold.
+    must pass its header, and it must hold exactly one row for each of `keys`,
+    the pinned documents unless the caller gives them; `RegionalError` names
+    the first thing that does not hold.
     """
     pinned = manifest.files.get(name)
     if pinned is None:
@@ -139,8 +144,8 @@ def read_pinned_csv(
     if not lines:
         raise RegionalError(f"{path} has no header")
     header, *body = lines
-    if FILENAME not in header:
-        raise RegionalError(f"{path} has no {FILENAME} column")
+    if key not in header:
+        raise RegionalError(f"{path} has no {key} column")
     if len(header) != len(set(header)):
         raise RegionalError(f"{path} names a column more than once")
     check_columns(header, path)
@@ -149,11 +154,11 @@ def read_pinned_csv(
         if not cells:
             continue
         row = _row(header, cells, path)
-        filename = row.pop(FILENAME)
-        if filename in rows:
-            raise RegionalError(f"{path} has more than one row for {filename}")
-        rows[filename] = row
-    _check_documents(rows, manifest, path)
+        row_key = row.pop(key)
+        if row_key in rows:
+            raise RegionalError(f"{path} has more than one row for {row_key}")
+        rows[row_key] = row
+    _check_documents(rows, manifest.document_ids if keys is None else keys, path)
     return header, rows
 
 
@@ -183,17 +188,16 @@ def _row(header: list[str], cells: list[str], path: Path) -> dict[str, str]:
 
 
 def _check_documents(
-    values: Mapping[str, object], manifest: Manifest, path: Path
+    values: Mapping[str, object], expected: Sequence[str], path: Path
 ) -> None:
-    pinned = set(manifest.document_ids)
-    unlabeled = [each for each in manifest.document_ids if each not in values]
+    pinned = set(expected)
+    unlabeled = [each for each in expected if each not in values]
     if unlabeled:
         raise RegionalError(f"{path} has no row for {', '.join(unlabeled)}")
     unpinned = [each for each in values if each not in pinned]
     if unpinned:
         raise RegionalError(
-            f"{path} has a row for {', '.join(unpinned)}, which the manifest does "
-            "not pin"
+            f"{path} has a row for {', '.join(unpinned)}, which the set does not have"
         )
 
 

@@ -3,15 +3,16 @@
 DGII publishes the XSD of every e-CF type and no sample XML (#206), and no
 real e-CF may enter a commit (`CLAUDE.md` rule 6), so the e-CF set CI scores
 is four e-CFs invented here, one of each type the parser reads: an E31
-crédito fiscal carrying the legal tip, a selective and another additional tax
-and a modified NCF; an E32 consumo to nobody, whose `Comprador` is empty and
-which prints no exempt amount, the missing optional elements; an E41 compras
+crédito fiscal carrying the legal tip, a selective and another additional tax; an E32 consumo to nobody, whose `Comprador` is empty
+and which prints no exempt amount, the missing optional elements; an E41 compras
 whose retentions are printed on its lines only; and an E43 gastos menores,
-which names no buyer. Every name, number and amount is made up, and the
-amounts are not computed at any tax rate the fixture would be stating: the
-rates the XSD requires beside an additional tax are placeholders. The RNCs,
-the cedula and the e-NCFs pass python-stdnum 2.2, as the paper fixture's do,
-from bases picked by hand.
+which names no buyer and carries a modified e-NCF, since DGII's pre-validator
+refuses a modified NCF on any row of these types (#231), and an E43 the
+reporter does not file never reaches it. Every name, number and amount is
+made up, and the amounts are not computed at any tax rate the fixture would
+be stating: the rates the XSD requires beside an additional tax are
+placeholders. The RNCs, the cedula and the e-NCFs pass python-stdnum 2.2, as
+the paper fixture's do, from bases picked by hand.
 
 Each e-CF is written element by element in the order the XSDs of
 16/10/2025 give (`e-CF 31 v.1.0.xsd` and its three siblings, read
@@ -41,7 +42,9 @@ from stdnum.do import rnc
 
 from docmatch.evals.ecf import REGION, write_set
 from docmatch.evals.manifest import Manifest, write
+from docmatch.evals.regional_fixture import REPORTER
 from docmatch.evals.run import MANIFEST_FILE, PREDICTIONS_FILE, RECORD_FILE
+from docmatch.export.filing import COLUMNS as FILING_COLUMNS
 from docmatch.extraction.ecf import COVERAGE, MODEL, read
 
 FIXTURE = Path(__file__).parents[3] / "tests" / "evals" / "regional"
@@ -157,9 +160,6 @@ ECFS = (
         ),
         additional_total="1350.00",
         total="13650.00",
-        modified="B0100000005",
-        modified_on="09-06-2026",
-        modification="4",
         lines=(
             Line(
                 name="Servicio de catering",
@@ -188,7 +188,6 @@ ECFS = (
             amount_tip="1000.00",
             amount_tax_selective="150.00",
             amount_tax_other="200.00",
-            document_id_modified="B0100000005",
         ),
     ),
     ECF(
@@ -268,6 +267,9 @@ ECFS = (
         issued="13-06-2026",
         exempt="350.00",
         total="350.00",
+        modified="E430000000000",
+        modified_on="12-06-2026",
+        modification="4",
         lines=(
             Line(
                 name="Peaje",
@@ -284,6 +286,7 @@ ECFS = (
             customer_tax_id="130990085",
             amount_total_net="350.00",
             amount_total_gross="350.00",
+            document_id_modified="E430000000000",
         ),
     ),
 )
@@ -399,6 +402,23 @@ def _item(item: ET.Element, number: int, line: Line) -> None:
     _add(item, "MontoItem", line.amount)
 
 
+FILING = {
+    "E31": "yes,09,goods,,1,,,",
+    "E32": "yes,09,goods,,1,,,",
+    "E41": "yes,02,services,2026-06-20,2,,,2",
+    "E43": "no,,,,,,,",
+}
+"""The made-up reporter's filing choices, one per e-CF type: the E43 names no
+vendor, which a 606 row needs, so the reporter does not file it."""
+
+
+def filing_csv() -> bytes:
+    """The set's `filing.csv`: one row per e-CF type, not per document."""
+    header = ",".join(("ecf_type", *FILING_COLUMNS))
+    rows = (f"E{each.kind},{FILING[f'E{each.kind}']}" for each in ECFS)
+    return ("\n".join((header, *rows)) + "\n").encode()
+
+
 def write_fixture_set(directory: Path) -> Manifest:
     """Write every e-CF into `directory`, with its hand-written labels and the
     set's manifest."""
@@ -411,6 +431,8 @@ def write_fixture_set(directory: Path) -> Manifest:
         contents,
         {each.filename: each.labels for each in ECFS},
         source=SOURCE,
+        filing=filing_csv(),
+        reporter=REPORTER,
     )
 
 

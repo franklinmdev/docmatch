@@ -22,6 +22,7 @@ from docmatch.evals.manifest import Manifest, write
 from docmatch.evals.public import digest
 from docmatch.evals.regional import FILENAME, LABELS_FILE
 from docmatch.evals.run import MANIFEST_FILE
+from docmatch.export.filing import FILING_FILE
 from docmatch.extraction.ecf import COVERAGE, ECFError, read
 
 REGION = "do"
@@ -43,10 +44,14 @@ def labels_csv(labels: Mapping[str, Mapping[str, str | None]]) -> bytes:
     return out.getvalue().encode("utf-8")
 
 
-def pin(directory: Path, *, source: str = SOURCE) -> Manifest:
+def pin(
+    directory: Path, *, source: str = SOURCE, reporter: str | None = None
+) -> Manifest:
     """Label every e-CF in `directory` from its own XML and pin the set.
 
-    Writes `labels.csv` and `manifest.json` beside the XMLs. Raises `ECFError`
+    Writes `labels.csv` and `manifest.json` beside the XMLs. A `filing.csv`
+    the owner wrote there, one row per e-CF type, is pinned too and declared
+    in the manifest, with the `reporter` a 606 is filed as. Raises `ECFError`
     naming the first file the parser cannot read, before writing anything.
     """
     paths = sorted(directory.glob("*.xml"))
@@ -63,7 +68,15 @@ def pin(directory: Path, *, source: str = SOURCE) -> Manifest:
             fieldtype: value if isinstance(value, str) else None
             for fieldtype, value in fields.items()
         }
-    return write_set(directory, contents, labels, source=source)
+    filing_path = directory / FILING_FILE
+    return write_set(
+        directory,
+        contents,
+        labels,
+        source=source,
+        filing=filing_path.read_bytes() if filing_path.is_file() else None,
+        reporter=reporter,
+    )
 
 
 def write_set(
@@ -72,11 +85,16 @@ def write_set(
     labels: Mapping[str, Mapping[str, str | None]],
     *,
     source: str,
+    filing: bytes | None = None,
+    reporter: str | None = None,
 ) -> Manifest:
     """Write `labels.csv` and the manifest of the e-CF set whose files'
-    bytes are `contents`, already in `directory`."""
+    bytes are `contents`, already in `directory`. A `filing` annotation, one
+    row per e-CF type, is written beside them, pinned and declared as such."""
     written = labels_csv(labels)
     (directory / LABELS_FILE).write_bytes(written)
+    if filing is not None:
+        (directory / FILING_FILE).write_bytes(filing)
     manifest = Manifest(
         split=SPLIT,
         seed=0,
@@ -86,20 +104,28 @@ def write_set(
         digests={name: digest(content) for name, content in contents.items()},
         region=REGION,
         coverage=COVERAGE,
-        files={LABELS_FILE: digest(written)},
+        files={LABELS_FILE: digest(written)}
+        | ({} if filing is None else {FILING_FILE: digest(filing)}),
+        reporter=reporter,
+        filing_per=None if filing is None else "ecf_type",
     )
     write(manifest, directory / MANIFEST_FILE)
     return manifest
 
 
 def main(arguments: list[str]) -> int:
-    """`python -m docmatch.evals.ecf <directory>`: pin an e-CF set."""
-    if len(arguments) != 1:
-        print("usage: python -m docmatch.evals.ecf <directory of e-CF XMLs>")
+    """`python -m docmatch.evals.ecf <directory> [reporter]`: pin an e-CF set."""
+    if len(arguments) not in (1, 2):
+        print(
+            "usage: python -m docmatch.evals.ecf <directory of e-CF XMLs> "
+            "[reporter RNC or cedula]"
+        )
         return 2
     try:
-        manifest = pin(Path(arguments[0]))
-    except ECFError as error:
+        manifest = pin(
+            Path(arguments[0]), reporter=arguments[1] if len(arguments) == 2 else None
+        )
+    except (ECFError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     print(f"pinned {manifest.size} e-CFs in {arguments[0]}")
