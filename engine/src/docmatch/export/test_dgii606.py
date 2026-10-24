@@ -662,3 +662,41 @@ def test_a_small_consumo_with_a_bad_ncf_still_fails() -> None:
 
     assert exported.reading.left_out == ()
     assert exported.reading.failed != ()
+
+
+@pytest.mark.parametrize("document_id", ["B1300000001", "E430000000001"])
+def test_a_gastos_menores_is_filed_under_the_reporters_own_rnc(
+    document_id: str,
+) -> None:
+    """DGII: for a B13 the RNC of "el contribuyente que reporta" goes in
+    column 1; an E43 is the same comprobante. It names no vendor, so a reading
+    without an RNC is not a failure."""
+    values = comprobante(document_id=document_id, vendor_tax_id="")
+    exported = export_606(
+        REPORTER, {"a.png": values}, {"a.png": values}, {"a.png": GOODS}
+    )
+
+    for side in (exported.reading, exported.control):
+        assert not side.failed
+        [content] = side.files().values()
+        assert content.split("\r\n")[1].startswith(f"{REPORTER}|1|09|{document_id}|")
+
+
+def test_a_gastos_menores_ignores_a_vendor_rnc_the_reading_carries() -> None:
+    values = comprobante(document_id="B1300000001", vendor_tax_id=SUPPLIER)
+    exported = export_606(
+        REPORTER, {"a.png": values}, {"a.png": values}, {"a.png": GOODS}
+    )
+
+    [content] = exported.reading.files().values()
+    assert content.split("\r\n")[1].startswith(f"{REPORTER}|1|")
+
+
+def test_a_gastos_menores_under_a_cedula_reporter_takes_tipo_id_2() -> None:
+    values = comprobante(document_id="B1300000001", vendor_tax_id="")
+    exported = export_606(
+        PERSON, {"a.png": values}, {"a.png": values}, {"a.png": GOODS}
+    )
+
+    [content] = exported.reading.files().values()
+    assert content.split("\r\n")[1].startswith(f"{PERSON}|2|")

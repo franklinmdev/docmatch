@@ -296,14 +296,14 @@ def test_prevalidate_reports_the_e_cf_export_for_the_reading_and_the_control(
             f"  binary        Pre_Validado.zip sha256 {BINARY_SHA256}",
             "  version       MSI 2.6, exe 4.0.0.9",
             "  runtime       Mono 6.12.0.182, a pass uncompared with one on Windows",
-            "  not reported  1 (annotated not reported)",
+            "  not reported  0 (annotated not reported)",
             "",
-            "Reading, 1 of 1 monthly files with zero errors, 0 of 2 rows with an error",
-            "  202606  0 errors, 2 rows",
+            "Reading, 1 of 1 monthly files with zero errors, 0 of 3 rows with an error",
+            "  202606  0 errors, 3 rows",
             "",
             "Labels control, 1 of 1 monthly files with zero errors, "
-            "0 of 2 rows with an error",
-            "  202606  0 errors, 2 rows",
+            "0 of 3 rows with an error",
+            "  202606  0 errors, 3 rows",
             "",
         ]
     )

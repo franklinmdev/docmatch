@@ -7,11 +7,11 @@ crédito fiscal carrying the legal tip, a selective and another additional tax;
 an E32 consumo to nobody, whose `Comprador` is empty and which prints no
 exempt amount, the missing optional elements; an E41 compras whose retentions
 are printed on its lines only; and an E43 gastos menores, which names no
-buyer. The modified e-NCF is the E43's: DGII's pre-validator refuses a modified
-NCF on every row of these types (#231), and the E43, which the made-up reporter
-does not file, never reaches one. Every name, number and amount is
-made up, and the amounts are not computed at any tax rate the fixture would
-be stating: the rates the XSD requires beside an additional tax are
+buyer. The modified e-NCF is the E32's: DGII's pre-validator refuses a modified
+NCF on every row of these types (#231, #250), and the E32, a consumo under
+RD$250,000, is left out of the 606 and never reaches one. Every name, number
+and amount is made up, and the amounts are not computed at any tax rate the
+fixture would be stating: the rates the XSD requires beside an additional tax are
 placeholders. The RNCs, the cedula and the e-NCFs pass python-stdnum 2.2, as
 the paper fixture's do, from bases picked by hand.
 
@@ -201,6 +201,9 @@ ECFS = (
         taxed="1000.00",
         itbis="180.00",
         total="1180.00",
+        modified="E320000000000",
+        modified_on="10-06-2026",
+        modification="4",
         lines=(
             Line(name="Arroz selecto", quantity="10", price="100.00", amount="1000.00"),
         ),
@@ -212,6 +215,7 @@ ECFS = (
             amount_total_net="1000.00",
             amount_total_tax="180.00",
             amount_total_gross="1180.00",
+            document_id_modified="E320000000000",
         ),
     ),
     ECF(
@@ -268,9 +272,6 @@ ECFS = (
         issued="13-06-2026",
         exempt="350.00",
         total="350.00",
-        modified="E430000000000",
-        modified_on="12-06-2026",
-        modification="4",
         lines=(
             Line(
                 name="Peaje",
@@ -287,7 +288,6 @@ ECFS = (
             customer_tax_id="130990085",
             amount_total_net="350.00",
             amount_total_gross="350.00",
-            document_id_modified="E430000000000",
         ),
     ),
 )
@@ -407,10 +407,10 @@ FILING = {
     "E31": "yes,09,goods,,1,,,",
     "E32": "yes,09,goods,,1,,,",
     "E41": "yes,02,services,2026-06-20,2,,,2",
-    "E43": "no,,,,,,,",
+    "E43": "yes,02,services,,1,,,",
 }
-"""The made-up reporter's filing choices, one per e-CF type: the E43 names no
-vendor, which a 606 row needs, so the reporter does not file it."""
+"""The made-up reporter's filing choices, one per e-CF type. The E43 names no
+vendor and is filed under the reporter's own RNC (#250)."""
 
 
 def filing_csv() -> bytes:

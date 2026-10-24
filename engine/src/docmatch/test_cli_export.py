@@ -313,14 +313,17 @@ ECF_SET = REGIONAL / "ecf" / "manifest.json"
 ECF_RUN = REGIONAL / "ecf-run"
 ECF_JUNE = "DGII_F_606_130990026_202606.TXT"
 ECF_JUNE_CONTENT = (
-    "606|130990026|202606|2\r\n"
+    "606|130990026|202606|3\r\n"
     "130990052|1|09|E310000000001||20260610||0.00|10500.00|10500.00|"
     "1800.00|0.00|0.00|0.00|1800.00|0.00||0.00|0.00|150.00|200.00|1000.00|1\r\n"
     "00099000028|2|02|E410000000001||20260612|20260620|5000.00|0.00|5000.00|"
-    "900.00|900.00|0.00|0.00|900.00|0.00|02|500.00|0.00|0.00|0.00|0.00|2"
+    "900.00|900.00|0.00|0.00|900.00|0.00|02|500.00|0.00|0.00|0.00|0.00|2\r\n"
+    "130990026|1|02|E430000000001||20260613||350.00|0.00|350.00|0.00|0.00|0.00|"
+    "0.00|0.00|0.00||0.00|0.00|0.00|0.00|0.00|1"
 )
-"""The E31 and the E41 of June, each annotated by its type; the E32 is a
-consumo under RD$250,000 and the E43 is annotated not reported."""
+"""The E31, the E41 and the E43 of June, each annotated by its type; the E43
+names no vendor and is filed under the reporter's RNC. The E32 is a consumo
+under RD$250,000."""
 
 ECF_OUTPUT = "\n".join(
     [
@@ -329,14 +332,14 @@ ECF_OUTPUT = "\n".join(
         "  run           {run}",
         "  out           {out}",
         "  documents     4",
-        "  not reported  1",
+        "  not reported  0",
         "",
         "Reading, 1 of 1 monthly files written",
-        "  202606  2 rows",
+        "  202606  3 rows",
         "  left out  202606  1 document, consumo of RD$250,000.00 or less",
         "",
         "Labels control, 1 of 1 monthly files written",
-        "  202606  2 rows",
+        "  202606  3 rows",
         "  left out  202606  1 document, consumo of RD$250,000.00 or less",
         "",
     ]

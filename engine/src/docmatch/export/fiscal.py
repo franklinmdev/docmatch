@@ -70,6 +70,19 @@ the code reads it as the net amount plus ITBIS, selective and other taxes and
 the tip. The consumo types are B02 and E32. The
 pre-validator itself rejects a B02 (and an E32) at any amount, under or
 over the threshold (#215, 2026-10-23), so it does not encode the threshold.
+
+Gastos menores, column 1
+------------------------
+
+DGII's help answers say the self-issued e-CFs E41, E43 and E47 "deben ser
+enviados de igual forma en el formato 606" (discussion "envío de facturas de
+gastos electrónicas", read 2026-10-23,
+https://ayuda.dgii.gov.do/conversations/discusiones/envo-de-facturas-de-gastos-electrnicas/68e00267c8792738a63e8e46),
+and that for gastos menores (B13, and so E43) "se debe colocar el RNC del
+contribuyente que reporta" (discussion "gastos menores B13", read 2026-10-23,
+https://ayuda.dgii.gov.do/conversations/discusiones/gastos-menores-b13/62a0f1d14c24491a89e9ee5a).
+That E43 follows B13 is inferred, and so is its Tipo Id: the instructivo gives
+1 for an RNC (unverified for E43).
 """
 
 from dataclasses import dataclass
@@ -85,6 +98,14 @@ CONSUMO_TYPES = ("B02", "E32")
 def is_consumo(ncf: str) -> bool:
     """Whether a compacted NCF or e-NCF is a consumo: B02 or E32."""
     return ncf[:3] in CONSUMO_TYPES
+
+
+GASTOS_MENORES_TYPES = ("B13", "E43")
+
+
+def is_gastos_menores(ncf: str) -> bool:
+    """Whether a compacted NCF or e-NCF is a gastos menores: B13 or E43."""
+    return ncf[:3] in GASTOS_MENORES_TYPES
 
 
 @dataclass(frozen=True)

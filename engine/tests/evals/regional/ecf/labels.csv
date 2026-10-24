@@ -1,5 +1,5 @@
 filename,vendor_name,vendor_tax_id,customer_tax_id,document_id,date_issue,amount_total_net,amount_total_tax,amount_total_gross,amount_tip,amount_tax_selective,amount_tax_other,document_id_modified,amount_retention_itbis,amount_retention_isr
 ecf0001.xml,Distribuidora Ficticia del Cibao SRL,130990052,130990069,E310000000001,2026-06-10,10500.00,1800.00,13650.00,1000.00,150.00,200.00,,,
-ecf0002.xml,Supermercado Inventado SRL,130990077,,E320000000001,2026-06-11,1000.00,180.00,1180.00,,,,,,
+ecf0002.xml,Supermercado Inventado SRL,130990077,,E320000000001,2026-06-11,1000.00,180.00,1180.00,,,,E320000000000,,
 ecf0003.xml,Juan Ejemplo,00099000028,130990085,E410000000001,2026-06-12,5000.00,900.00,5900.00,,,,,900.00,500.00
-ecf0004.xml,,,130990085,E430000000001,2026-06-13,350.00,,350.00,,,,E430000000000,,
+ecf0004.xml,,,130990085,E430000000001,2026-06-13,350.00,,350.00,,,,,,

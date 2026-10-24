@@ -1214,7 +1214,9 @@ fails the month. An ITBIS retention not printed is zero. A B02 or E32 of
 RD$250,000 or less is left out of the file, listed with its reason and never a
 failure; the threshold is a DGII help answer, its "monto" read as the net plus
 taxes and tip is unverified, and the pre-validator itself rejects a consumo at
-any amount. The report prints counts and reasons only, never a number or a name
+any amount. A B13 or E43, which name no vendor, writes the reporter's RNC in
+column 1 (Tipo Id from its kind: 1 for an RNC, 2 for a cedula), per DGII's help
+answers; that E43 follows B13 is inferred, unverified. The report prints counts and reasons only, never a number or a name
 from a comprobante. CI's `Regional` step exports the made-up set's saved run.
 
 ```bash
@@ -2081,7 +2083,9 @@ fails the month. An ITBIS retention not printed is zero. A B02 or E32 of
 RD$250,000 or less is left out of the file, listed with its reason and never a
 failure; the threshold is a DGII help answer, its "monto" read as the net plus
 taxes and tip is unverified, and the pre-validator itself rejects a consumo at
-any amount. The report prints counts and reasons only, never a number or a name
+any amount. A B13 or E43, which name no vendor, writes the reporter's RNC in
+column 1 (Tipo Id from its kind: 1 for an RNC, 2 for a cedula), per DGII's help
+answers; that E43 follows B13 is inferred, unverified. The report prints counts and reasons only, never a number or a name
 from a comprobante. CI's `Regional` step exports the made-up set's saved run.
 
 ```bash
