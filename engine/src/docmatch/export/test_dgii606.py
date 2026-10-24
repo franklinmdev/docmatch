@@ -10,7 +10,14 @@ from decimal import Decimal
 
 import pytest
 
-from docmatch.export.dgii606 import NO_MONTH, REGION, Failure, LeftOut, export_606
+from docmatch.export.dgii606 import (
+    NO_MONTH,
+    REGION,
+    Failure,
+    LeftOut,
+    RateDate,
+    export_606,
+)
 from docmatch.export.filing import ALL, Filing, Share
 from docmatch.metrics.fields import FieldValues
 from docmatch.metrics.normalization import read_date, reads_day_first
@@ -469,15 +476,77 @@ def test_a_retention_type_with_no_stated_rate_fails_its_month() -> None:
     assert month.failures == (Failure("a", ("no ISR rate for retention type 3",)),)
 
 
-def test_a_retention_to_compute_without_a_payment_date_fails_its_month() -> None:
+def test_without_a_payment_date_the_rate_is_the_comprobante_dates() -> None:
+    """Both sides of 2026-07-01 by the comprobante date, and the export lists
+    which date picked each document's rate."""
     undated = replace(FEES, payment_date=None)
+    june = comprobante(
+        date_issue="30/06/2026", amount_total_net="5,000.00", amount_total_tax="0.00"
+    )
+    july = comprobante(
+        date_issue="01/07/2026", amount_total_net="5,000.00", amount_total_tax="0.00"
+    )
 
-    exported = export_606(REPORTER, {"a": comprobante()}, {}, {"a": undated})
+    before = export_606(REPORTER, {"a": june}, {}, {"a": undated})
+    after = export_606(REPORTER, {"a": july}, {}, {"a": undated})
+
+    [before_file] = before.reading.files().values()
+    [after_file] = after.reading.files().values()
+    assert retention_column(before_file) == "500.00"
+    assert retention_column(after_file) == "750.00"
+    assert before.reading.rate_dates == (RateDate("a", "comprobante date"),)
+    assert after.reading.rate_dates == (RateDate("a", "comprobante date"),)
+
+
+def test_a_retention_with_a_payment_date_lists_the_payment_date_as_the_pick() -> None:
+    reading = comprobante(amount_total_net="5,000.00", amount_total_tax="0.00")
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": FEES})
+
+    assert exported.reading.rate_dates == (RateDate("a", "payment date"),)
+
+
+def test_with_neither_date_the_month_fails_on_the_date_and_lists_no_rate_source() -> (
+    None
+):
+    undated = replace(FEES, payment_date=None)
+    reading = comprobante(
+        date_issue="", amount_total_net="5,000.00", amount_total_tax="0.00"
+    )
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": undated})
 
     [month] = exported.reading.failed
-    assert month.failures == (
-        Failure("a", ("ISR retention to compute without a payment date",)),
+    assert month.period == NO_MONTH
+    assert month.failures == (Failure("a", ("no date",)),)
+    assert exported.reading.rate_dates == ()
+
+
+def test_an_unreadable_comprobante_date_still_uses_the_payment_dates_rate() -> None:
+    """The month fails on the date alone: the payment date's rate is found, so
+    no retention reason joins it."""
+    reading = comprobante(
+        date_issue="not a date", amount_total_net="5,000.00", amount_total_tax="0.00"
     )
+
+    exported = export_606(REPORTER, {"a": reading}, {}, {"a": FEES})
+
+    [month] = exported.reading.failed
+    assert month.failures == (Failure("a", ("date unreadable",)),)
+
+
+def test_a_printed_retention_or_a_goods_document_lists_no_rate_date() -> None:
+    printed = comprobante(
+        amount_total_net="5,000.00",
+        amount_total_tax="0.00",
+        amount_retention_isr="123.45",
+    )
+
+    exported = export_606(
+        REPORTER, {"a": printed, "b": comprobante()}, {}, {"a": FEES, "b": GOODS}
+    )
+
+    assert exported.reading.rate_dates == ()
 
 
 def consumo(ncf: str, net: str, tax: str = "0.00", **changes: str) -> FieldValues:
