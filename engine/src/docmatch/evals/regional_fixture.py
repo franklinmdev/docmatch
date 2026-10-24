@@ -345,42 +345,33 @@ def write_set(directory: Path) -> Manifest:
 
 def readings() -> dict[str, dict[str, object]]:
     """The saved run's made-up readings, keyed by filename."""
-    right, misread, untaxed, credit, *others = (
-        dict(each.labels) for each in COMPROBANTES
-    )
-    consumo, small_e32, *_ = others
-    small_e32["document_id"] = "E310000000019"
+    by_name = {each.filename: dict(each.labels) for each in COMPROBANTES}
+    right = by_name["do0001.png"]
+    misread = by_name["do0002.png"]
+    untaxed = by_name["do0003.png"]
     right["vendor_email"] = "ventas@example.do"
     misread["document_id"] = "B0200001238"
     del untaxed["amount_total_tax"]
+    by_name["do0006.png"]["document_id"] = "E310000000019"
+    fields = {
+        name: {key: value or None for key, value in labels.items()}
+        for name, labels in by_name.items()
+    }
     return {
-        COMPROBANTES[0].filename: {
-            "fields": {key: value or None for key, value in right.items()},
-            "line_items": [
-                {"line_item_description": "Cemento gris", "line_item_quantity": "10"}
-            ],
-        },
-        COMPROBANTES[1].filename: {
-            "fields": {key: value or None for key, value in misread.items()}
-        },
-        COMPROBANTES[2].filename: {
-            "fields": {key: value or None for key, value in untaxed.items()}
-        },
-        COMPROBANTES[3].filename: {
-            "fields": {key: value or None for key, value in credit.items()}
-        },
-        COMPROBANTES[4].filename: {
-            "fields": {key: value or None for key, value in consumo.items()}
-        },
-        COMPROBANTES[5].filename: {
-            "fields": {key: value or None for key, value in small_e32.items()}
-        },
-        **{
-            each.filename: {
-                "fields": {key: value or None for key, value in each.labels.items()}
+        name: {"fields": values}
+        | (
+            {
+                "line_items": [
+                    {
+                        "line_item_description": "Cemento gris",
+                        "line_item_quantity": "10",
+                    }
+                ]
             }
-            for each in COMPROBANTES[6:]
-        },
+            if name == "do0001.png"
+            else {}
+        )
+        for name, values in fields.items()
     }
 
 
