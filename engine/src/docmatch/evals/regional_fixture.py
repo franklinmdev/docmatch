@@ -28,10 +28,9 @@ and a line item, one with its NCF misread, one with its tax left unread
 and one read right.
 
 Beside the labels, `filing.csv` holds the made-up reporter's filing annotation
-(#228) and the manifest names that reporter, the B01's buyer: the consumo is
-not reported, the E31 is paid with its retentions printed, the nota de
-credito is settled as one. The export does not check a comprobante's buyer
-against the reporter, so the E31 to a person stands in the same 606.
+(#228) and the manifest names that reporter, the buyer of every comprobante
+that names one (#253): the consumo is not reported, the E31 is paid with its
+retentions printed, the nota de credito is settled as one.
 
 Regenerate with `uv run python -m docmatch.evals.regional_fixture`.
 """
@@ -141,7 +140,7 @@ COMPROBANTES = (
         labels=labeled(
             vendor_name="Servicios Tecnicos Caribe SRL",
             vendor_tax_id=_rnc("13099004"),
-            customer_tax_id=_cedula("0009900001"),
+            customer_tax_id=_rnc("13099002"),
             document_id="E310000000052",
             date_issue="21/05/2026",
             amount_total_net="8,000.00",

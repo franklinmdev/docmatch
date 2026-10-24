@@ -1203,26 +1203,28 @@ date and method, ITBIS to proportionality and to cost, ISR retention type.
 A document with no reading, or one missing its NCF, RNC or date, fails its
 month, which gets no file; one with no readable date, or no reading, fails a
 `no month` row. So does an RNC, cedula or NCF python-stdnum does not validate,
-a negative amount, and a split, retention or ITBIS share beyond what was read:
-nothing is written negative. An ISR retention the comprobante does not print is
-computed over the services amount when `filing.csv` names a retention type: at
-the rate in force on the payment date, which DGII says picks the percentage,
-or on the comprobante date when the annotation has no payment date, the export
-listing which date picked each rate (types 1 and 2, 10 percent, 15 percent from
-2026-07-01, sources in `export/fiscal.py`); a type with no rate DGII states
-fails the month. An ITBIS retention not printed is zero. A B02 or E32 of
-RD$250,000 or less is left out of the file, listed with its reason and never a
-failure; the threshold is a DGII help answer, its "monto" read as the net plus
-taxes and tip is unverified, and the pre-validator itself rejects a consumo at
-any amount. A B13 or E43, which name no vendor, writes the reporter's RNC in
-column 1 (Tipo Id from its kind: 1 for an RNC, 2 for a cedula), per DGII's help
-answers; that E43 follows B13 is inferred, unverified. Column 5, the modified
-NCF, is written only for a B03, B04, E33 or E34 (the instructivo: the
-comprobante "afectado por una nota de débito o crédito"); on any other type a
-read one is dropped, the document still filed and the export listing the drop,
-since the pre-validator refuses it on an E31 and an E43. The report prints
-counts and reasons only, never a number or a name from a comprobante. CI's
-`Regional` step exports the made-up set's saved run.
+a negative amount, a read buyer RNC or cedula other than the reporter's (an
+absent buyer files as before), and a split, retention or ITBIS share beyond
+what was read: nothing is written negative. An ISR retention the comprobante
+does not print is computed over the services amount when `filing.csv` names a
+retention type: at the rate in force on the payment date, which DGII says
+picks the percentage, or on the comprobante date when the annotation has no
+payment date, the export listing which date picked each rate (types 1 and 2,
+10 percent, 15 percent from 2026-07-01, sources in `export/fiscal.py`); a type
+with no rate DGII states fails the month. An ITBIS retention not printed is
+zero. A B02 or E32 of RD$250,000 or less is left out of the file, listed with
+its reason and never a failure; the threshold is a DGII help answer, its
+"monto" read as the net plus taxes and tip is unverified, and the
+pre-validator itself rejects a consumo at any amount. A B13 or E43, which name
+no vendor, writes the reporter's RNC in column 1 (Tipo Id from its kind: 1 for
+an RNC, 2 for a cedula), per DGII's help answers; that E43 follows B13 is
+inferred, unverified. Column 5, the modified NCF, is written only for a B03,
+B04, E33 or E34 (the instructivo: the comprobante "afectado por una nota de
+débito o crédito"); on any other type a read one is dropped, the document
+still filed and the export listing the drop, since the pre-validator refuses
+it on an E31 and an E43. The report prints counts and reasons only, never a
+number or a name from a comprobante. CI's `Regional` step exports the made-up
+set's saved run.
 
 ```bash
 uv run docmatch prevalidate 606 --export data/exports/606/do-gemini \
@@ -2077,26 +2079,28 @@ date and method, ITBIS to proportionality and to cost, ISR retention type.
 A document with no reading, or one missing its NCF, RNC or date, fails its
 month, which gets no file; one with no readable date, or no reading, fails a
 `no month` row. So does an RNC, cedula or NCF python-stdnum does not validate,
-a negative amount, and a split, retention or ITBIS share beyond what was read:
-nothing is written negative. An ISR retention the comprobante does not print is
-computed over the services amount when `filing.csv` names a retention type: at
-the rate in force on the payment date, which DGII says picks the percentage,
-or on the comprobante date when the annotation has no payment date, the export
-listing which date picked each rate (types 1 and 2, 10 percent, 15 percent from
-2026-07-01, sources in `export/fiscal.py`); a type with no rate DGII states
-fails the month. An ITBIS retention not printed is zero. A B02 or E32 of
-RD$250,000 or less is left out of the file, listed with its reason and never a
-failure; the threshold is a DGII help answer, its "monto" read as the net plus
-taxes and tip is unverified, and the pre-validator itself rejects a consumo at
-any amount. A B13 or E43, which name no vendor, writes the reporter's RNC in
-column 1 (Tipo Id from its kind: 1 for an RNC, 2 for a cedula), per DGII's help
-answers; that E43 follows B13 is inferred, unverified. Column 5, the modified
-NCF, is written only for a B03, B04, E33 or E34 (the instructivo: the
-comprobante "afectado por una nota de débito o crédito"); on any other type a
-read one is dropped, the document still filed and the export listing the drop,
-since the pre-validator refuses it on an E31 and an E43. The report prints
-counts and reasons only, never a number or a name from a comprobante. CI's
-`Regional` step exports the made-up set's saved run.
+a negative amount, a read buyer RNC or cedula other than the reporter's (an
+absent buyer files as before), and a split, retention or ITBIS share beyond
+what was read: nothing is written negative. An ISR retention the comprobante
+does not print is computed over the services amount when `filing.csv` names a
+retention type: at the rate in force on the payment date, which DGII says
+picks the percentage, or on the comprobante date when the annotation has no
+payment date, the export listing which date picked each rate (types 1 and 2,
+10 percent, 15 percent from 2026-07-01, sources in `export/fiscal.py`); a type
+with no rate DGII states fails the month. An ITBIS retention not printed is
+zero. A B02 or E32 of RD$250,000 or less is left out of the file, listed with
+its reason and never a failure; the threshold is a DGII help answer, its
+"monto" read as the net plus taxes and tip is unverified, and the
+pre-validator itself rejects a consumo at any amount. A B13 or E43, which name
+no vendor, writes the reporter's RNC in column 1 (Tipo Id from its kind: 1 for
+an RNC, 2 for a cedula), per DGII's help answers; that E43 follows B13 is
+inferred, unverified. Column 5, the modified NCF, is written only for a B03,
+B04, E33 or E34 (the instructivo: the comprobante "afectado por una nota de
+débito o crédito"); on any other type a read one is dropped, the document
+still filed and the export listing the drop, since the pre-validator refuses
+it on an E31 and an E43. The report prints counts and reasons only, never a
+number or a name from a comprobante. CI's `Regional` step exports the made-up
+set's saved run.
 
 ```bash
 uv run docmatch prevalidate 606 --export data/exports/606/do-gemini \

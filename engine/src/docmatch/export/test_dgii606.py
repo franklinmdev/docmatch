@@ -772,3 +772,55 @@ def test_a_dropped_modified_ncf_is_not_listed_when_the_month_fails() -> None:
 
     assert [month.is_failed for month in exported.reading.months] == [True]
     assert exported.reading.dropped_modified == ()
+
+
+def test_a_buyer_that_is_not_the_reporter_fails_its_month_by_each_sides_value() -> None:
+    """The 606 lists the reporter's purchases: a read buyer RNC that differs
+    from the reporter's, after compacting separators, fails the month, on the
+    side that read it. An equal buyer, however written, or none, files."""
+    other = comprobante(customer_tax_id="130-99002-1")
+    same = comprobante(customer_tax_id="1-30-99002-6")
+    spaced = comprobante(customer_tax_id="130 990 026")
+    absent = comprobante()
+
+    exported = export_606(
+        REPORTER,
+        {"a.png": other, "b.png": same, "c.png": absent, "d.png": spaced},
+        {"a.png": same, "b.png": other, "c.png": same, "d.png": same},
+        {name: GOODS for name in ("a.png", "b.png", "c.png", "d.png")},
+    )
+
+    [march] = exported.reading.failed
+    assert march.failures == (Failure("a.png", ("buyer is not the reporter",)),)
+    [control_march] = exported.control.failed
+    assert control_march.failures == (Failure("b.png", ("buyer is not the reporter",)),)
+
+
+def test_a_small_consumo_with_a_foreign_buyer_fails_its_month_and_is_not_left_out() -> (
+    None
+):
+    """The buyer check runs before the consumo rule, like the other checks
+    that make the reading wrong."""
+    foreign = consumo("B0200000001", "700.00", customer_tax_id="130990018")
+
+    exported = export_606(REPORTER, {"a": foreign}, {}, {"a": GOODS})
+
+    assert exported.reading.left_out == ()
+    [march] = exported.reading.failed
+    assert march.failures == (Failure("a", ("buyer is not the reporter",)),)
+
+
+def test_a_reporter_written_with_dashes_still_matches_its_own_buyer() -> None:
+    buyer = comprobante(customer_tax_id=REPORTER)
+
+    exported = export_606("1-30-99002-6", {"a": buyer}, {}, {"a": GOODS})
+
+    assert exported.reading.failed == ()
+
+
+def test_a_cedula_buyer_against_an_rnc_reporter_fails_its_month() -> None:
+    buyer = comprobante(customer_tax_id=PERSON)
+
+    [march] = export_606(REPORTER, {"a": buyer}, {}, {"a": GOODS}).reading.failed
+
+    assert march.failures == (Failure("a", ("buyer is not the reporter",)),)
