@@ -7,9 +7,9 @@ crédito fiscal carrying the legal tip, a selective and another additional tax;
 an E32 consumo to nobody, whose `Comprador` is empty and which prints no
 exempt amount, the missing optional elements; an E41 compras whose retentions
 are printed on its lines only; and an E43 gastos menores, which names no
-buyer. The modified e-NCF is the E32's: DGII's pre-validator refuses a modified
-NCF on every row of these types (#231, #250), and the E32, a consumo under
-RD$250,000, is left out of the 606 and never reaches one. Every name, number
+buyer. The E43 carries a modified e-NCF, which the 606 drops because only a
+debit or credit note writes one (#251; DGII's pre-validator refuses it on an
+E43, #231), so the fixture exercises the drop. Every name, number
 and amount is made up, and the amounts are not computed at any tax rate the
 fixture would be stating: the rates the XSD requires beside an additional tax are
 placeholders. The RNCs, the cedula and the e-NCFs pass python-stdnum 2.2, as
@@ -201,9 +201,6 @@ ECFS = (
         taxed="1000.00",
         itbis="180.00",
         total="1180.00",
-        modified="E320000000000",
-        modified_on="10-06-2026",
-        modification="4",
         lines=(
             Line(name="Arroz selecto", quantity="10", price="100.00", amount="1000.00"),
         ),
@@ -215,7 +212,6 @@ ECFS = (
             amount_total_net="1000.00",
             amount_total_tax="180.00",
             amount_total_gross="1180.00",
-            document_id_modified="E320000000000",
         ),
     ),
     ECF(
@@ -272,6 +268,9 @@ ECFS = (
         issued="13-06-2026",
         exempt="350.00",
         total="350.00",
+        modified="E430000000000",
+        modified_on="12-06-2026",
+        modification="4",
         lines=(
             Line(
                 name="Peaje",
@@ -288,6 +287,7 @@ ECFS = (
             customer_tax_id="130990085",
             amount_total_net="350.00",
             amount_total_gross="350.00",
+            document_id_modified="E430000000000",
         ),
     ),
 )
