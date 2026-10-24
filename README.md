@@ -1206,10 +1206,11 @@ month, which gets no file; one with no readable date, or no reading, fails a
 a negative amount, and a split, retention or ITBIS share beyond what was read:
 nothing is written negative. An ISR retention the comprobante does not print is
 computed over the services amount when `filing.csv` names a retention type: at
-the rate in force on the payment date, which DGII says picks the percentage
-(types 1 and 2, 10 percent, 15 percent from 2026-07-01, sources in
-`export/fiscal.py`); a type with no rate DGII states, or no payment date, fails
-the month. An ITBIS retention not printed is zero. A B02 or E32 of RD$250,000 or
+the rate in force on the payment date, which DGII says picks the percentage,
+or on the comprobante date when the annotation has no payment date, the export
+listing which date picked each rate (types 1 and 2, 10 percent, 15 percent from
+2026-07-01, sources in `export/fiscal.py`); a type with no rate DGII states
+fails the month. An ITBIS retention not printed is zero. A B02 or E32 of RD$250,000 or
 less is left out of the file, listed with its reason and never a failure; the
 threshold is a DGII help answer, its "monto" read as the net plus taxes and tip
 is unverified, and the pre-validator itself rejects a consumo at any amount. The report prints counts and reasons
@@ -2072,10 +2073,11 @@ month, which gets no file; one with no readable date, or no reading, fails a
 a negative amount, and a split, retention or ITBIS share beyond what was read:
 nothing is written negative. An ISR retention the comprobante does not print is
 computed over the services amount when `filing.csv` names a retention type: at
-the rate in force on the payment date, which DGII says picks the percentage
-(types 1 and 2, 10 percent, 15 percent from 2026-07-01, sources in
-`export/fiscal.py`); a type with no rate DGII states, or no payment date, fails
-the month. An ITBIS retention not printed is zero. A B02 or E32 of RD$250,000 or
+the rate in force on the payment date, which DGII says picks the percentage,
+or on the comprobante date when the annotation has no payment date, the export
+listing which date picked each rate (types 1 and 2, 10 percent, 15 percent from
+2026-07-01, sources in `export/fiscal.py`); a type with no rate DGII states
+fails the month. An ITBIS retention not printed is zero. A B02 or E32 of RD$250,000 or
 less is left out of the file, listed with its reason and never a failure; the
 threshold is a DGII help answer, its "monto" read as the net plus taxes and tip
 is unverified, and the pre-validator itself rejects a consumo at any amount. The report prints counts and reasons

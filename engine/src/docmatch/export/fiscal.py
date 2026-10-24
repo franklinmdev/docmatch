@@ -46,7 +46,9 @@ The date that picks the rate is the payment date, not the comprobante's:
 retención a aplicar es la fecha del pago", discussion "Retenciones 15%
 honorarios profesionales", question dated 2026-07-20, read 2026-10-23
 (https://ayuda.dgii.gov.do/conversations/discusiones/retenciones-15-honorarios-profesionales/6a5e1cdbf8ac4db6a2ca51f7).
-This departs from #215 and #230, which said the comprobante date.
+This departs from #215 and #230, which said the comprobante date. A filing
+annotation with no payment date falls back to the comprobante date (owner
+decision on #230, ticket #249).
 
 Types 3 to 9 have no rate in any source read, so none is given (unverified);
 the export fails the document rather than guess. DGII's help answers show 10

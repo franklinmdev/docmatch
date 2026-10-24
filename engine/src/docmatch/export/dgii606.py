@@ -143,6 +143,16 @@ class LeftOut:
 
 
 @dataclass(frozen=True)
+class RateDate:
+    """Which date picked the ISR retention rate of a document whose column 18
+    was computed: its payment date, or its comprobante date when the filing
+    annotation has no payment date."""
+
+    filename: str
+    source: str
+
+
+@dataclass(frozen=True)
 class Month:
     """One period of one side: its lines, or the documents that failed it."""
 
@@ -166,6 +176,9 @@ class Side:
     left_out: tuple[LeftOut, ...] = ()
     """Documents a rule leaves out of this side's files, in filing order. A
     month holding only such documents has no file and is not a month."""
+    rate_dates: tuple[RateDate, ...] = ()
+    """The documents whose retention was computed, in filing order, each with
+    the date that picked its rate."""
 
     @property
     def failed(self) -> tuple[Month, ...]:
@@ -197,6 +210,10 @@ class Export:
             ("reading", "Reading", self.reading),
             ("control", "Labels control", self.control),
         )
+
+
+PAYMENT_DATE = "payment date"
+COMPROBANTE_DATE = "comprobante date"
 
 
 def filename(reporter: str, period: str) -> str:
@@ -232,12 +249,15 @@ def _side(
     lines: dict[str, list[str]] = {}
     failures: dict[str, list[Failure]] = {}
     left_out: list[LeftOut] = []
+    rate_dates: list[RateDate] = []
     for name in documents:
         outcome = _line(values.get(name), filing[name])
         period = outcome.period
         if outcome.left_out_reason is not None:
             left_out.append(LeftOut(name, period, outcome.left_out_reason))
             continue
+        if outcome.rate_date is not None:
+            rate_dates.append(RateDate(name, outcome.rate_date))
         lines.setdefault(period, [])
         failures.setdefault(period, [])
         if outcome.reasons:
@@ -253,6 +273,7 @@ def _side(
             for period in periods
         ),
         left_out=tuple(left_out),
+        rate_dates=tuple(rate_dates),
     )
 
 
@@ -265,6 +286,7 @@ class _Outcome:
     line: str | None = None
     reasons: tuple[str, ...] = ()
     left_out_reason: str | None = None
+    rate_date: str | None = None
 
 
 def _line(values: FieldValues | None, filing: Filing) -> _Outcome:
@@ -273,8 +295,8 @@ def _line(values: FieldValues | None, filing: Filing) -> _Outcome:
     The checks that make the reading itself wrong run first and fail the
     month even for a small consumo: no reading, the NCF, the RNC or cedula,
     the date, the amounts and their bounds. Then the consumo rule leaves a
-    small B02 or E32 out. Only after it comes the retention, which needs the
-    payment date and a rate: a document the 606 does not carry never fails
+    small B02 or E32 out. Only after it comes the retention, which needs a
+    rate: a document the 606 does not carry never fails
     for a filing detail it does not use."""
     if values is None:
         return _Outcome(NO_MONTH, reasons=("no reading",))
@@ -316,7 +338,7 @@ def _line(values: FieldValues | None, filing: Filing) -> _Outcome:
     period = NO_MONTH if day is None else f"{day:%Y%m}"
     if not reasons and number is not None and _is_small_consumo(number, amounts):
         return _Outcome(period, left_out_reason=LEFT_OUT_CONSUMO)
-    _retain_isr(values, amounts, filing, reasons)
+    rate_date = _retain_isr(values, amounts, filing, day, reasons)
     if reasons:
         return _Outcome(period, reasons=tuple(reasons))
     assert number is not None and identifier is not None and tipo_id is not None
@@ -332,6 +354,7 @@ def _line(values: FieldValues | None, filing: Filing) -> _Outcome:
             day=day,
             amounts=amounts,
         ),
+        rate_date=rate_date,
     )
 
 
@@ -358,27 +381,35 @@ def _retain_isr(
     values: FieldValues,
     amounts: dict[str, Decimal],
     filing: Filing,
+    day: date | None,
     reasons: list[str],
-) -> None:
+) -> str | None:
     """Fill column 18 when the comprobante does not print it: the services
-    amount at the rate in force on the payment date for the annotation's
-    retention type. Nothing is computed without a type; a retention the
-    comprobante prints is read as it is."""
+    amount at the rate in force on the payment date, or on the comprobante
+    date when the annotation has none, for the annotation's retention type.
+    Returns which date picked the rate, None when nothing was computed.
+    Nothing is computed without a type; a retention the comprobante prints is
+    read as it is."""
     net = amounts.get("amount_total_net")
     type_ = filing.isr_retention_type
     if type_ is None or net is None or _value(values, "amount_retention_isr"):
-        return
+        return None
     if _services(filing, net) == ZERO:
         amounts["amount_retention_isr"] = ZERO
-        return
-    if filing.payment_date is None:
-        reasons.append("ISR retention to compute without a payment date")
-        return
-    rate = isr_retention_rate(type_, filing.payment_date)
+        return None
+    picked: date | None = filing.payment_date
+    source = PAYMENT_DATE
+    if picked is None:
+        picked, source = day, COMPROBANTE_DATE
+    if picked is None:
+        # The date is already a reason; nothing to compute a rate on.
+        return None
+    rate = isr_retention_rate(type_, picked)
     if rate is None:
         reasons.append(f"no ISR rate for retention type {type_}")
-        return
+        return None
     amounts["amount_retention_isr"] = _services(filing, net) * rate
+    return source
 
 
 def _ncf(
@@ -517,6 +548,9 @@ def write_export(exported: Export, out: Path, manifest: Path, run: Path) -> None
     }
     for directory, _, side in exported.sides():
         (out / directory).mkdir(parents=True)
+        listed[f"{directory}_rate_dates"] = [
+            {"filename": each.filename, "date": each.source} for each in side.rate_dates
+        ]
         listed[f"{directory}_left_out"] = [
             {"filename": each.filename, "period": each.period, "reason": each.reason}
             for each in side.left_out
@@ -564,6 +598,7 @@ def render_export(exported: Export, out: Path, manifest: Path, run: Path) -> str
         for month in side.months:
             lines.append(f"  {month.period:<{width}}  {_month(month)}")
         lines.extend(_left_out(side))
+        lines.extend(_rate_dates(side))
         lines.append("")
     return "\n".join(lines)
 
@@ -575,6 +610,15 @@ def _left_out(side: Side) -> list[str]:
         f"  left out  {period}  {count} {'document' if count == 1 else 'documents'}, "
         f"{reason}"
         for (period, reason), count in sorted(tally.items())
+    ]
+
+
+def _rate_dates(side: Side) -> list[str]:
+    """One line per date that picked the rate of a computed retention."""
+    tally = Counter(each.source for each in side.rate_dates)
+    return [
+        f"  rate by {source}  {count} {'document' if count == 1 else 'documents'}"
+        for source, count in sorted(tally.items())
     ]
 
 

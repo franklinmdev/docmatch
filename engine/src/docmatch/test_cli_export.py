@@ -74,6 +74,7 @@ EXPECTED_OUTPUT = "\n".join(
         "  202605  failed, 1 document: ITBIS retention above the ITBIS",
         "  202606  2 rows",
         "  left out  202603  1 document, consumo of RD$250,000.00 or less",
+        "  rate by payment date  2 documents",
         "",
         "Labels control, 4 of 4 monthly files written",
         "  202603  2 rows",
@@ -82,9 +83,16 @@ EXPECTED_OUTPUT = "\n".join(
         "  202606  1 row",
         "  left out  202603  1 document, consumo of RD$250,000.00 or less",
         "  left out  202606  1 document, consumo of RD$250,000.00 or less",
+        "  rate by payment date  2 documents",
         "",
     ]
 )
+
+
+RATE_DATES = [
+    {"filename": "do0007.png", "date": "payment date"},
+    {"filename": "do0008.png", "date": "payment date"},
+]
 
 
 LEFT_OUT_B02 = {
@@ -174,6 +182,8 @@ def test_export_lists_every_month_and_document_in_export_json(
             {"period": "202605", "file": f"control/{MAY}", "rows": 1, "failures": []},
             {"period": "202606", "file": f"control/{JUNE}", "rows": 1, "failures": []},
         ],
+        "reading_rate_dates": RATE_DATES,
+        "control_rate_dates": RATE_DATES,
         "reading_left_out": [LEFT_OUT_B02],
         "control_left_out": [LEFT_OUT_B02, LEFT_OUT_E32],
     }
