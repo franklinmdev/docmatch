@@ -10,6 +10,7 @@ import pytest
 
 from docmatch.export.fiscal import (
     is_consumo,
+    is_gastos_menores,
     isr_retention_rate,
 )
 
@@ -45,3 +46,17 @@ def test_a_retention_type_with_no_stated_rate_has_none(retention_type: int) -> N
 )
 def test_consumo_is_a_b02_or_an_e32(ncf: str, expected: bool) -> None:
     assert is_consumo(ncf) is expected
+
+
+@pytest.mark.parametrize(
+    ("ncf", "expected"),
+    [
+        ("B1300000001", True),
+        ("E430000000001", True),
+        ("B0100000001", False),
+        ("E410000000001", False),
+        ("B1400000001", False),
+    ],
+)
+def test_gastos_menores_is_a_b13_or_an_e43(ncf: str, expected: bool) -> None:
+    assert is_gastos_menores(ncf) is expected

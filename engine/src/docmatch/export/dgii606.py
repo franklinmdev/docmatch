@@ -21,7 +21,8 @@ lines and none after the last, the shape #217's `good-v1.txt` passed in.
 
 Columns, by source (#215 decision 3):
 
-- **Read**, from the reading or the labels: 1 RNC or cedula (`vendor_tax_id`),
+- **Read**, from the reading or the labels: 1 RNC or cedula (`vendor_tax_id`,
+  the reporter's own for a B13 or E43, which name no vendor; `export.fiscal`),
   4 NCF (`document_id`), 5 modified NCF, 6 date, the net amount the split
   divides, 11 ITBIS (`amount_total_tax`), 12 and 18 the ITBIS and ISR
   retentions where the comprobante prints them, 20 selective tax, 21 other
@@ -90,6 +91,7 @@ from docmatch.export.filing import ALL, Filing, Share
 from docmatch.export.fiscal import (
     CONSUMO_THRESHOLD,
     is_consumo,
+    is_gastos_menores,
     isr_retention_rate,
 )
 from docmatch.metrics.fields import FieldValues
@@ -256,7 +258,7 @@ def _side(
     left_out: list[LeftOut] = []
     rate_dates: list[RateDate] = []
     for name in documents:
-        outcome = _line(values.get(name), filing[name])
+        outcome = _line(reporter, values.get(name), filing[name])
         period = outcome.period
         if outcome.left_out_reason is not None:
             left_out.append(LeftOut(name, period, outcome.left_out_reason))
@@ -294,7 +296,7 @@ class _Outcome:
     rate_source: RateSource | None = None
 
 
-def _line(values: FieldValues | None, filing: Filing) -> _Outcome:
+def _line(reporter: str, values: FieldValues | None, filing: Filing) -> _Outcome:
     """A document's period and its line, its failures, or why it is left out.
 
     The checks that make the reading itself wrong run first and fail the
@@ -307,7 +309,11 @@ def _line(values: FieldValues | None, filing: Filing) -> _Outcome:
         return _Outcome(NO_MONTH, reasons=("no reading",))
     reasons: list[str] = []
     number = _ncf(values, "document_id", "NCF", reasons)
-    identifier = _value(values, "vendor_tax_id")
+    identifier = (
+        reporter
+        if number is not None and is_gastos_menores(number)
+        else _value(values, "vendor_tax_id")
+    )
     tipo_id = None
     if identifier is None:
         reasons.append("no RNC")
