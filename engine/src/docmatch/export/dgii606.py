@@ -23,8 +23,9 @@ Columns, by source (#215 decision 3):
 
 - **Read**, from the reading or the labels: 1 RNC or cedula (`vendor_tax_id`,
   the reporter's own for a B13 or E43, which name no vendor; `export.fiscal`),
-  4 NCF (`document_id`), 5 modified NCF, 6 date, the net amount the split
-  divides, 11 ITBIS (`amount_total_tax`), 12 and 18 the ITBIS and ISR
+  4 NCF (`document_id`), 5 modified NCF (only on a debit or credit note,
+  dropped and listed on any other type; `export.fiscal`), 6 date, the net
+  amount the split divides, 11 ITBIS (`amount_total_tax`), 12 and 18 the ITBIS and ISR
   retentions where the comprobante prints them, 20 selective tax, 21 other
   taxes, 22 legal tip. A column 12 not printed is 0: the annotation has no
   ITBIS retention to compute it from. A column 18 not printed is computed
@@ -92,6 +93,7 @@ from docmatch.export.fiscal import (
     CONSUMO_THRESHOLD,
     is_consumo,
     is_gastos_menores,
+    is_note,
     isr_retention_rate,
 )
 from docmatch.metrics.fields import FieldValues
@@ -145,6 +147,15 @@ class LeftOut:
     reason: str
 
 
+@dataclass(frozen=True)
+class DroppedModified:
+    """A document that read a modified NCF its type does not carry: column 4
+    is left empty and the document is still filed (#251)."""
+
+    filename: str
+    period: str
+
+
 RateSource = Literal["payment date", "comprobante date"]
 """Which date picked a computed retention's rate."""
 
@@ -186,6 +197,8 @@ class Side:
     rate_dates: tuple[RateDate, ...] = ()
     """The documents whose retention was computed, in filing order, each with
     the date that picked its rate."""
+    dropped_modified: tuple[DroppedModified, ...] = ()
+    """The documents filed with a read modified NCF dropped, in filing order."""
 
     @property
     def failed(self) -> tuple[Month, ...]:
@@ -257,6 +270,7 @@ def _side(
     failures: dict[str, list[Failure]] = {}
     left_out: list[LeftOut] = []
     rate_dates: list[RateDate] = []
+    dropped: list[DroppedModified] = []
     for name in documents:
         outcome = _line(reporter, values.get(name), filing[name])
         period = outcome.period
@@ -265,6 +279,8 @@ def _side(
             continue
         if outcome.rate_source is not None:
             rate_dates.append(RateDate(name, outcome.rate_source))
+        if outcome.modified_dropped:
+            dropped.append(DroppedModified(name, period))
         lines.setdefault(period, [])
         failures.setdefault(period, [])
         if outcome.reasons:
@@ -281,6 +297,7 @@ def _side(
         ),
         left_out=tuple(left_out),
         rate_dates=tuple(rate_dates),
+        dropped_modified=tuple(dropped),
     )
 
 
@@ -294,6 +311,7 @@ class _Outcome:
     reasons: tuple[str, ...] = ()
     left_out_reason: str | None = None
     rate_source: RateSource | None = None
+    modified_dropped: bool = False
 
 
 def _line(reporter: str, values: FieldValues | None, filing: Filing) -> _Outcome:
@@ -354,6 +372,7 @@ def _line(reporter: str, values: FieldValues | None, filing: Filing) -> _Outcome
         return _Outcome(period, reasons=tuple(reasons))
     assert number is not None and identifier is not None and tipo_id is not None
     assert day is not None
+    keeps_modified = is_note(number)
     return _Outcome(
         period,
         line=_fields(
@@ -361,11 +380,12 @@ def _line(reporter: str, values: FieldValues | None, filing: Filing) -> _Outcome
             identifier=identifier,
             tipo_id=tipo_id,
             ncf=number,
-            modified="" if modified is None else modified,
+            modified=modified if modified is not None and keeps_modified else "",
             day=day,
             amounts=amounts,
         ),
         rate_source=rate_source,
+        modified_dropped=modified is not None and not keeps_modified,
     )
 
 
@@ -566,6 +586,10 @@ def write_export(exported: Export, out: Path, manifest: Path, run: Path) -> None
             {"filename": each.filename, "period": each.period, "reason": each.reason}
             for each in side.left_out
         ]
+        listed[f"{directory}_dropped_modified"] = [
+            {"filename": each.filename, "period": each.period}
+            for each in side.dropped_modified
+        ]
         for name, content in side.files().items():
             (out / directory / name).write_bytes(content.encode("ascii"))
         listed[directory] = [
@@ -609,6 +633,7 @@ def render_export(exported: Export, out: Path, manifest: Path, run: Path) -> str
         for month in side.months:
             lines.append(f"  {month.period:<{width}}  {_month(month)}")
         lines.extend(_left_out(side))
+        lines.extend(_dropped_modified(side))
         lines.extend(_rate_dates(side))
         lines.append("")
     return "\n".join(lines)
@@ -621,6 +646,16 @@ def _left_out(side: Side) -> list[str]:
         f"  left out  {period}  {count} {'document' if count == 1 else 'documents'}, "
         f"{reason}"
         for (period, reason), count in sorted(tally.items())
+    ]
+
+
+def _dropped_modified(side: Side) -> list[str]:
+    """One line per period of the documents filed with a modified NCF dropped."""
+    tally = Counter(each.period for each in side.dropped_modified)
+    return [
+        f"  modified NCF dropped  {period}  {count} "
+        f"{'document' if count == 1 else 'documents'}, not a debit or credit note"
+        for period, count in sorted(tally.items())
     ]
 
 
